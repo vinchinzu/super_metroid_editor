@@ -225,10 +225,16 @@ class RomParser(private val romData: ByteArray) {
     }
     
     /**
-     * Decompress LZ data. The decompressed data starts with a 2-byte LE size
-     * header indicating the expected Layer 1 size. We use this to know when
-     * to stop (not relying solely on 0xFF as end marker, since the data may
-     * span multiple compressed chunks separated by 0xFF).
+     * Decompress LZ data (Super Metroid LZ5 / Lunar Compress format 4).
+     * 
+     * The decompressed data starts with a 2-byte LE size header (Layer 1 size).
+     * Decompression stops when the output reaches the expected total size
+     * (header + Layer1 + BTS).
+     * 
+     * IMPORTANT: 0xFF is NOT an end-of-data marker. When bits 7-5 = 7 (extended)
+     * and bits 4-2 = 7 (cmdType 7), this is a NO-OP — skip it and continue.
+     * Decompression terminates by reaching the expected output size.
+     * (Verified by comparing output with Lunar Compress DLL results from SMILE.)
      */
     fun decompressLZ2AtPc(startPc: Int): ByteArray {
         val output = mutableListOf<Byte>()
@@ -243,9 +249,6 @@ class RomParser(private val romData: ByteArray) {
             
             if (cmdType == 7) {
                 // Extended header: 2-byte header
-                // Bits 4-2 = actual command type (0-6)
-                // Bits 1-0 = high bits of length
-                // Next byte = low bits of length
                 cmdType = (header shr 2) and 0x07
                 
                 if (pos >= romData.size) break
@@ -254,26 +257,21 @@ class RomParser(private val romData: ByteArray) {
                 length = ((header and 0x03) shl 8) or byte2
                 length += 1
                 
-                // cmdType 7 in extended mode = potential end marker
+                // Extended cmdType 7 = NO-OP (skip and continue)
+                // NOT an end marker — decompression stops by reaching expected size
                 if (cmdType == 7) {
-                    // Check if we've decompressed enough data.
-                    // The first 2 bytes of output are a size header.
-                    // If we haven't reached that size yet, this 0xFF might
-                    // be a chunk boundary — skip it and continue.
-                    if (output.size >= 2) {
-                        val expectedSize = (output[0].toInt() and 0xFF) or 
-                            ((output[1].toInt() and 0xFF) shl 8)
-                        // Need: 2 (header) + expectedSize (Layer1) + expectedSize/2 (BTS)
-                        val minExpected = 2 + expectedSize
-                        if (output.size < minExpected) {
-                            // Not done yet — skip this end marker and continue
-                            continue
-                        }
-                    }
-                    break
+                    continue
                 }
             } else {
                 length = (header and 0x1F) + 1
+            }
+            
+            // Check if we've reached the expected output size
+            if (output.size >= 2) {
+                val expectedSize = (output[0].toInt() and 0xFF) or 
+                    ((output[1].toInt() and 0xFF) shl 8)
+                val totalExpected = 2 + expectedSize + expectedSize / 2  // header + L1 + BTS
+                if (output.size >= totalExpected) break
             }
             
             when (cmdType) {
