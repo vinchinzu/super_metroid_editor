@@ -82,9 +82,11 @@ class TileGraphics(private val romParser: RomParser) {
         println("  varTileTable: ${varTileTable.size} bytes, creTileTable: ${creTileTable.size} bytes")
         println("  varGfx: ${varGfx.size} bytes, creGfx: ${creGfx.size} bytes")
         
-        // Load palette
-        val palettePC = romParser.snesToPc(palettePtr)
-        cachedPalette = loadPalette(romData, palettePC)
+        // Decompress palette (it's LZ5 compressed too!)
+        // From SMILE Palette.vb: Decompress GraphicsSetPointers(ArrayIndex) + ROM_HEADER, OutputArray
+        val paletteDecompressed = romParser.decompressLZ2(palettePtr)
+        cachedPalette = parsePalette(paletteDecompressed)
+        println("  palette: ${paletteDecompressed.size} bytes decompressed")
         
         // Combine tile tables: CRE first, then variable (from SMILE source)
         metatiles = parseTileTable(varTileTable, creTileTable)
@@ -233,19 +235,19 @@ class TileGraphics(private val romParser: RomParser) {
     }
     
     /**
-     * Load 8 sub-palettes × 16 colors from ROM.
+     * Parse decompressed palette data into 8 sub-palettes × 16 colors.
      * Each color is BGR555: 0BBBBBGGGGGRRRRR (16-bit LE).
      * Returns array of 8 palettes, each with 16 ARGB colors.
      */
-    private fun loadPalette(romData: ByteArray, palettePC: Int): Array<IntArray> {
+    private fun parsePalette(paletteData: ByteArray): Array<IntArray> {
         val result = Array(8) { IntArray(16) }
         
         for (pal in 0 until 8) {
             for (col in 0 until 16) {
-                val offset = palettePC + (pal * 16 + col) * 2
-                if (offset + 1 < romData.size) {
-                    val lo = romData[offset].toInt() and 0xFF
-                    val hi = romData[offset + 1].toInt() and 0xFF
+                val offset = (pal * 16 + col) * 2
+                if (offset + 1 < paletteData.size) {
+                    val lo = paletteData[offset].toInt() and 0xFF
+                    val hi = paletteData[offset + 1].toInt() and 0xFF
                     val bgr555 = (hi shl 8) or lo
                     result[pal][col] = bgr555ToArgb(bgr555)
                 }
