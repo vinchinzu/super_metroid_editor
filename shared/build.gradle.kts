@@ -4,7 +4,11 @@ plugins {
 }
 
 kotlin {
-    jvm()
+    jvm {
+        testRuns["test"].executionTask.configure {
+            useJUnitPlatform()
+        }
+    }
     
     sourceSets {
         val commonMain by getting {
@@ -16,6 +20,13 @@ kotlin {
         val jvmMain by getting {
             dependencies {
                 // Add JVM-specific dependencies here
+            }
+        }
+        
+        val jvmTest by getting {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("org.junit.jupiter:junit-jupiter:5.10.0")
             }
         }
     }

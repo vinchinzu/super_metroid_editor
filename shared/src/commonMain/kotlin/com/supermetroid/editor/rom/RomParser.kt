@@ -53,74 +53,93 @@ class RomParser(private val romData: ByteArray) {
         
         for (i in 0 until maxRooms) {
             val headerOffset = roomHeadersTableOffset + (i * 38)
-            if (headerOffset + 38 > romData.size) break
+            
+            // Check bounds before reading
+            if (headerOffset < 0 || headerOffset + 38 > romData.size) {
+                break
+            }
+            
+            // Ensure we have enough data
+            if (romData.size < headerOffset + 38) {
+                break
+            }
             
             val buffer = ByteBuffer.wrap(romData, headerOffset, 38)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
             
-            // Read header fields
-            val index = buffer.get().toInt() and 0xFF
-            val area = buffer.get().toInt() and 0xFF
-            val mapX = buffer.get().toInt() and 0xFF
-            val mapY = buffer.get().toInt() and 0xFF
-            val width = buffer.get().toInt() and 0xFF
-            val height = buffer.get().toInt() and 0xFF
-            val scrollX = buffer.get().toInt() and 0xFF
-            val scrollY = buffer.get().toInt() and 0xFF
-            val specialGfxBitflag = buffer.get().toInt() and 0xFF
+            // Check if buffer has remaining bytes before reading
+            if (buffer.remaining() < 38) {
+                continue
+            }
             
-            val doors = buffer.short.toInt() and 0xFFFF
-            val roomState = buffer.short.toInt() and 0xFFFF
-            val roomDown = buffer.short.toInt() and 0xFFFF
-            val roomUp = buffer.short.toInt() and 0xFFFF
-            val roomLeft = buffer.short.toInt() and 0xFFFF
-            val roomRight = buffer.short.toInt() and 0xFFFF
-            val roomDownScroll = buffer.short.toInt() and 0xFFFF
-            val roomUpScroll = buffer.short.toInt() and 0xFFFF
-            val roomLeftScroll = buffer.short.toInt() and 0xFFFF
-            val roomRightScroll = buffer.short.toInt() and 0xFFFF
-            val unused1 = buffer.short.toInt() and 0xFFFF
-            val mainAsm = buffer.short.toInt() and 0xFFFF
-            val plmSet = buffer.short.toInt() and 0xFFFF
-            val bgData = buffer.short.toInt() and 0xFFFF
-            val roomSetupAsm = buffer.short.toInt() and 0xFFFF
-            
-            // Check if this room matches our roomId
-            // We'll need to match by checking room pointers or other means
-            // For now, return the first room as a placeholder
-            // TODO: Implement proper room ID matching
-            
-            // For v1, we'll return a room with basic data
-            // The actual room ID matching will be improved later
-            return Room(
-                roomId = roomId,
-                name = "Room $roomId",
-                handle = "room_$roomId",
-                index = index,
-                area = area,
-                mapX = mapX,
-                mapY = mapY,
-                width = width,
-                height = height,
-                scrollX = scrollX,
-                scrollY = scrollY,
-                specialGfxBitflag = specialGfxBitflag,
-                doors = doors,
-                roomState = roomState,
-                roomDown = roomDown,
-                roomUp = roomUp,
-                roomLeft = roomLeft,
-                roomRight = roomRight,
-                roomDownScroll = roomDownScroll,
-                roomUpScroll = roomUpScroll,
-                roomLeftScroll = roomLeftScroll,
-                roomRightScroll = roomRightScroll,
-                unused1 = unused1,
-                mainAsm = mainAsm,
-                plmSet = plmSet,
-                bgData = bgData,
-                roomSetupAsm = roomSetupAsm
-            )
+            try {
+                // Read header fields
+                val index = buffer.get().toInt() and 0xFF
+                val area = buffer.get().toInt() and 0xFF
+                val mapX = buffer.get().toInt() and 0xFF
+                val mapY = buffer.get().toInt() and 0xFF
+                val width = buffer.get().toInt() and 0xFF
+                val height = buffer.get().toInt() and 0xFF
+                val scrollX = buffer.get().toInt() and 0xFF
+                val scrollY = buffer.get().toInt() and 0xFF
+                val specialGfxBitflag = buffer.get().toInt() and 0xFF
+                
+                val doors = buffer.short.toInt() and 0xFFFF
+                val roomState = buffer.short.toInt() and 0xFFFF
+                val roomDown = buffer.short.toInt() and 0xFFFF
+                val roomUp = buffer.short.toInt() and 0xFFFF
+                val roomLeft = buffer.short.toInt() and 0xFFFF
+                val roomRight = buffer.short.toInt() and 0xFFFF
+                val roomDownScroll = buffer.short.toInt() and 0xFFFF
+                val roomUpScroll = buffer.short.toInt() and 0xFFFF
+                val roomLeftScroll = buffer.short.toInt() and 0xFFFF
+                val roomRightScroll = buffer.short.toInt() and 0xFFFF
+                val unused1 = buffer.short.toInt() and 0xFFFF
+                val mainAsm = buffer.short.toInt() and 0xFFFF
+                val plmSet = buffer.short.toInt() and 0xFFFF
+                val bgData = buffer.short.toInt() and 0xFFFF
+                val roomSetupAsm = buffer.short.toInt() and 0xFFFF
+                
+                // Validate room data - skip invalid rooms (all zeros or invalid values)
+                if (width == 0 || height == 0 || width > 16 || height > 16) {
+                    continue
+                }
+                
+                // For v1, return the first valid room we find
+                // TODO: Implement proper room ID matching using room pointers
+                return Room(
+                    roomId = roomId,
+                    name = "Room $roomId",
+                    handle = "room_$roomId",
+                    index = index,
+                    area = area,
+                    mapX = mapX,
+                    mapY = mapY,
+                    width = width,
+                    height = height,
+                    scrollX = scrollX,
+                    scrollY = scrollY,
+                    specialGfxBitflag = specialGfxBitflag,
+                    doors = doors,
+                    roomState = roomState,
+                    roomDown = roomDown,
+                    roomUp = roomUp,
+                    roomLeft = roomLeft,
+                    roomRight = roomRight,
+                    roomDownScroll = roomDownScroll,
+                    roomUpScroll = roomUpScroll,
+                    roomLeftScroll = roomLeftScroll,
+                    roomRightScroll = roomRightScroll,
+                    unused1 = unused1,
+                    mainAsm = mainAsm,
+                    plmSet = plmSet,
+                    bgData = bgData,
+                    roomSetupAsm = roomSetupAsm
+                )
+            } catch (e: java.nio.BufferUnderflowException) {
+                // Skip this room if we can't read it
+                continue
+            }
         }
         
         return null

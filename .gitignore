@@ -33,3 +33,5 @@ dist/
 *.smc
 *.sfc
 *.rom
+# But keep test-resources directory structure
+!test-resources/.gitkeep
