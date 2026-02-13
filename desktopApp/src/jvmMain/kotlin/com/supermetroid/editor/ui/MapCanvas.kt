@@ -1,20 +1,27 @@
 package com.supermetroid.editor.ui
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.rom.MapRenderer
 import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.rom.RoomRenderData
 import java.awt.image.BufferedImage
+
+private fun renderDataToImage(data: RoomRenderData): BufferedImage {
+    val img = BufferedImage(data.width, data.height, BufferedImage.TYPE_INT_ARGB)
+    img.setRGB(0, 0, data.width, data.height, data.pixels, 0, data.width)
+    return img
+}
 
 @Composable
 fun MapCanvas(
@@ -29,6 +36,7 @@ fun MapCanvas(
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp)
         ) {
+            // Room info header
             Text(
                 text = room?.name ?: "No room selected",
                 style = MaterialTheme.typography.titleLarge
@@ -37,145 +45,107 @@ fun MapCanvas(
             if (room != null) {
                 Text(
                     text = "Room ID: ${room.id}",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 
                 if (romParser != null) {
-                    // Render room map
-                    var isLoading by remember(room?.id) { mutableStateOf(false) }
-                    var errorMessage by remember(room?.id) { mutableStateOf<String?>(null) }
-                    var renderResult by remember(room?.id) { mutableStateOf<com.supermetroid.editor.rom.RoomRenderData?>(null) }
+                    var isLoading by remember(room.id) { mutableStateOf(true) }
+                    var errorMessage by remember(room.id) { mutableStateOf<String?>(null) }
+                    var imageBitmap by remember(room.id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                    var roomInfo by remember(room.id) { mutableStateOf("") }
                     
-                    // Load and render room when it changes
-                    LaunchedEffect(room?.id) {
-                        if (room != null) {
-                            isLoading = true
-                            errorMessage = null
-                            renderResult = null
+                    LaunchedEffect(room.id) {
+                        isLoading = true
+                        errorMessage = null
+                        imageBitmap = null
+                        
+                        try {
+                            val roomId = room.getRoomIdAsInt()
+                            val roomHeader = romParser.readRoomHeader(roomId)
                             
-                            try {
-                                val roomId = room.getRoomIdAsInt()
-                                println("Looking for room ID: 0x${roomId.toString(16)} (${room.name})")
-                                
-                                val roomHeader = romParser.readRoomHeader(roomId)
-                                
-                                if (roomHeader != null) {
-                                    println("Found room: ${room.name} — Index=${roomHeader.index}, Area=${roomHeader.area}, Size=${roomHeader.width}x${roomHeader.height}")
-                                    
-                                    val mapRenderer = MapRenderer(romParser)
-                                    val result = mapRenderer.renderRoom(roomHeader)
-                                    renderResult = result
-                                    
-                                    if (result == null) {
-                                        errorMessage = "Failed to render room map (${roomHeader.width}x${roomHeader.height} screens)"
-                                    } else {
-                                        println("  Map rendered: ${result.width}x${result.height} pixels")
-                                    }
-                                } else {
-                                    errorMessage = "Room header not found in ROM for ID 0x${roomId.toString(16)}"
+                            if (roomHeader != null) {
+                                val areaName = when (roomHeader.area) {
+                                    0 -> "Crateria"
+                                    1 -> "Brinstar"
+                                    2 -> "Norfair"
+                                    3 -> "Wrecked Ship"
+                                    4 -> "Maridia"
+                                    5 -> "Tourian"
+                                    6 -> "Ceres"
+                                    else -> "Unknown"
                                 }
-                            } catch (e: Exception) {
-                                errorMessage = "Error: ${e.message}"
-                                println("Exception: ${e.message}")
-                                e.printStackTrace()
-                            } finally {
-                                isLoading = false
+                                roomInfo = "Area: $areaName  •  Size: ${roomHeader.width}×${roomHeader.height} screens  •  Map: (${roomHeader.mapX}, ${roomHeader.mapY})"
+                                
+                                val mapRenderer = MapRenderer(romParser)
+                                val result = mapRenderer.renderRoom(roomHeader)
+                                
+                                if (result != null) {
+                                    val img = renderDataToImage(result)
+                                    imageBitmap = img.toComposeImageBitmap()
+                                } else {
+                                    errorMessage = "Failed to render room map"
+                                }
+                            } else {
+                                errorMessage = "Room header not found in ROM"
                             }
+                        } catch (e: Exception) {
+                            errorMessage = "Error: ${e.message}"
+                            e.printStackTrace()
+                        } finally {
+                            isLoading = false
                         }
                     }
                     
+                    // Room metadata
+                    if (roomInfo.isNotEmpty()) {
+                        Text(
+                            text = roomInfo,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     
+                    // Map display
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF1A1A1A))
+                            .background(Color(0xFF1A1A1A)),
+                        contentAlignment = Alignment.Center
                     ) {
                         when {
                             isLoading -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
-                                ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     CircularProgressIndicator()
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = "Loading room map...",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Loading...", color = Color.White)
                                 }
                             }
                             errorMessage != null -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = errorMessage!!,
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                }
-                            }
-                            renderResult != null -> {
-                                // Render the map directly from pixel data
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
-                                ) {
-                                    Canvas(
-                                        modifier = Modifier.fillMaxSize()
-                                    ) {
-                                        val data = renderResult!!
-                                        val scale = minOf(
-                                            size.width / data.width,
-                                            size.height / data.height
-                                        ).coerceAtMost(1f)
-                                        
-                                        val scaledWidth = data.width * scale
-                                        val scaledHeight = data.height * scale
-                                        val x = (size.width - scaledWidth) / 2
-                                        val y = (size.height - scaledHeight) / 2
-                                        
-                                        // Draw pixels directly
-                                        val pixelSize = 1f * scale
-                                        for (py in 0 until data.height) {
-                                            for (px in 0 until data.width) {
-                                                val pixelIndex = py * data.width + px
-                                                val argb = data.pixels[pixelIndex]
-                                                val color = Color(argb)
-                                                
-                                                drawRect(
-                                                    color = color,
-                                                    topLeft = Offset(x + px * pixelSize, y + py * pixelSize),
-                                                    size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            else -> {
                                 Text(
-                                    text = "No map data available",
-                                    color = Color.Gray,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = errorMessage!!,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                            imageBitmap != null -> {
+                                Image(
+                                    bitmap = imageBitmap!!,
+                                    contentDescription = room.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(4.dp),
+                                    contentScale = ContentScale.Fit
                                 )
                             }
                         }
                     }
                 } else {
                     Text(
-                        text = "Please load a ROM file first",
+                        text = "Load a ROM file to view room maps",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -183,7 +153,7 @@ fun MapCanvas(
             } else {
                 Box(
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Select a room from the list to view its map",

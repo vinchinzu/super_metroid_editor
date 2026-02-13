@@ -1,177 +1,208 @@
 package com.supermetroid.editor.rom
 
 import com.supermetroid.editor.data.Room
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
- * Renders Super Metroid room maps
+ * Renders Super Metroid room maps.
+ * 
+ * V1: Renders a visual grid showing the room structure with screen boundaries,
+ * area-based coloring, and room metadata overlay.
+ * 
+ * Future: Full tile-based rendering with LZ2 decompression and palette lookup.
  */
 class MapRenderer(private val romParser: RomParser) {
-    private val tileDecoder = TileDecoder()
     
-    /**
-     * Get level data for a room
-     */
-    fun getLevelData(room: Room): ByteArray? {
-        // bgData is a pointer to the level data
-        // It's stored as a 16-bit value, but we need to convert it to a full address
-        // Level data pointers are relative to bank 0x8F
-        val levelDataPointer = 0x8F0000 + room.bgData
-        val pcOffset = romParser.snesToPc(levelDataPointer)
-        
-        val romData = romParser.getRomData()
-        if (pcOffset < 0 || pcOffset >= romData.size) {
-            return null
-        }
-        
-        // Read compressed level data
-        // We need to find where it ends (0xFF marker or calculate size)
-        val compressedData = mutableListOf<Byte>()
-        var offset = pcOffset
-        var foundEnd = false
-        
-        while (offset < romData.size && !foundEnd) {
-            val byte = romData[offset]
-            compressedData.add(byte)
-            
-            if (byte.toInt() == 0xFF && compressedData.size > 1) {
-                foundEnd = true
-            }
-            
-            // Safety limit
-            if (compressedData.size > 10000) break
-            offset++
-        }
-        
-        // Decompress
-        return romParser.decompressLevelData(compressedData.toByteArray())
+    companion object {
+        private const val SCREEN_PIXELS = 256  // Each screen is 256x256 pixels (16x16 tiles of 16x16)
+        private const val TILE_SIZE = 16       // Block/metatile size in pixels
+        private const val TILES_PER_SCREEN = 16 // 16 tiles per screen edge
+        private const val RENDER_SCALE = 1     // 1:1 pixel scale
     }
     
-    /**
-     * Parse level data into tile map
-     * Level data format: Each screen is 32x32 tiles (256x256 pixels)
-     */
-    fun parseLevelData(levelData: ByteArray, roomWidth: Int, roomHeight: Int): Array<IntArray> {
-        val totalWidth = roomWidth * 32
-        val totalHeight = roomHeight * 32
-        val tileMap = Array(totalHeight) { IntArray(totalWidth) }
-        
-        val buffer = ByteBuffer.wrap(levelData)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        
-        // Level data is stored screen by screen, left to right, top to bottom
-        // Each screen is 32x32 tiles = 1024 tiles
-        // Each tile index is 2 bytes (little endian)
-        var dataIndex = 0
-        
-        for (screenY in 0 until roomHeight) {
-            for (screenX in 0 until roomWidth) {
-                // Read 32x32 tiles for this screen
-                for (tileY in 0 until 32) {
-                    for (tileX in 0 until 32) {
-                        if (dataIndex + 1 < levelData.size) {
-                            val tileIndex = buffer.getShort(dataIndex).toInt() and 0xFFFF
-                            val mapY = screenY * 32 + tileY
-                            val mapX = screenX * 32 + tileX
-                            
-                            if (mapY < totalHeight && mapX < totalWidth) {
-                                tileMap[mapY][mapX] = tileIndex
-                            }
-                            
-                            dataIndex += 2
-                        } else {
-                            return tileMap
-                        }
-                    }
-                }
-            }
-        }
-        
-        return tileMap
-    }
+    // Area colors (ARGB) — matching the game's area themes
+    private val areaColors = mapOf(
+        0 to intArrayOf(0xFF2A4858.toInt(), 0xFF1A3040.toInt(), 0xFF3A6070.toInt()), // Crateria (blue-gray)
+        1 to intArrayOf(0xFF2A5828.toInt(), 0xFF1A4018.toInt(), 0xFF3A7038.toInt()), // Brinstar (green)
+        2 to intArrayOf(0xFF6A2828.toInt(), 0xFF4A1818.toInt(), 0xFF8A3838.toInt()), // Norfair (red)
+        3 to intArrayOf(0xFF3A3A5A.toInt(), 0xFF2A2A4A.toInt(), 0xFF4A4A6A.toInt()), // Wrecked Ship (purple)
+        4 to intArrayOf(0xFF28486A.toInt(), 0xFF18384A.toInt(), 0xFF38588A.toInt()), // Maridia (blue)
+        5 to intArrayOf(0xFF5A4828.toInt(), 0xFF4A3818.toInt(), 0xFF6A5838.toInt()), // Tourian (brown)
+        6 to intArrayOf(0xFF5A5A5A.toInt(), 0xFF3A3A3A.toInt(), 0xFF7A7A7A.toInt()), // Ceres (gray)
+    )
     
     /**
-     * Get tileset graphics from ROM
-     * Tilesets are stored at various locations in the ROM
-     */
-    fun getTilesetGraphics(tilesetId: Int): ByteArray? {
-        // Tileset graphics locations (simplified - actual locations vary)
-        // For now, we'll use a common tileset location
-        // TODO: Implement proper tileset lookup based on tilesetId
-        
-        // Common tileset graphics are around 0x920000-0x940000
-        val tilesetBase = 0x920000
-        val romData = romParser.getRomData()
-        val pcOffset = romParser.snesToPc(tilesetBase)
-        
-        if (pcOffset < 0 || pcOffset >= romData.size) {
-            return null
-        }
-        
-        // Read a reasonable amount of tileset data (e.g., 512 tiles = 16KB)
-        val tilesetSize = 512 * 32 // 512 tiles * 32 bytes per tile
-        val endOffset = (pcOffset + tilesetSize).coerceAtMost(romData.size)
-        
-        return romData.sliceArray(pcOffset until endOffset)
-    }
-    
-    /**
-     * Render room to pixel data
+     * Render room to pixel data — V1 grid visualization
      */
     fun renderRoom(room: Room): RoomRenderData? {
-        val levelData = getLevelData(room) ?: return null
-        val tileMap = parseLevelData(levelData, room.width, room.height)
-        val tilesetGraphics = getTilesetGraphics(room.tilesetId) ?: return null
+        val screenWidth = room.width   // Width in screens
+        val screenHeight = room.height // Height in screens
         
-        // Decode tileset
-        val tiles = tileDecoder.decodeTileset(tilesetGraphics, 512)
+        val pixelWidth = screenWidth * SCREEN_PIXELS
+        val pixelHeight = screenHeight * SCREEN_PIXELS
         
-        // Render to pixel array
-        val width = room.width * 256
-        val height = room.height * 256
-        val pixels = IntArray(width * height)
+        if (pixelWidth <= 0 || pixelHeight <= 0) return null
         
-        for (y in tileMap.indices) {
-            for (x in tileMap[y].indices) {
-                val tileIndex = tileMap[y][x]
-                if (tileIndex < tiles.size) {
-                    val tile = tiles[tileIndex]
-                    
-                    // Draw tile at position
-                    val screenX = x * 8
-                    val screenY = y * 8
-                    
-                    for (ty in 0 until 8) {
-                        for (tx in 0 until 8) {
-                            val px = screenX + tx
-                            val py = screenY + ty
-                            
-                            if (px < width && py < height) {
-                                val pixelIndex = py * width + px
-                                val colorIndex = tile[ty][tx]
-                                // Convert color index to ARGB (simplified palette)
-                                pixels[pixelIndex] = colorIndexToArgb(colorIndex)
-                            }
-                        }
+        val pixels = IntArray(pixelWidth * pixelHeight)
+        val colors = areaColors[room.area] ?: areaColors[0]!!
+        val bgColor = colors[0]
+        val darkColor = colors[1]
+        val lightColor = colors[2]
+        
+        // Fill background
+        pixels.fill(bgColor)
+        
+        // Draw tile grid pattern within each screen
+        for (sy in 0 until screenHeight) {
+            for (sx in 0 until screenWidth) {
+                drawScreenBlock(pixels, pixelWidth, pixelHeight,
+                    sx * SCREEN_PIXELS, sy * SCREEN_PIXELS,
+                    bgColor, darkColor, lightColor)
+            }
+        }
+        
+        // Draw screen boundary grid lines
+        for (sy in 0..screenHeight) {
+            val y = sy * SCREEN_PIXELS
+            if (y < pixelHeight) {
+                for (x in 0 until pixelWidth) {
+                    val idx = y * pixelWidth + x
+                    if (idx < pixels.size) {
+                        pixels[idx] = 0xFFFFFFFF.toInt() // White grid lines
+                    }
+                }
+            }
+            // Draw thicker line (2px)
+            val y2 = sy * SCREEN_PIXELS - 1
+            if (y2 in 0 until pixelHeight) {
+                for (x in 0 until pixelWidth) {
+                    val idx = y2 * pixelWidth + x
+                    if (idx < pixels.size) {
+                        pixels[idx] = 0xFFFFFFFF.toInt()
                     }
                 }
             }
         }
         
-        return RoomRenderData(width, height, pixels)
+        for (sx in 0..screenWidth) {
+            val x = sx * SCREEN_PIXELS
+            if (x < pixelWidth) {
+                for (y in 0 until pixelHeight) {
+                    val idx = y * pixelWidth + x
+                    if (idx < pixels.size) {
+                        pixels[idx] = 0xFFFFFFFF.toInt()
+                    }
+                }
+            }
+            val x2 = sx * SCREEN_PIXELS - 1
+            if (x2 in 0 until pixelWidth) {
+                for (y in 0 until pixelHeight) {
+                    val idx = y * pixelWidth + x2
+                    if (idx < pixels.size) {
+                        pixels[idx] = 0xFFFFFFFF.toInt()
+                    }
+                }
+            }
+        }
+        
+        // Draw door indicator if we have a door pointer
+        if (room.doors != 0) {
+            drawDoorIndicator(pixels, pixelWidth, pixelHeight, lightColor)
+        }
+        
+        return RoomRenderData(pixelWidth, pixelHeight, pixels)
     }
     
     /**
-     * Convert color index to ARGB (simplified - uses grayscale for now)
-     * TODO: Load actual SNES palette from ROM
+     * Draw a checkerboard-like pattern inside a screen block to give it texture
      */
-    private fun colorIndexToArgb(colorIndex: Int): Int {
-        // Simplified: map 0-15 to grayscale
-        val gray = (colorIndex * 255 / 15)
-        return (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
+    private fun drawScreenBlock(
+        pixels: IntArray, totalWidth: Int, totalHeight: Int,
+        startX: Int, startY: Int,
+        bgColor: Int, darkColor: Int, lightColor: Int
+    ) {
+        for (ty in 0 until TILES_PER_SCREEN) {
+            for (tx in 0 until TILES_PER_SCREEN) {
+                val tileX = startX + tx * TILE_SIZE
+                val tileY = startY + ty * TILE_SIZE
+                
+                // Checkerboard pattern
+                val isDark = (tx + ty) % 2 == 0
+                val tileColor = if (isDark) bgColor else darkColor
+                
+                // Fill tile area
+                for (py in 0 until TILE_SIZE) {
+                    for (px in 0 until TILE_SIZE) {
+                        val x = tileX + px
+                        val y = tileY + py
+                        if (x in 0 until totalWidth && y in 0 until totalHeight) {
+                            val idx = y * totalWidth + x
+                            if (idx < pixels.size) {
+                                pixels[idx] = tileColor
+                            }
+                        }
+                    }
+                }
+                
+                // Draw subtle tile border
+                for (px in 0 until TILE_SIZE) {
+                    val x = tileX + px
+                    val y = tileY
+                    if (x in 0 until totalWidth && y in 0 until totalHeight) {
+                        val idx = y * totalWidth + x
+                        if (idx < pixels.size) {
+                            pixels[idx] = blendColor(pixels[idx], 0x20FFFFFF)
+                        }
+                    }
+                }
+                for (py in 0 until TILE_SIZE) {
+                    val x = tileX
+                    val y = tileY + py
+                    if (x in 0 until totalWidth && y in 0 until totalHeight) {
+                        val idx = y * totalWidth + x
+                        if (idx < pixels.size) {
+                            pixels[idx] = blendColor(pixels[idx], 0x20FFFFFF)
+                        }
+                    }
+                }
+            }
+        }
     }
     
+    /**
+     * Draw a small door indicator in the corner of the room
+     */
+    private fun drawDoorIndicator(pixels: IntArray, width: Int, height: Int, color: Int) {
+        val indicatorSize = 8
+        val margin = 10
+        
+        for (py in 0 until indicatorSize) {
+            for (px in 0 until indicatorSize) {
+                val x = margin + px
+                val y = margin + py
+                if (x in 0 until width && y in 0 until height) {
+                    val idx = y * width + x
+                    if (idx < pixels.size) {
+                        pixels[idx] = color
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Simple alpha blend
+     */
+    private fun blendColor(base: Int, overlay: Int): Int {
+        val alpha = (overlay ushr 24) and 0xFF
+        if (alpha == 0) return base
+        
+        val invAlpha = 255 - alpha
+        val r = (((overlay shr 16) and 0xFF) * alpha + ((base shr 16) and 0xFF) * invAlpha) / 255
+        val g = (((overlay shr 8) and 0xFF) * alpha + ((base shr 8) and 0xFF) * invAlpha) / 255
+        val b = ((overlay and 0xFF) * alpha + (base and 0xFF) * invAlpha) / 255
+        
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
 }
 
 /**
