@@ -107,21 +107,29 @@ class RomParser(private val romData: ByteArray) {
                 val scrollY = buffer.get().toInt() and 0xFF
                 val specialGfxBitflag = buffer.get().toInt() and 0xFF
                 
-                val doors = buffer.short.toInt() and 0xFFFF
-                val roomState = buffer.short.toInt() and 0xFFFF
-                val roomDown = buffer.short.toInt() and 0xFFFF
-                val roomUp = buffer.short.toInt() and 0xFFFF
-                val roomLeft = buffer.short.toInt() and 0xFFFF
-                val roomRight = buffer.short.toInt() and 0xFFFF
-                val roomDownScroll = buffer.short.toInt() and 0xFFFF
-                val roomUpScroll = buffer.short.toInt() and 0xFFFF
-                val roomLeftScroll = buffer.short.toInt() and 0xFFFF
-                val roomRightScroll = buffer.short.toInt() and 0xFFFF
-                val unused1 = buffer.short.toInt() and 0xFFFF
-                val mainAsm = buffer.short.toInt() and 0xFFFF
-                val plmSet = buffer.short.toInt() and 0xFFFF
-                val bgData = buffer.short.toInt() and 0xFFFF
-                val roomSetupAsm = buffer.short.toInt() and 0xFFFF
+                // Read 16-bit unsigned values properly
+                // Read bytes directly to avoid signed short issues
+                fun readUInt16(): Int {
+                    val low = buffer.get().toInt() and 0xFF
+                    val high = buffer.get().toInt() and 0xFF
+                    return (high shl 8) or low  // Little-endian
+                }
+                
+                val doors = readUInt16()
+                val roomState = readUInt16()
+                val roomDown = readUInt16()
+                val roomUp = readUInt16()
+                val roomLeft = readUInt16()
+                val roomRight = readUInt16()
+                val roomDownScroll = readUInt16()
+                val roomUpScroll = readUInt16()
+                val roomLeftScroll = readUInt16()
+                val roomRightScroll = readUInt16()
+                val unused1 = readUInt16()
+                val mainAsm = readUInt16()
+                val plmSet = readUInt16()
+                val bgData = readUInt16()
+                val roomSetupAsm = readUInt16()
                 
                 // Validate room data - skip invalid rooms
                 if (width == 0 || height == 0 || width > 16 || height > 16) {
@@ -236,27 +244,56 @@ class RomParser(private val romData: ByteArray) {
             val mapY = buffer.get().toInt() and 0xFF
             val width = buffer.get().toInt() and 0xFF
             val height = buffer.get().toInt() and 0xFF
+            
+            // Debug: Log first few rooms to see what we're reading
+            if (roomIndex < 5) {
+                val rawBytes = romData.sliceArray(headerOffset until minOf(headerOffset + 10, romData.size))
+                val hexBytes = rawBytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                println("Room[$roomIndex] at offset 0x${headerOffset.toString(16)}: index=$index, area=$area, width=$width, height=$height")
+                println("  Raw bytes (first 10): $hexBytes")
+            }
             val scrollX = buffer.get().toInt() and 0xFF
             val scrollY = buffer.get().toInt() and 0xFF
             val specialGfxBitflag = buffer.get().toInt() and 0xFF
             
-            val doors = buffer.short.toInt() and 0xFFFF
-            val roomState = buffer.short.toInt() and 0xFFFF
-            val roomDown = buffer.short.toInt() and 0xFFFF
-            val roomUp = buffer.short.toInt() and 0xFFFF
-            val roomLeft = buffer.short.toInt() and 0xFFFF
-            val roomRight = buffer.short.toInt() and 0xFFFF
-            val roomDownScroll = buffer.short.toInt() and 0xFFFF
-            val roomUpScroll = buffer.short.toInt() and 0xFFFF
-            val roomLeftScroll = buffer.short.toInt() and 0xFFFF
-            val roomRightScroll = buffer.short.toInt() and 0xFFFF
-            val unused1 = buffer.short.toInt() and 0xFFFF
-            val mainAsm = buffer.short.toInt() and 0xFFFF
-            val plmSet = buffer.short.toInt() and 0xFFFF
-            val bgData = buffer.short.toInt() and 0xFFFF
-            val roomSetupAsm = buffer.short.toInt() and 0xFFFF
+            // Read 16-bit unsigned values properly
+            // Read bytes directly to avoid signed short issues
+            fun readUInt16(): Int {
+                val low = buffer.get().toInt() and 0xFF
+                val high = buffer.get().toInt() and 0xFF
+                return (high shl 8) or low  // Little-endian
+            }
             
-            if (width == 0 || height == 0 || width > 16 || height > 16) {
+            val doors = readUInt16()
+            val roomState = readUInt16()
+            val roomDown = readUInt16()
+            val roomUp = readUInt16()
+            val roomLeft = readUInt16()
+            val roomRight = readUInt16()
+            val roomDownScroll = readUInt16()
+            val roomUpScroll = readUInt16()
+            val roomLeftScroll = readUInt16()
+            val roomRightScroll = readUInt16()
+            val unused1 = readUInt16()
+            val mainAsm = readUInt16()
+            val plmSet = readUInt16()
+            val bgData = readUInt16()
+            val roomSetupAsm = readUInt16()
+            
+            // Temporarily relax validation to see what we're actually reading
+            // Original: if (width == 0 || height == 0 || width > 16 || height > 16)
+            if (width == 0 && height == 0) {
+                // Both zero likely means invalid/unused room slot
+                if (roomIndex < 5) {
+                    println("  Filtered: width=$width, height=$height (both zero)")
+                }
+                return null
+            }
+            // Allow larger sizes temporarily for debugging
+            if (width > 32 || height > 32) {
+                if (roomIndex < 5) {
+                    println("  Filtered: width=$width, height=$height (too large)")
+                }
                 return null
             }
             
