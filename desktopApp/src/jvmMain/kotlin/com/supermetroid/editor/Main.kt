@@ -15,6 +15,7 @@ import com.supermetroid.editor.data.RoomRepository
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.MapCanvas
+import com.supermetroid.editor.data.RomPreferences
 import java.io.File
 
 fun main() = application {
@@ -26,6 +27,17 @@ fun main() = application {
     // Load rooms on startup
     LaunchedEffect(Unit) {
         rooms = roomRepository.getAllRooms()
+        
+        // Auto-load last ROM if available
+        val lastRomPath = RomPreferences.getLastRomPath()
+        if (lastRomPath != null) {
+            try {
+                romParser = RomParser.loadRom(lastRomPath)
+            } catch (e: Exception) {
+                println("Failed to auto-load ROM: ${e.message}")
+                e.printStackTrace()
+            }
+        }
     }
     
     Window(
@@ -55,6 +67,8 @@ fun main() = application {
                                 val file = File(fileDialog.directory, selectedFile)
                                 try {
                                     romParser = RomParser.loadRom(file.absolutePath)
+                                    // Save ROM path for auto-loading next time
+                                    RomPreferences.setLastRomPath(file.absolutePath)
                                 } catch (e: Exception) {
                                     e.printStackTrace()
                                 }
