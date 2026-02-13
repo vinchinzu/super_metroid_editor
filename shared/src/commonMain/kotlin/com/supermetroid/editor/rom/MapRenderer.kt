@@ -134,10 +134,28 @@ class MapRenderer(private val romParser: RomParser) {
             }
         }
         
+        // Parse block types and BTS data for overlay system
+        val blockTypes = IntArray(totalBlocks)
+        val btsDataStart = tileDataStart + layer1Size
+        val btsBytes = ByteArray(totalBlocks)
+        
+        for (i in 0 until totalBlocks) {
+            val offset = tileDataStart + i * 2
+            if (offset + 1 < levelData.size) {
+                val lo = levelData[offset].toInt() and 0xFF
+                val hi = levelData[offset + 1].toInt() and 0xFF
+                blockTypes[i] = ((hi shl 8) or lo shr 12) and 0x0F
+            }
+            val btsOffset = btsDataStart + i
+            if (btsOffset < levelData.size) {
+                btsBytes[i] = levelData[btsOffset]
+            }
+        }
+        
         // Draw screen grid
         drawScreenGrid(pixels, pixelWidth, pixelHeight, room.width, room.height)
         
-        return RoomRenderData(pixelWidth, pixelHeight, pixels)
+        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes)
     }
     
     private fun fillBlock(pixels: IntArray, w: Int, h: Int, px: Int, py: Int, color: Int) {
@@ -191,7 +209,11 @@ class MapRenderer(private val romParser: RomParser) {
 }
 
 data class RoomRenderData(
-    val width: Int,
-    val height: Int,
-    val pixels: IntArray
+    val width: Int,           // Pixel width
+    val height: Int,          // Pixel height
+    val pixels: IntArray,     // ARGB pixel data
+    val blocksWide: Int = 0,  // Width in 16x16 blocks
+    val blocksTall: Int = 0,  // Height in 16x16 blocks
+    val blockTypes: IntArray = IntArray(0),  // Block type per tile (0-15)
+    val btsData: ByteArray = ByteArray(0),   // BTS byte per tile
 )
