@@ -39,22 +39,176 @@ class RomParser(private val romData: ByteArray) {
     }
     
     /**
+     * Search for room headers table by scanning ROM for valid room headers
+     * Returns the PC offset where valid room headers start
+     */
+    private fun findRoomHeadersTable(): Int? {
+        // Search for a sequence of valid room headers (allowing some gaps for unused slots)
+        // A valid room header has: width > 0 && width <= 16 && height > 0 && height <= 16
+        val minValidRooms = 3  // Need at least 3 valid rooms
+        val maxGaps = 2  // Allow up to 2 invalid rooms between valid ones
+        
+        for (startOffset in 0 until romData.size - (200 * 38) step 38) {
+            var validCount = 0
+            var gapCount = 0
+            
+            for (i in 0 until 200) {  // Check up to 200 room slots
+                val offset = startOffset + (i * 38)
+                if (offset + 5 >= romData.size) break
+                
+                val width = romData[offset + 4].toInt() and 0xFF
+                val height = romData[offset + 5].toInt() and 0xFF
+                
+                if (width > 0 && width <= 16 && height > 0 && height <= 16) {
+                    validCount++
+                    gapCount = 0  // Reset gap counter on valid room
+                    
+                    if (validCount >= minValidRooms) {
+                        println("Found room headers table at PC offset: 0x${startOffset.toString(16)} (found $validCount valid rooms so far)")
+                        return startOffset
+                    }
+                } else {
+                    gapCount++
+                    // If we hit too many gaps early, this isn't the table
+                    if (validCount == 0 && gapCount > 5) {
+                        break
+                    }
+                    // If we have some valid rooms but hit too many gaps, might still be valid
+                    if (validCount > 0 && gapCount > maxGaps) {
+                        break
+                    }
+                }
+            }
+        }
+        
+        // Fallback: try known locations from test output
+        val knownLocations = listOf(0x1f06, 0x153a, 0x1ee0)
+        for (loc in knownLocations) {
+            if (loc + 38 < romData.size) {
+                val width = romData[loc + 4].toInt() and 0xFF
+                val height = romData[loc + 5].toInt() and 0xFF
+                if (width > 0 && width <= 16 && height > 0 && height <= 16) {
+                    println("Using fallback room headers table location: 0x${loc.toString(16)}")
+                    return loc
+                }
+            }
+        }
+        
+        return null
+    }
+    
+    /**
      * Build a lookup table of all rooms for faster matching
      * Returns a map of room index to Room
      */
     fun buildRoomLookupTable(): Map<Int, Room> {
-        val roomHeadersTableOffset = snesToPc(0x8F0000)
+        // Try to find the actual room headers table location
+        val roomHeadersTableOffset = findRoomHeadersTable() ?: snesToPc(0x8F0000)
         val maxRooms = 200
         val rooms = mutableMapOf<Int, Room>()
         
         for (i in 0 until maxRooms) {
-            val room = readRoomHeaderByIndex(i)
+            val headerOffset = roomHeadersTableOffset + (i * 38)
+            if (headerOffset < 0 || headerOffset + 38 > romData.size) {
+                break
+            }
+            
+            val room = readRoomHeaderAtOffset(headerOffset, i)
             if (room != null) {
                 rooms[i] = room
             }
         }
         
         return rooms
+    }
+    
+    /**
+     * Read room header at a specific PC offset
+     */
+    private fun readRoomHeaderAtOffset(headerOffset: Int, roomIndex: Int): Room? {
+        if (headerOffset < 0 || headerOffset + 38 > romData.size) {
+            return null
+        }
+        
+        val buffer = ByteBuffer.wrap(romData, headerOffset, 38)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        
+        if (buffer.remaining() < 38) {
+            return null
+        }
+        
+        try {
+            val index = buffer.get().toInt() and 0xFF
+            val area = buffer.get().toInt() and 0xFF
+            val mapX = buffer.get().toInt() and 0xFF
+            val mapY = buffer.get().toInt() and 0xFF
+            val width = buffer.get().toInt() and 0xFF
+            val height = buffer.get().toInt() and 0xFF
+            
+            // Validate room data
+            if (width == 0 || height == 0 || width > 16 || height > 16) {
+                return null
+            }
+            
+            val scrollX = buffer.get().toInt() and 0xFF
+            val scrollY = buffer.get().toInt() and 0xFF
+            val specialGfxBitflag = buffer.get().toInt() and 0xFF
+            
+            // Read 16-bit unsigned values properly
+            fun readUInt16(): Int {
+                val low = buffer.get().toInt() and 0xFF
+                val high = buffer.get().toInt() and 0xFF
+                return (high shl 8) or low  // Little-endian
+            }
+            
+            val doors = readUInt16()
+            val roomState = readUInt16()
+            val roomDown = readUInt16()
+            val roomUp = readUInt16()
+            val roomLeft = readUInt16()
+            val roomRight = readUInt16()
+            val roomDownScroll = readUInt16()
+            val roomUpScroll = readUInt16()
+            val roomLeftScroll = readUInt16()
+            val roomRightScroll = readUInt16()
+            val unused1 = readUInt16()
+            val mainAsm = readUInt16()
+            val plmSet = readUInt16()
+            val bgData = readUInt16()
+            val roomSetupAsm = readUInt16()
+            
+            return Room(
+                roomId = 0, // Unknown, will be set by matcher
+                name = "Room Index $roomIndex",
+                handle = "room_index_$roomIndex",
+                index = index,
+                area = area,
+                mapX = mapX,
+                mapY = mapY,
+                width = width,
+                height = height,
+                scrollX = scrollX,
+                scrollY = scrollY,
+                specialGfxBitflag = specialGfxBitflag,
+                doors = doors,
+                roomState = roomState,
+                roomDown = roomDown,
+                roomUp = roomUp,
+                roomLeft = roomLeft,
+                roomRight = roomRight,
+                roomDownScroll = roomDownScroll,
+                roomUpScroll = roomUpScroll,
+                roomLeftScroll = roomLeftScroll,
+                roomRightScroll = roomRightScroll,
+                unused1 = unused1,
+                mainAsm = mainAsm,
+                plmSet = plmSet,
+                bgData = bgData,
+                roomSetupAsm = roomSetupAsm
+            )
+        } catch (e: Exception) {
+            return null
+        }
     }
     
     /**
@@ -223,112 +377,16 @@ class RomParser(private val romData: ByteArray) {
      * Read room header by index (for fallback/debugging)
      */
     fun readRoomHeaderByIndex(roomIndex: Int): Room? {
-        val roomHeadersTableOffset = snesToPc(0x8F0000)
+        // Try to find the actual table location first
+        val roomHeadersTableOffset = findRoomHeadersTable() ?: snesToPc(0x8F0000)
         val headerOffset = roomHeadersTableOffset + (roomIndex * 38)
         
         if (headerOffset < 0 || headerOffset + 38 > romData.size) {
             return null
         }
         
-        val buffer = ByteBuffer.wrap(romData, headerOffset, 38)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        
-        if (buffer.remaining() < 38) {
-            return null
-        }
-        
-        try {
-            val index = buffer.get().toInt() and 0xFF
-            val area = buffer.get().toInt() and 0xFF
-            val mapX = buffer.get().toInt() and 0xFF
-            val mapY = buffer.get().toInt() and 0xFF
-            val width = buffer.get().toInt() and 0xFF
-            val height = buffer.get().toInt() and 0xFF
-            
-            // Debug: Log first few rooms to see what we're reading
-            if (roomIndex < 5) {
-                val rawBytes = romData.sliceArray(headerOffset until minOf(headerOffset + 10, romData.size))
-                val hexBytes = rawBytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-                println("Room[$roomIndex] at offset 0x${headerOffset.toString(16)}: index=$index, area=$area, width=$width, height=$height")
-                println("  Raw bytes (first 10): $hexBytes")
-            }
-            val scrollX = buffer.get().toInt() and 0xFF
-            val scrollY = buffer.get().toInt() and 0xFF
-            val specialGfxBitflag = buffer.get().toInt() and 0xFF
-            
-            // Read 16-bit unsigned values properly
-            // Read bytes directly to avoid signed short issues
-            fun readUInt16(): Int {
-                val low = buffer.get().toInt() and 0xFF
-                val high = buffer.get().toInt() and 0xFF
-                return (high shl 8) or low  // Little-endian
-            }
-            
-            val doors = readUInt16()
-            val roomState = readUInt16()
-            val roomDown = readUInt16()
-            val roomUp = readUInt16()
-            val roomLeft = readUInt16()
-            val roomRight = readUInt16()
-            val roomDownScroll = readUInt16()
-            val roomUpScroll = readUInt16()
-            val roomLeftScroll = readUInt16()
-            val roomRightScroll = readUInt16()
-            val unused1 = readUInt16()
-            val mainAsm = readUInt16()
-            val plmSet = readUInt16()
-            val bgData = readUInt16()
-            val roomSetupAsm = readUInt16()
-            
-            // Temporarily relax validation to see what we're actually reading
-            // Original: if (width == 0 || height == 0 || width > 16 || height > 16)
-            if (width == 0 && height == 0) {
-                // Both zero likely means invalid/unused room slot
-                if (roomIndex < 5) {
-                    println("  Filtered: width=$width, height=$height (both zero)")
-                }
-                return null
-            }
-            // Allow larger sizes temporarily for debugging
-            if (width > 32 || height > 32) {
-                if (roomIndex < 5) {
-                    println("  Filtered: width=$width, height=$height (too large)")
-                }
-                return null
-            }
-            
-            return Room(
-                roomId = 0, // Unknown
-                name = "Room Index $roomIndex",
-                handle = "room_index_$roomIndex",
-                index = index,
-                area = area,
-                mapX = mapX,
-                mapY = mapY,
-                width = width,
-                height = height,
-                scrollX = scrollX,
-                scrollY = scrollY,
-                specialGfxBitflag = specialGfxBitflag,
-                doors = doors,
-                roomState = roomState,
-                roomDown = roomDown,
-                roomUp = roomUp,
-                roomLeft = roomLeft,
-                roomRight = roomRight,
-                roomDownScroll = roomDownScroll,
-                roomUpScroll = roomUpScroll,
-                roomLeftScroll = roomLeftScroll,
-                roomRightScroll = roomRightScroll,
-                unused1 = unused1,
-                mainAsm = mainAsm,
-                plmSet = plmSet,
-                bgData = bgData,
-                roomSetupAsm = roomSetupAsm
-            )
-        } catch (e: Exception) {
-            return null
-        }
+        // Use the shared readRoomHeaderAtOffset method
+        return readRoomHeaderAtOffset(headerOffset, roomIndex)
     }
     
     /**
