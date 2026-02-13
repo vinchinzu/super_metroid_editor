@@ -39,12 +39,36 @@ class RomParser(private val romData: ByteArray) {
     }
     
     /**
+     * Build a lookup table of all rooms for faster matching
+     * Returns a map of room index to Room
+     */
+    fun buildRoomLookupTable(): Map<Int, Room> {
+        val roomHeadersTableOffset = snesToPc(0x8F0000)
+        val maxRooms = 200
+        val rooms = mutableMapOf<Int, Room>()
+        
+        for (i in 0 until maxRooms) {
+            val room = readRoomHeaderByIndex(i)
+            if (room != null) {
+                rooms[i] = room
+            }
+        }
+        
+        return rooms
+    }
+    
+    /**
      * Read a room header from the ROM by room ID (SNES address)
      * Room headers table starts at 0x8F0000
      * Each room header is 38 bytes
      * 
-     * Room IDs are SNES addresses. We match by checking if the room's pointers
-     * or level data address matches the room ID.
+     * Room IDs in the JSON (like 0x91F8) are SNES addresses.
+     * These might correspond to:
+     * 1. The room's level data address (bgData pointer)
+     * 2. The room's state data address (roomState pointer)
+     * 3. A room index in a lookup table
+     * 
+     * We try multiple matching strategies.
      */
     fun readRoomHeader(roomId: Int): Room? {
         val roomHeadersTableOffset = snesToPc(0x8F0000)
@@ -119,28 +143,31 @@ class RomParser(private val romData: ByteArray) {
                 val roomLeftFull = 0x8F0000 + roomLeft
                 val roomRightFull = 0x8F0000 + roomRight
                 
-                // Match if room ID matches any pointer, or if it's close
-                // Room IDs might be the address where level data starts
-                val matches = when {
-                    // Direct matches
-                    bgDataFull == roomId -> true
-                    roomStateFull == roomId -> true
-                    doorsFull == roomId -> true
-                    roomDownFull == roomId -> true
-                    roomUpFull == roomId -> true
-                    roomLeftFull == roomId -> true
-                    roomRightFull == roomId -> true
-                    // Check if room ID is in the same bank and close to bgData
-                    // (room IDs might be level data addresses)
-                    roomIdBank >= 0x91 && roomIdBank <= 0xDF -> {
-                        // Room IDs in this range are likely level data addresses
-                        // Check if bgData points to a location close to roomId
-                        val bgDataFullAddr = bgDataFull
-                        val diff = kotlin.math.abs(bgDataFullAddr - roomId)
-                        diff < 0x1000 // Within 4KB
-                    }
+                // Strategy 1: Direct pointer matches
+                val directMatch = when (roomId) {
+                    bgDataFull, roomStateFull, doorsFull, 
+                    roomDownFull, roomUpFull, roomLeftFull, roomRightFull -> true
                     else -> false
                 }
+                
+                // Strategy 2: Room ID might be the actual level data address
+                // Check if bgData points to roomId (bgData is relative to 0x8F0000)
+                // Room IDs like 0x91F8 are in bank 0x91, which is level data bank
+                val levelDataMatch = if (roomIdBank >= 0x91 && roomIdBank <= 0xDF) {
+                    // Convert roomId to PC address to compare with bgData
+                    val roomIdPc = snesToPc(roomId)
+                    val bgDataPc = snesToPc(bgDataFull)
+                    val diff = kotlin.math.abs(bgDataPc - roomIdPc)
+                    diff < 0x2000 // Within 8KB (level data can be large)
+                } else {
+                    false
+                }
+                
+                // Strategy 3: Room ID might be an index into the room table
+                // Some room IDs might actually be indices (0-199)
+                val indexMatch = roomId < 200 && roomId == i
+                
+                val matches = directMatch || levelDataMatch || indexMatch
                 
                 if (matches) {
                     return Room(
@@ -179,15 +206,15 @@ class RomParser(private val romData: ByteArray) {
             }
         }
         
-        // If no match found, return first valid room as fallback (for debugging)
-        // This helps us see if rooms are being read at all
-        return readRoomHeaderByIndex(0)
+        // If no match found, try using RoomMatcher for better matching
+        val matcher = RoomMatcher(this)
+        return matcher.findRoomById(roomId)
     }
     
     /**
      * Read room header by index (for fallback/debugging)
      */
-    private fun readRoomHeaderByIndex(roomIndex: Int): Room? {
+    fun readRoomHeaderByIndex(roomIndex: Int): Room? {
         val roomHeadersTableOffset = snesToPc(0x8F0000)
         val headerOffset = roomHeadersTableOffset + (roomIndex * 38)
         
