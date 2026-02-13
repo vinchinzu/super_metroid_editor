@@ -3,14 +3,18 @@ package com.supermetroid.editor.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.supermetroid.editor.data.RoomInfo
+import com.supermetroid.editor.rom.MapRenderer
 import com.supermetroid.editor.rom.RomParser
+import java.awt.image.BufferedImage
 
 @Composable
 fun MapCanvas(
@@ -40,45 +44,126 @@ fun MapCanvas(
                 
                 if (romParser != null) {
                     // Render room map
+                    var isLoading by remember(room?.id) { mutableStateOf(false) }
+                    var errorMessage by remember(room?.id) { mutableStateOf<String?>(null) }
+                    var renderResult by remember(room?.id) { mutableStateOf<com.supermetroid.editor.rom.RoomRenderData?>(null) }
+                    
+                    // Load and render room when it changes
+                    LaunchedEffect(room?.id) {
+                        if (room != null) {
+                            isLoading = true
+                            errorMessage = null
+                            renderResult = null
+                            
+                            try {
+                                val roomId = room.getRoomIdAsInt()
+                                val roomHeader = romParser.readRoomHeader(roomId)
+                                
+                                if (roomHeader != null) {
+                                    val mapRenderer = MapRenderer(romParser)
+                                    val result = mapRenderer.renderRoom(roomHeader)
+                                    renderResult = result
+                                    
+                                    if (result == null) {
+                                        errorMessage = "Failed to render room map"
+                                    }
+                                } else {
+                                    errorMessage = "Room header not found in ROM"
+                                }
+                            } catch (e: Exception) {
+                                errorMessage = "Error: ${e.message}"
+                                e.printStackTrace()
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    }
+                    
+                    
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color(0xFF1A1A1A))
                     ) {
-                        Canvas(
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            // Placeholder rendering
-                            // TODO: Implement actual tile rendering
-                            drawRect(
-                                color = Color(0xFF333333),
-                                topLeft = Offset(0f, 0f),
-                                size = androidx.compose.ui.geometry.Size(size.width, size.height)
-                            )
-                            
-                            // Draw placeholder text
-                            // Note: Text drawing requires a different approach in Canvas
-                            // For now, we'll show a placeholder
-                        }
-                        
-                        // Placeholder text overlay
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Map rendering coming soon",
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                text = "Room: ${room.name}",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                        when {
+                            isLoading -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator()
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "Loading room map...",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                            errorMessage != null -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = errorMessage!!,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                            }
+                            renderResult != null -> {
+                                // Render the map directly from pixel data
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Canvas(
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        val data = renderResult!!
+                                        val scale = minOf(
+                                            size.width / data.width,
+                                            size.height / data.height
+                                        ).coerceAtMost(1f)
+                                        
+                                        val scaledWidth = data.width * scale
+                                        val scaledHeight = data.height * scale
+                                        val x = (size.width - scaledWidth) / 2
+                                        val y = (size.height - scaledHeight) / 2
+                                        
+                                        // Draw pixels directly
+                                        val pixelSize = 1f * scale
+                                        for (py in 0 until data.height) {
+                                            for (px in 0 until data.width) {
+                                                val pixelIndex = py * data.width + px
+                                                val argb = data.pixels[pixelIndex]
+                                                val color = Color(argb)
+                                                
+                                                drawRect(
+                                                    color = color,
+                                                    topLeft = Offset(x + px * pixelSize, y + py * pixelSize),
+                                                    size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                Text(
+                                    text = "No map data available",
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
                     }
                 } else {

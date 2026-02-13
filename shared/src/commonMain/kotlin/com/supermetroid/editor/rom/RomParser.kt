@@ -24,7 +24,7 @@ class RomParser(private val romData: ByteArray) {
      * Convert SNES address to PC offset
      * SNES addresses are in bank:address format (e.g., 0x8F0000)
      */
-    private fun snesToPc(snesAddress: Int): Int {
+    fun snesToPc(snesAddress: Int): Int {
         val bank = (snesAddress shr 16) and 0xFF
         val address = snesAddress and 0xFFFF
         
@@ -168,6 +168,11 @@ class RomParser(private val romData: ByteArray) {
         
         return output.toByteArray()
     }
+    
+    /**
+     * Get ROM data (for use by MapRenderer)
+     */
+    fun getRomData(): ByteArray = romData
     
     companion object {
         fun loadRom(filePath: String): RomParser {

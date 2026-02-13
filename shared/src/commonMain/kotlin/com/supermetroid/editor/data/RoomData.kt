@@ -18,4 +18,14 @@ data class RoomInfo(
         // Convert "0X91F8" to 0x91F8
         return id.removePrefix("0X").toInt(16)
     }
+    
+    companion object {
+        fun fromRoomInfo(roomInfo: RoomInfo, roomHeader: com.supermetroid.editor.data.Room): com.supermetroid.editor.data.Room {
+            return roomHeader.copy(
+                roomId = roomInfo.getRoomIdAsInt(),
+                name = roomInfo.name,
+                handle = roomInfo.handle
+            )
+        }
+    }
 }
