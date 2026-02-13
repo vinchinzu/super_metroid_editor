@@ -21,6 +21,8 @@ class MapRenderer(private val romParser: RomParser) {
         const val BLOCKS_PER_SCREEN = 16
     }
     
+    private val tileGraphics = TileGraphics(romParser)
+    
     /**
      * Classify block types into visual categories for rendering.
      */
@@ -68,20 +70,13 @@ class MapRenderer(private val romParser: RomParser) {
         val blocksTall = room.height * BLOCKS_PER_SCREEN
         val totalBlocks = blocksWide * blocksTall
         
-        // Parse block types into a grid
-        val blockTypes = IntArray(totalBlocks)
-        for (i in 0 until totalBlocks) {
-            val offset = tileDataStart + i * 2
-            if (offset + 1 >= levelData.size) break
-            val lo = levelData[offset].toInt() and 0xFF
-            val hi = levelData[offset + 1].toInt() and 0xFF
-            blockTypes[i] = ((hi shl 8) or lo shr 12) and 0x0F
+        // Try to load tile graphics for this room's tileset
+        val hasTileGraphics = try {
+            tileGraphics.loadTileset(room.tileset)
+        } catch (e: Exception) {
+            println("Failed to load tileset ${room.tileset}: ${e.message}")
+            false
         }
-        
-        // Get area colors
-        val terrainColors = areaTerrainColors[room.area] ?: areaTerrainColors[0]!!
-        val terrainColor = terrainColors[0]
-        val terrainDark = terrainColors[1]
         
         // Render to pixels
         val pixelWidth = blocksWide * BLOCK_SIZE
@@ -89,63 +84,52 @@ class MapRenderer(private val romParser: RomParser) {
         val pixels = IntArray(pixelWidth * pixelHeight)
         pixels.fill(bgColor)
         
-        // Draw blocks
-        for (by in 0 until blocksTall) {
-            for (bx in 0 until blocksWide) {
-                val idx = by * blocksWide + bx
-                val blockType = blockTypes[idx]
-                
+        // Parse and render each block
+        for (tileIdx in 0 until totalBlocks) {
+            val dataOffset = tileDataStart + tileIdx * 2
+            if (dataOffset + 1 >= levelData.size) break
+            
+            val lo = levelData[dataOffset].toInt() and 0xFF
+            val hi = levelData[dataOffset + 1].toInt() and 0xFF
+            val blockWord = (hi shl 8) or lo
+            
+            val blockType = (blockWord shr 12) and 0x0F
+            val metatileIndex = blockWord and 0x03FF
+            val hFlip = (blockWord shr 10) and 1
+            val vFlip = (blockWord shr 11) and 1
+            
+            val bx = tileIdx % blocksWide
+            val by = tileIdx / blocksWide
+            val px = bx * BLOCK_SIZE
+            val py = by * BLOCK_SIZE
+            
+            if (hasTileGraphics) {
+                // Render actual tile graphics
+                val metatilePixels = tileGraphics.renderMetatile(metatileIndex)
+                if (metatilePixels != null) {
+                    // Draw the 16x16 metatile with flip support
+                    for (ty in 0 until 16) {
+                        for (tx in 0 until 16) {
+                            val sx = if (hFlip != 0) 15 - tx else tx
+                            val sy = if (vFlip != 0) 15 - ty else ty
+                            val argb = metatilePixels[sy * 16 + sx]
+                            if (argb != 0) { // Skip transparent pixels
+                                setPixel(pixels, pixelWidth, pixelHeight, px + tx, py + ty, argb)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fallback: block type coloring
+                val terrainColors = areaTerrainColors[room.area] ?: areaTerrainColors[0]!!
                 val color = when {
                     isDoor(blockType) -> doorColor
                     isSpike(blockType) -> spikeColor
-                    isSolid(blockType) -> {
-                        // Add subtle depth: darker near edges of terrain regions
-                        val hasAirAbove = by == 0 || !isSolid(blockTypes[(by - 1) * blocksWide + bx])
-                        val hasAirLeft = bx == 0 || !isSolid(blockTypes[by * blocksWide + (bx - 1)])
-                        if (hasAirAbove || hasAirLeft) terrainColor else terrainDark
-                    }
-                    else -> bgColor  // Air types
+                    isSolid(blockType) -> terrainColors[0]
+                    else -> bgColor
                 }
-                
                 if (color != bgColor) {
-                    fillBlock(pixels, pixelWidth, pixelHeight, bx * BLOCK_SIZE, by * BLOCK_SIZE, color)
-                }
-            }
-        }
-        
-        // Draw terrain edges — dark outline where solid meets air
-        for (by in 0 until blocksTall) {
-            for (bx in 0 until blocksWide) {
-                val idx = by * blocksWide + bx
-                if (!isSolid(blockTypes[idx]) && !isDoor(blockTypes[idx])) continue
-                
-                // Check each neighbor — draw edge pixel where terrain borders air
-                val px = bx * BLOCK_SIZE
-                val py = by * BLOCK_SIZE
-                
-                // Right edge
-                if (bx + 1 < blocksWide && !isSolid(blockTypes[idx + 1]) && !isDoor(blockTypes[idx + 1])) {
-                    for (y in 0 until BLOCK_SIZE) {
-                        setPixel(pixels, pixelWidth, pixelHeight, px + BLOCK_SIZE - 1, py + y, edgeColor)
-                    }
-                }
-                // Bottom edge
-                if (by + 1 < blocksTall && !isSolid(blockTypes[(by + 1) * blocksWide + bx]) && !isDoor(blockTypes[(by + 1) * blocksWide + bx])) {
-                    for (x in 0 until BLOCK_SIZE) {
-                        setPixel(pixels, pixelWidth, pixelHeight, px + x, py + BLOCK_SIZE - 1, edgeColor)
-                    }
-                }
-                // Left edge  
-                if (bx > 0 && !isSolid(blockTypes[idx - 1]) && !isDoor(blockTypes[idx - 1])) {
-                    for (y in 0 until BLOCK_SIZE) {
-                        setPixel(pixels, pixelWidth, pixelHeight, px, py + y, edgeColor)
-                    }
-                }
-                // Top edge
-                if (by > 0 && !isSolid(blockTypes[(by - 1) * blocksWide + bx]) && !isDoor(blockTypes[(by - 1) * blocksWide + bx])) {
-                    for (x in 0 until BLOCK_SIZE) {
-                        setPixel(pixels, pixelWidth, pixelHeight, px + x, py, edgeColor)
-                    }
+                    fillBlock(pixels, pixelWidth, pixelHeight, px, py, color)
                 }
             }
         }
