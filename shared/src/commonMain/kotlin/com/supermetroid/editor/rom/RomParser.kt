@@ -195,173 +195,164 @@ class RomParser(private val romData: ByteArray) {
         return null
     }
     
-    // ─── LZ2 Decompression ────────────────────────────────────────────
+    // ─── LZ5 Decompression ──────────────────────────────────────────────
+    //
+    // Ported from the verified working Python implementation:
+    //   https://github.com/aremath/sm_rando/blob/master/rom_tools/compress/decompress.py
+    // Algorithm spec: https://sneslab.net/wiki/LZ5
+    //
+    // Commands 0-6 are standard, command 7 is extended (2-byte header).
+    // 0xFF terminates decompression.
+    //
+    // CRITICAL differences from our old broken implementation:
+    //   1. 0xFF IS the end marker (not a no-op)
+    //   2. Command 6 (Negative Repeat) takes 1 byte (relative offset), not 2
+    //   3. Dictionary copies wrap around when referencing past current output end
     
-    /**
-     * Decompress data at the given SNES address using Super Metroid's
-     * LZ2 compression format.
-     * 
-     * Format:
-     *   Bits 7-5 of header byte = command type (0-6)
-     *   Bits 4-0 = length - 1  (length 1..32)
-     *   
-     *   If bits 7-5 = 7 (extended header):
-     *     Byte 1 bits 4-2 = actual command type (0-6)
-     *     ((byte1 & 3) << 8) | byte2 + 1 = length (up to 1024)
-     *     If actual command type is ALSO 7: END OF DATA (e.g., 0xFF 0xFF)
-     *   
-     * Commands:
-     *   0: Direct copy (copy next `len` bytes verbatim)
-     *   1: Byte fill  (repeat 1 byte `len` times)
-     *   2: Word fill  (alternate 2 bytes for `len` bytes)
-     *   3: Increment  (byte increments by 1 each time, `len` bytes)
-     *   4: Dictionary (copy `len` bytes from earlier output at offset)
-     *   5: XOR dict   (copy from earlier output, XOR each byte with 0xFF)
-     *   6: Minus dict (copy from earlier output, reading backwards)
-     */
     fun decompressLZ2(snesAddress: Int): ByteArray {
         val startPc = snesToPc(snesAddress)
-        return decompressLZ2AtPc(startPc)
+        return decompressLZ5AtPc(startPc)
     }
     
     /**
-     * Decompress LZ data (Super Metroid LZ5 / Lunar Compress format 4).
-     * 
-     * The decompressed data starts with a 2-byte LE size header (Layer 1 size).
-     * Decompression stops when the output reaches the expected total size
-     * (header + Layer1 + BTS).
-     * 
-     * IMPORTANT: 0xFF is NOT an end-of-data marker. When bits 7-5 = 7 (extended)
-     * and bits 4-2 = 7 (cmdType 7), this is a NO-OP — skip it and continue.
-     * Decompression terminates by reaching the expected output size.
-     * (Verified by comparing output with Lunar Compress DLL results from SMILE.)
+     * Decompress LZ5 data starting at the given PC offset.
+     * Ported directly from aremath/sm_rando decompress.py
      */
-    fun decompressLZ2AtPc(startPc: Int): ByteArray {
-        val output = mutableListOf<Byte>()
+    fun decompressLZ5AtPc(startPc: Int): ByteArray {
+        val dst = ByteArray(0x20000) // 128KB max output (some rooms are very large)
+        var dstPos = 0
         var pos = startPc
         
         while (pos < romData.size) {
-            val header = romData[pos].toInt() and 0xFF
-            pos++
+            val nextCmd = romData[pos].toInt() and 0xFF
             
-            var cmdType = (header shr 5) and 0x07
-            var length: Int
-            
-            if (cmdType == 7) {
-                // Extended header: 2-byte header
-                cmdType = (header shr 2) and 0x07
-                
-                if (pos >= romData.size) break
-                val byte2 = romData[pos].toInt() and 0xFF
+            // 0xFF = end of compressed data
+            if (nextCmd == 0xFF) {
                 pos++
-                length = ((header and 0x03) shl 8) or byte2
-                length += 1
-                
-                // Extended cmdType 7 = NO-OP (skip and continue)
-                // NOT an end marker — decompression stops by reaching expected size
-                if (cmdType == 7) {
-                    continue
-                }
+                break
+            }
+            
+            val cmdCode: Int
+            val length: Int
+            
+            val topBits = (nextCmd shr 5) and 7
+            if (topBits == 7) {
+                // Extended command: 2-byte header
+                // Bits 5-3 of first byte = actual command
+                // Last 2 bits of first byte + all 8 bits of second byte = 10-bit length
+                cmdCode = (nextCmd shr 2) and 7
+                val highBits = nextCmd and 0x03
+                val lowBits = romData[pos + 1].toInt() and 0xFF
+                length = ((highBits shl 8) or lowBits) + 1
+                pos += 2
             } else {
-                length = (header and 0x1F) + 1
+                // Standard command: 1-byte header
+                cmdCode = topBits
+                length = (nextCmd and 0x1F) + 1
+                pos += 1
             }
             
-            // Check if we've reached the expected output size
-            if (output.size >= 2) {
-                val expectedSize = (output[0].toInt() and 0xFF) or 
-                    ((output[1].toInt() and 0xFF) shl 8)
-                val totalExpected = 2 + expectedSize + expectedSize / 2  // header + L1 + BTS
-                if (output.size >= totalExpected) break
-            }
-            
-            when (cmdType) {
+            when (cmdCode) {
                 0 -> {
-                    // Direct copy
+                    // Direct copy: copy next `length` bytes from source
                     for (i in 0 until length) {
                         if (pos >= romData.size) break
-                        output.add(romData[pos])
-                        pos++
+                        dst[dstPos++] = romData[pos++]
                     }
                 }
                 1 -> {
-                    // Byte fill
-                    if (pos >= romData.size) break
-                    val fillByte = romData[pos]
-                    pos++
-                    repeat(length) { output.add(fillByte) }
+                    // Byte fill: repeat one byte `length` times
+                    val fillByte = romData[pos++]
+                    for (i in 0 until length) {
+                        dst[dstPos++] = fillByte
+                    }
                 }
                 2 -> {
-                    // Word fill (alternate 2 bytes)
-                    if (pos + 1 >= romData.size) break
-                    val b1 = romData[pos]
-                    val b2 = romData[pos + 1]
-                    pos += 2
+                    // Word fill: alternate two bytes for `length` bytes
+                    val b1 = romData[pos++]
+                    val b2 = romData[pos++]
                     for (i in 0 until length) {
-                        output.add(if (i % 2 == 0) b1 else b2)
+                        dst[dstPos++] = if (i % 2 == 0) b1 else b2
                     }
                 }
                 3 -> {
-                    // Increment fill
-                    if (pos >= romData.size) break
-                    var fillByte = romData[pos].toInt() and 0xFF
-                    pos++
+                    // Increasing fill: write byte, increment by 1, `length` times
+                    var b = romData[pos++].toInt() and 0xFF
                     for (i in 0 until length) {
-                        output.add((fillByte and 0xFF).toByte())
-                        fillByte++
+                        dst[dstPos++] = (b and 0xFF).toByte()
+                        b++
                     }
                 }
                 4 -> {
-                    // Dictionary copy (from earlier in output)
-                    if (pos + 1 >= romData.size) break
-                    val offset = (romData[pos].toInt() and 0xFF) or
+                    // Repeat (absolute address copy): copy `length` bytes from
+                    // absolute position in output buffer. Wraps if past current end.
+                    val addr = (romData[pos].toInt() and 0xFF) or
                         ((romData[pos + 1].toInt() and 0xFF) shl 8)
                     pos += 2
-                    for (i in 0 until length) {
-                        val srcIdx = offset + i
-                        if (srcIdx < output.size) {
-                            output.add(output[srcIdx])
-                        } else {
-                            output.add(0)
-                        }
-                    }
+                    copyFromOutput(dst, dstPos, addr, length) { it }
+                    dstPos += length
                 }
                 5 -> {
-                    // XOR dictionary copy
-                    if (pos + 1 >= romData.size) break
-                    val offset = (romData[pos].toInt() and 0xFF) or
+                    // XOR Repeat: same as cmd 4 but XOR each byte with 0xFF
+                    val addr = (romData[pos].toInt() and 0xFF) or
                         ((romData[pos + 1].toInt() and 0xFF) shl 8)
                     pos += 2
-                    for (i in 0 until length) {
-                        val srcIdx = offset + i
-                        if (srcIdx < output.size) {
-                            output.add((output[srcIdx].toInt() xor 0xFF).toByte())
-                        } else {
-                            output.add(0xFF.toByte())
-                        }
-                    }
+                    copyFromOutput(dst, dstPos, addr, length) { (it.toInt() xor 0xFF).toByte() }
+                    dstPos += length
                 }
                 6 -> {
-                    // Backwards dictionary copy
-                    if (pos + 1 >= romData.size) break
-                    val offset = (romData[pos].toInt() and 0xFF) or
-                        ((romData[pos + 1].toInt() and 0xFF) shl 8)
-                    pos += 2
-                    for (i in 0 until length) {
-                        val srcIdx = offset - i
-                        if (srcIdx >= 0 && srcIdx < output.size) {
-                            output.add(output[srcIdx])
-                        } else {
-                            output.add(0)
-                        }
-                    }
+                    // Negative Repeat (relative address copy): copy `length` bytes
+                    // from (current_position - offset) in output buffer.
+                    // Takes only 1 byte for the relative offset!
+                    val relOffset = romData[pos++].toInt() and 0xFF
+                    val srcAddr = dstPos - relOffset
+                    copyFromOutput(dst, dstPos, srcAddr, length) { it }
+                    dstPos += length
+                }
+                7 -> {
+                    // Extended cmd 7 = Negative XOR Repeat (relative + XOR 0xFF)
+                    val relOffset = romData[pos++].toInt() and 0xFF
+                    val srcAddr = dstPos - relOffset
+                    copyFromOutput(dst, dstPos, srcAddr, length) { (it.toInt() xor 0xFF).toByte() }
+                    dstPos += length
                 }
             }
             
-            // Safety limit
-            if (output.size > 0x20000) break  // 128KB max
+            if (dstPos >= dst.size) break // Safety
         }
         
-        return output.toByteArray()
+        return dst.copyOf(dstPos)
+    }
+    
+    /**
+     * Copy bytes from output buffer with wrap-around support.
+     * When the copy range extends past what has been written, bytes wrap
+     * (repeat from the start of the copied portion).
+     * Ported from aremath/sm_rando get_copy_bytes().
+     */
+    private fun copyFromOutput(
+        dst: ByteArray, dstPos: Int, srcAddr: Int, length: Int, 
+        transform: (Byte) -> Byte
+    ) {
+        // First pass: copy bytes that already exist in the output
+        var srcIdx = srcAddr
+        var written = 0
+        while (written < length && srcIdx < dstPos) {
+            if (srcIdx >= 0) {
+                dst[dstPos + written] = transform(dst[srcIdx])
+            } else {
+                dst[dstPos + written] = transform(0)
+            }
+            written++
+            srcIdx++
+        }
+        // Second pass: wrap-around — copy from what we just wrote
+        var wrapIdx = 0
+        while (written < length) {
+            dst[dstPos + written] = transform(dst[dstPos + wrapIdx])
+            written++
+            wrapIdx++
+        }
     }
     
     // ─── Utility ──────────────────────────────────────────────────────
