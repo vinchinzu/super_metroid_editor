@@ -5,12 +5,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
+import java.awt.event.MouseEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.rom.MapRenderer
 import com.supermetroid.editor.rom.RomParser
@@ -34,7 +39,7 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     SPEED("Speed/Treadmill", "~", 0xCC88CCFF),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun MapCanvas(
     room: RoomInfo?,
@@ -202,12 +207,50 @@ fun MapCanvas(
                                 compositeImage.toComposeImageBitmap()
                             }
                             
-                            // Scrollable + zoomable map
+                            // Scroll states for middle-click drag panning
+                            val hScrollState = rememberScrollState()
+                            val vScrollState = rememberScrollState()
+                            val coroutineScope = rememberCoroutineScope()
+                            var isDragging by remember { mutableStateOf(false) }
+                            var lastDragX by remember { mutableStateOf(0f) }
+                            var lastDragY by remember { mutableStateOf(0f) }
+                            
+                            // Scrollable + zoomable map with middle-click drag
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .horizontalScroll(rememberScrollState())
-                                    .verticalScroll(rememberScrollState())
+                                    .onPointerEvent(PointerEventType.Press) { event ->
+                                        // Middle mouse button = button index 2 in AWT
+                                        val nativeEvent = event.nativeEvent as? MouseEvent
+                                        if (nativeEvent != null && nativeEvent.button == MouseEvent.BUTTON2) {
+                                            isDragging = true
+                                            val pos = event.changes.first().position
+                                            lastDragX = pos.x
+                                            lastDragY = pos.y
+                                        }
+                                    }
+                                    .onPointerEvent(PointerEventType.Release) { event ->
+                                        val nativeEvent = event.nativeEvent as? MouseEvent
+                                        if (nativeEvent == null || nativeEvent.button == MouseEvent.BUTTON2) {
+                                            isDragging = false
+                                        }
+                                    }
+                                    .onPointerEvent(PointerEventType.Move) { event ->
+                                        if (isDragging) {
+                                            val pos = event.changes.first().position
+                                            val dx = lastDragX - pos.x
+                                            val dy = lastDragY - pos.y
+                                            lastDragX = pos.x
+                                            lastDragY = pos.y
+                                            
+                                            coroutineScope.launch {
+                                                hScrollState.scrollTo((hScrollState.value + dx.toInt()).coerceIn(0, hScrollState.maxValue))
+                                                vScrollState.scrollTo((vScrollState.value + dy.toInt()).coerceIn(0, vScrollState.maxValue))
+                                            }
+                                        }
+                                    }
+                                    .horizontalScroll(hScrollState)
+                                    .verticalScroll(vScrollState)
                             ) {
                                 Image(
                                     bitmap = bitmap,
