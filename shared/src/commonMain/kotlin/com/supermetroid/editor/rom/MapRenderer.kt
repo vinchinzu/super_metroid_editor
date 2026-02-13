@@ -74,6 +74,18 @@ class MapRenderer(private val romParser: RomParser) {
     
     /**
      * Render a room's level data to pixel data.
+     * 
+     * Decompressed level data format (from SMILE source):
+     *   Bytes 0-1:  Layer 1 size in bytes (16-bit LE) 
+     *   Bytes 2+:   Layer 1 tile data (2 bytes per 16x16 block)
+     *   Then:       BTS data (1 byte per block)
+     *   Then:       Layer 2 tile data (optional)
+     * 
+     * Each tile entry (2 bytes LE):
+     *   Bits 0-9:   Block/metatile index
+     *   Bit 10:     H-flip
+     *   Bit 11:     V-flip
+     *   Bits 12-15: Block type (collision)
      */
     fun renderRoom(room: Room): RoomRenderData? {
         if (room.levelDataPtr == 0) {
@@ -90,40 +102,42 @@ class MapRenderer(private val romParser: RomParser) {
             return renderGrid(room)
         }
         
+        if (levelData.size < 2) {
+            println("Room 0x${room.roomId.toString(16)}: decompressed data too small (${levelData.size} bytes)")
+            return renderGrid(room)
+        }
+        
+        // First 2 bytes = Layer 1 size header
+        val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
+        val tileDataStart = 2 // Tile data starts after 2-byte header
+        
         val blocksWide = room.width * BLOCKS_PER_SCREEN
         val blocksTall = room.height * BLOCKS_PER_SCREEN
-        val expectedSize = blocksWide * blocksTall * 2 // 2 bytes per block for Layer 1
+        val totalBlocks = blocksWide * blocksTall
+        val expectedLayer1Size = totalBlocks * 2
         
-        println("Room 0x${room.roomId.toString(16)}: decompressed ${levelData.size} bytes (expected Layer1=${expectedSize}, blocks=${blocksWide}x${blocksTall})")
+        println("Room 0x${room.roomId.toString(16)}: decompressed ${levelData.size} bytes, layer1Size=$layer1Size (expected=$expectedLayer1Size), blocks=${blocksWide}x${blocksTall}")
         
-        if (levelData.size < expectedSize) {
-            println("  Warning: decompressed data smaller than expected, rendering what we have")
-        }
+        // BTS data starts after Layer 1 tile data
+        val btsDataStart = tileDataStart + layer1Size
         
         // Parse block types and render
         val pixelWidth = blocksWide * BLOCK_SIZE
         val pixelHeight = blocksTall * BLOCK_SIZE
         val pixels = IntArray(pixelWidth * pixelHeight)
-        
-        // Fill with background
         pixels.fill(0xFF0A0A14.toInt())
         
-        // Parse Layer 1 tilemap and render each block
+        // Parse Layer 1 tilemap
         for (by in 0 until blocksTall) {
             for (bx in 0 until blocksWide) {
-                // Level data is stored screen-by-screen
-                // Within each screen, blocks go left-to-right, top-to-bottom
                 val screenX = bx / BLOCKS_PER_SCREEN
                 val screenY = by / BLOCKS_PER_SCREEN
                 val localX = bx % BLOCKS_PER_SCREEN
                 val localY = by % BLOCKS_PER_SCREEN
                 
-                // Screen index (left to right, top to bottom)
                 val screenIdx = screenY * room.width + screenX
-                // Block index within screen
                 val blockIdx = localY * BLOCKS_PER_SCREEN + localX
-                // Byte offset in level data
-                val dataOffset = (screenIdx * BLOCKS_PER_SCREEN * BLOCKS_PER_SCREEN + blockIdx) * 2
+                val dataOffset = tileDataStart + (screenIdx * BLOCKS_PER_SCREEN * BLOCKS_PER_SCREEN + blockIdx) * 2
                 
                 if (dataOffset + 1 >= levelData.size) continue
                 
@@ -132,11 +146,7 @@ class MapRenderer(private val romParser: RomParser) {
                 val blockWord = (hi shl 8) or lo
                 
                 val blockType = (blockWord shr 12) and 0x0F
-                val tileIndex = blockWord and 0x03FF
-                val hFlip = (blockWord shr 10) and 1
-                val vFlip = (blockWord shr 11) and 1
                 
-                // Choose color based on block type
                 val isChecker = (bx + by) % 2 == 0
                 val color = if (isChecker) {
                     blockTypeColors[blockType] ?: 0xFF0A0A14.toInt()
@@ -144,7 +154,6 @@ class MapRenderer(private val romParser: RomParser) {
                     blockTypeDarkColors[blockType] ?: 0xFF080810.toInt()
                 }
                 
-                // Draw block
                 drawBlock(pixels, pixelWidth, pixelHeight, bx * BLOCK_SIZE, by * BLOCK_SIZE, color)
             }
         }
