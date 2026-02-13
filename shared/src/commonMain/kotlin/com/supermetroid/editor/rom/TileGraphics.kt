@@ -46,15 +46,16 @@ class TileGraphics(private val romParser: RomParser) {
     
     // Cached data per tileset
     private var cachedTilesetId: Int = -1
-    private var tilePixels: Array<IntArray>? = null   // tile[tileIdx] = 64 ARGB pixels (8x8)
-    private var metatiles: Array<IntArray>? = null     // metatile[idx] = 4 sub-tile words
+    private var rawTileData: ByteArray? = null          // Combined 4bpp tile graphics (var + CRE)
+    private var metatiles: Array<IntArray>? = null       // metatile[idx] = 4 sub-tile words
+    private var cachedPalette: Array<IntArray>? = null   // 8 palettes × 16 ARGB colors
     
     /**
      * Load a complete tileset (graphics + tile table + palette).
      * Returns true if successful.
      */
     fun loadTileset(tilesetId: Int): Boolean {
-        if (tilesetId == cachedTilesetId && tilePixels != null) return true
+        if (tilesetId == cachedTilesetId && rawTileData != null) return true
         
         val romData = romParser.getRomData()
         
@@ -83,15 +84,19 @@ class TileGraphics(private val romParser: RomParser) {
         
         // Load palette
         val palettePC = romParser.snesToPc(palettePtr)
-        val palette = loadPalette(romData, palettePC)
+        cachedPalette = loadPalette(romData, palettePC)
         
-        // Combine tile tables: variable first, then CRE
-        // Each metatile entry = 8 bytes (4 × 16-bit SNES tilemap words)
+        // Combine tile tables: CRE first, then variable (from SMILE source)
         metatiles = parseTileTable(varTileTable, creTileTable)
         
-        // Combine tile graphics: variable (0-639) then CRE (640-1023)
-        // Decode 4bpp tiles to ARGB pixels using palette
-        tilePixels = decodeTileGraphics(varGfx, creGfx, palette)
+        // Combine tile graphics: variable at offset 0, CRE at offset 0x5000
+        // From SMILE DecompressTiles.vb:
+        //   CombineArrays VarTiles, CRETiles, SizeOfVarTiles, SizeOfCRETiles, &H0, &H5000, OutputArray
+        val combinedGfxSize = 0x5000 + creGfx.size
+        val combinedGfx = ByteArray(maxOf(combinedGfxSize, TOTAL_TILES * BYTES_PER_TILE))
+        System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, 0x5000))
+        System.arraycopy(creGfx, 0, combinedGfx, 0x5000, minOf(creGfx.size, combinedGfx.size - 0x5000))
+        rawTileData = combinedGfx
         
         cachedTilesetId = tilesetId
         return true
@@ -101,16 +106,29 @@ class TileGraphics(private val romParser: RomParser) {
      * Render a 16x16 metatile to an ARGB pixel array.
      * Returns 256 pixels (16x16) or null if index is invalid.
      */
+    /**
+     * Render a 16x16 metatile to an ARGB pixel array.
+     * Each metatile is 4 sub-tiles arranged: TL(0), TR(1), BL(2), BR(3).
+     * 
+     * SNES BG tilemap word format (per sub-tile):
+     *   VH0PPPTTTTTTTTTT
+     *   V = vertical flip (bit 15)
+     *   H = horizontal flip (bit 14)
+     *   0 = priority (bit 13, ignored for our purposes)
+     *   PPP = palette row (bits 10-12)
+     *   TTTTTTTTTT = tile number (bits 0-9)
+     */
     fun renderMetatile(metatileIndex: Int): IntArray? {
         val metas = metatiles ?: return null
-        val tiles = tilePixels ?: return null
+        val pal = cachedPalette ?: return null
+        if (rawTileData == null) return null
         
         if (metatileIndex < 0 || metatileIndex >= metas.size) return null
         
         val meta = metas[metatileIndex]
         val pixels = IntArray(16 * 16)
         
-        // 4 sub-tiles: TL, TR, BL, BR
+        // 4 sub-tiles: TL(0), TR(1), BL(2), BR(3)
         for (quadrant in 0..3) {
             val word = meta[quadrant]
             val tileNum = word and 0x03FF
@@ -118,11 +136,13 @@ class TileGraphics(private val romParser: RomParser) {
             val hFlip = (word shr 14) and 1
             val vFlip = (word shr 15) and 1
             
-            if (tileNum >= tiles.size) continue
-            val srcPixels = tiles[tileNum]
+            if (tileNum >= TOTAL_TILES) continue
             
             val baseX = if (quadrant % 2 == 0) 0 else 8
             val baseY = if (quadrant < 2) 0 else 8
+            
+            // Decode this 8x8 tile with its specific palette
+            val subTilePixels = decode4bppTileWithPalette(tileNum, pal, paletteIdx)
             
             for (py in 0 until 8) {
                 for (px in 0 until 8) {
@@ -130,7 +150,7 @@ class TileGraphics(private val romParser: RomParser) {
                     val sy = if (vFlip != 0) 7 - py else py
                     val srcIdx = sy * 8 + sx
                     val dstIdx = (baseY + py) * 16 + (baseX + px)
-                    pixels[dstIdx] = srcPixels[srcIdx]
+                    pixels[dstIdx] = subTilePixels[srcIdx]
                 }
             }
         }
@@ -142,84 +162,50 @@ class TileGraphics(private val romParser: RomParser) {
     
     /**
      * Parse metatile table from decompressed tile table data.
-     * Variable tile table entries come first, CRE entries fill the rest.
+     * 
+     * From SMILE DecompressTtable.vb:
+     *   CombineArrays CRETtable, VarTtable, SizeOfCRETtable, SizeOfVarTtable, &H0, SizeOfCRETtable, OutputArray
+     * 
+     * This means: CRE tile table FIRST (at offset 0), then Variable tile table AFTER.
      * Each entry = 8 bytes = 4 × 16-bit LE words (TL, TR, BL, BR).
      */
     private fun parseTileTable(varTable: ByteArray, creTable: ByteArray): Array<IntArray> {
-        val result = Array(METATILE_COUNT) { IntArray(4) }
+        // Combine: CRE first, then Variable
+        val creSize = creTable.size
+        val combined = ByteArray(creSize + varTable.size)
+        System.arraycopy(creTable, 0, combined, 0, creSize)
+        System.arraycopy(varTable, 0, combined, creSize, varTable.size)
         
-        // Variable metatiles from decompressed var tile table
-        val varCount = minOf(varTable.size / 8, METATILE_COUNT)
-        for (i in 0 until varCount) {
+        val result = Array(METATILE_COUNT) { IntArray(4) }
+        val entryCount = minOf(combined.size / 8, METATILE_COUNT)
+        
+        for (i in 0 until entryCount) {
             val offset = i * 8
             for (q in 0..3) {
-                val lo = varTable[offset + q * 2].toInt() and 0xFF
-                val hi = varTable[offset + q * 2 + 1].toInt() and 0xFF
+                val lo = combined[offset + q * 2].toInt() and 0xFF
+                val hi = combined[offset + q * 2 + 1].toInt() and 0xFF
                 result[i][q] = (hi shl 8) or lo
             }
         }
         
-        // CRE metatiles fill from the CRE table (combined after variable)
-        // In SMILE: CRE tile table is placed after variable tile table
-        val creMetaCount = minOf(creTable.size / 8, METATILE_COUNT)
-        val creStartIdx = varCount
-        for (i in 0 until creMetaCount) {
-            val destIdx = creStartIdx + i
-            if (destIdx >= METATILE_COUNT) break
-            val offset = i * 8
-            for (q in 0..3) {
-                val lo = creTable[offset + q * 2].toInt() and 0xFF
-                val hi = creTable[offset + q * 2 + 1].toInt() and 0xFF
-                result[destIdx][q] = (hi shl 8) or lo
-            }
-        }
-        
         return result
     }
     
     /**
-     * Decode 4bpp SNES tile graphics to ARGB pixel arrays.
-     * Variable graphics fill tiles 0-639, CRE fills 640-1023.
-     */
-    private fun decodeTileGraphics(
-        varGfx: ByteArray, creGfx: ByteArray, palette: Array<IntArray>
-    ): Array<IntArray> {
-        val result = Array(TOTAL_TILES) { IntArray(64) } // 64 pixels per 8x8 tile
-        
-        // Decode variable tiles (0-639)
-        val varTileCount = minOf(varGfx.size / BYTES_PER_TILE, VARIABLE_TILE_COUNT)
-        for (i in 0 until varTileCount) {
-            result[i] = decode4bppTile(varGfx, i * BYTES_PER_TILE, palette, 0)
-        }
-        
-        // Decode CRE tiles (640-1023)
-        val creTileCount = minOf(creGfx.size / BYTES_PER_TILE, TOTAL_TILES - CRE_TILE_START)
-        for (i in 0 until creTileCount) {
-            result[CRE_TILE_START + i] = decode4bppTile(creGfx, i * BYTES_PER_TILE, palette, 0)
-        }
-        
-        return result
-    }
-    
-    /**
-     * Decode a single 8x8 SNES 4bpp planar tile to 64 ARGB pixels.
+     * Decode a single 8x8 SNES 4bpp planar tile with a specific palette.
      * 
      * SNES 4bpp format (32 bytes per tile):
      *   Bytes 0-15: Bitplanes 0 & 1 interleaved (row 0: bytes 0,1; row 1: bytes 2,3; ...)
      *   Bytes 16-31: Bitplanes 2 & 3 interleaved (row 0: bytes 16,17; row 1: bytes 18,19; ...)
-     * 
-     * For pixel at (x, y): color index bits come from:
-     *   bit 0: byte[y*2]     bit (7-x)
-     *   bit 1: byte[y*2+1]   bit (7-x)
-     *   bit 2: byte[y*2+16]  bit (7-x)
-     *   bit 3: byte[y*2+17]  bit (7-x)
      */
-    private fun decode4bppTile(
-        data: ByteArray, offset: Int, palette: Array<IntArray>, paletteIdx: Int
-    ): IntArray {
+    private fun decode4bppTileWithPalette(tileNum: Int, palette: Array<IntArray>, paletteIdx: Int): IntArray {
         val pixels = IntArray(64)
+        val data = rawTileData ?: return pixels
+        val offset = tileNum * BYTES_PER_TILE
         
         if (offset + 32 > data.size) return pixels
+        
+        val palIdx = minOf(paletteIdx, palette.size - 1)
         
         for (y in 0 until 8) {
             val bp0 = data[offset + y * 2].toInt() and 0xFF
@@ -236,9 +222,8 @@ class TileGraphics(private val romParser: RomParser) {
                 
                 // Color index 0 = transparent
                 if (colorIdx == 0) {
-                    pixels[y * 8 + x] = 0x00000000 // Transparent
+                    pixels[y * 8 + x] = 0x00000000
                 } else {
-                    val palIdx = minOf(paletteIdx, palette.size - 1)
                     pixels[y * 8 + x] = palette[palIdx][colorIdx]
                 }
             }
