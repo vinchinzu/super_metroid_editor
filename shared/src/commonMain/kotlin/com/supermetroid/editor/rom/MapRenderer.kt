@@ -127,35 +127,35 @@ class MapRenderer(private val romParser: RomParser) {
         val pixels = IntArray(pixelWidth * pixelHeight)
         pixels.fill(0xFF0A0A14.toInt())
         
-        // Parse Layer 1 tilemap
-        for (by in 0 until blocksTall) {
-            for (bx in 0 until blocksWide) {
-                val screenX = bx / BLOCKS_PER_SCREEN
-                val screenY = by / BLOCKS_PER_SCREEN
-                val localX = bx % BLOCKS_PER_SCREEN
-                val localY = by % BLOCKS_PER_SCREEN
-                
-                val screenIdx = screenY * room.width + screenX
-                val blockIdx = localY * BLOCKS_PER_SCREEN + localX
-                val dataOffset = tileDataStart + (screenIdx * BLOCKS_PER_SCREEN * BLOCKS_PER_SCREEN + blockIdx) * 2
-                
-                if (dataOffset + 1 >= levelData.size) continue
-                
-                val lo = levelData[dataOffset].toInt() and 0xFF
-                val hi = levelData[dataOffset + 1].toInt() and 0xFF
-                val blockWord = (hi shl 8) or lo
-                
-                val blockType = (blockWord shr 12) and 0x0F
-                
-                val isChecker = (bx + by) % 2 == 0
-                val color = if (isChecker) {
-                    blockTypeColors[blockType] ?: 0xFF0A0A14.toInt()
-                } else {
-                    blockTypeDarkColors[blockType] ?: 0xFF080810.toInt()
-                }
-                
-                drawBlock(pixels, pixelWidth, pixelHeight, bx * BLOCK_SIZE, by * BLOCK_SIZE, color)
+        // Parse Layer 1 tilemap.
+        // After decompression, tiles are stored as a flat row-major array:
+        //   tile[0] = block (0,0), tile[1] = block (1,0), ...
+        //   tile[blocksWide] = block (0,1), etc.
+        // This goes across the FULL room width (all screens), NOT screen-by-screen.
+        // (Verified against SMILE source: it reads tiles linearly then maps using
+        //  pixelX = (index * 16) % (width * 256), pixelY = (index * 16) / (width * 256) * 16)
+        for (tileIdx in 0 until totalBlocks) {
+            val dataOffset = tileDataStart + tileIdx * 2
+            if (dataOffset + 1 >= levelData.size) break
+            
+            val lo = levelData[dataOffset].toInt() and 0xFF
+            val hi = levelData[dataOffset + 1].toInt() and 0xFF
+            val blockWord = (hi shl 8) or lo
+            
+            val blockType = (blockWord shr 12) and 0x0F
+            
+            // Row-major layout: x = index % width, y = index / width
+            val bx = tileIdx % blocksWide
+            val by = tileIdx / blocksWide
+            
+            val isChecker = (bx + by) % 2 == 0
+            val color = if (isChecker) {
+                blockTypeColors[blockType] ?: 0xFF0A0A14.toInt()
+            } else {
+                blockTypeDarkColors[blockType] ?: 0xFF080810.toInt()
             }
+            
+            drawBlock(pixels, pixelWidth, pixelHeight, bx * BLOCK_SIZE, by * BLOCK_SIZE, color)
         }
         
         // Draw screen boundary grid lines
