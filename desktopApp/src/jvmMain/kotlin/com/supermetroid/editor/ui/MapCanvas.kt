@@ -62,31 +62,19 @@ fun MapCanvas(
                                 val roomHeader = romParser.readRoomHeader(roomId)
                                 
                                 if (roomHeader != null) {
-                                    println("Found room header: Index=${roomHeader.index}, Area=${roomHeader.area}, Size=${roomHeader.width}x${roomHeader.height}")
-                                    println("  bgData=0x${(0x8F0000 + roomHeader.bgData).toString(16)}, roomState=0x${(0x8F0000 + roomHeader.roomState).toString(16)}")
+                                    println("Found room: ${room.name} — Index=${roomHeader.index}, Area=${roomHeader.area}, Size=${roomHeader.width}x${roomHeader.height}")
                                     
                                     val mapRenderer = MapRenderer(romParser)
                                     val result = mapRenderer.renderRoom(roomHeader)
                                     renderResult = result
                                     
                                     if (result == null) {
-                                        errorMessage = "Failed to render room map"
-                                        println("  Map rendering failed")
+                                        errorMessage = "Failed to render room map (${roomHeader.width}x${roomHeader.height} screens)"
                                     } else {
                                         println("  Map rendered: ${result.width}x${result.height} pixels")
                                     }
                                 } else {
                                     errorMessage = "Room header not found in ROM for ID 0x${roomId.toString(16)}"
-                                    println("  Room header NOT FOUND")
-                                    
-                                    // Debug: try to list some rooms
-                                    val matcher = com.supermetroid.editor.rom.RoomMatcher(romParser)
-                                    val allRooms = matcher.getAllRooms()
-                                    println("  Total rooms found in ROM: ${allRooms.size}")
-                                    if (allRooms.isNotEmpty()) {
-                                        val firstRoom = allRooms.first()
-                                        println("  First room: Index=${firstRoom.index}, Area=${firstRoom.area}, bgData=0x${(0x8F0000 + firstRoom.bgData).toString(16)}")
-                                    }
                                 }
                             } catch (e: Exception) {
                                 errorMessage = "Error: ${e.message}"

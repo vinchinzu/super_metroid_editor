@@ -8,10 +8,15 @@ import java.nio.ByteOrder
  * Parser for Super Metroid ROM files (.smc format)
  * 
  * Super Metroid ROM structure:
- * - Header: 0x200 bytes (512 bytes) if present (SMC format)
- * - ROM data starts at 0x000000 or 0x000200 depending on header
- * - Room headers table starts at 0x8F0000 (SNES address)
- * - Each room header is 38 bytes
+ * - Optional SMC header: 0x200 bytes (512 bytes) 
+ * - ROM data: 3MB (0x300000 bytes)
+ * - LoROM mapping (mode byte 0x30 at internal header offset $7FD5)
+ * 
+ * Room IDs (e.g., 0x91F8 for Landing Site) are 16-bit pointers within
+ * SNES bank $8F. Each room header lives at SNES address $8F:<roomId>.
+ * 
+ * LoROM SNES-to-PC conversion:
+ *   PC offset = ((bank & 0x7F) * 0x8000) + (address - 0x8000)
  */
 class RomParser(private val romData: ByteArray) {
     private val hasHeader: Boolean
@@ -21,372 +26,206 @@ class RomParser(private val romData: ByteArray) {
         get() = if (hasHeader) 0x200 else 0x0
     
     /**
-     * Convert SNES address to PC offset
-     * SNES addresses are in bank:address format (e.g., 0x8F0000)
+     * Convert SNES address to PC offset using LoROM mapping.
+     * 
+     * LoROM: banks $00-$7F and $80-$FF, addresses $8000-$FFFF map to ROM.
+     * PC offset = ((bank & 0x7F) * 0x8000) + (address & 0x7FFF)
      */
     fun snesToPc(snesAddress: Int): Int {
         val bank = (snesAddress shr 16) and 0xFF
         val address = snesAddress and 0xFFFF
         
-        // For banks 0x80-0xFF, subtract 0x800000
-        val pcAddress = if (bank >= 0x80) {
-            (bank - 0x80) * 0x10000 + address
-        } else {
-            bank * 0x10000 + address
-        }
+        // LoROM mapping
+        val pcAddress = ((bank and 0x7F) * 0x8000) + (address and 0x7FFF)
         
         return romStartOffset + pcAddress
     }
     
     /**
-     * Search for room headers table by scanning ROM for valid room headers
-     * Returns the PC offset where valid room headers start
+     * Convert a 16-bit room ID to a PC file offset.
+     * Room IDs are pointers within SNES bank $8F.
+     * Full SNES address = $8F:<roomId>
      */
-    private fun findRoomHeadersTable(): Int? {
-        // Search for a sequence of valid room headers (allowing some gaps for unused slots)
-        // A valid room header has: width > 0 && width <= 16 && height > 0 && height <= 16
-        val minValidRooms = 3  // Need at least 3 valid rooms
-        val maxGaps = 2  // Allow up to 2 invalid rooms between valid ones
-        
-        for (startOffset in 0 until romData.size - (200 * 38) step 38) {
-            var validCount = 0
-            var gapCount = 0
-            
-            for (i in 0 until 200) {  // Check up to 200 room slots
-                val offset = startOffset + (i * 38)
-                if (offset + 5 >= romData.size) break
-                
-                val width = romData[offset + 4].toInt() and 0xFF
-                val height = romData[offset + 5].toInt() and 0xFF
-                
-                if (width > 0 && width <= 16 && height > 0 && height <= 16) {
-                    validCount++
-                    gapCount = 0  // Reset gap counter on valid room
-                    
-                    if (validCount >= minValidRooms) {
-                        println("Found room headers table at PC offset: 0x${startOffset.toString(16)} (found $validCount valid rooms so far)")
-                        return startOffset
-                    }
-                } else {
-                    gapCount++
-                    // If we hit too many gaps early, this isn't the table
-                    if (validCount == 0 && gapCount > 5) {
-                        break
-                    }
-                    // If we have some valid rooms but hit too many gaps, might still be valid
-                    if (validCount > 0 && gapCount > maxGaps) {
-                        break
-                    }
-                }
-            }
-        }
-        
-        // Fallback: try known locations from test output
-        val knownLocations = listOf(0x1f06, 0x153a, 0x1ee0)
-        for (loc in knownLocations) {
-            if (loc + 38 < romData.size) {
-                val width = romData[loc + 4].toInt() and 0xFF
-                val height = romData[loc + 5].toInt() and 0xFF
-                if (width > 0 && width <= 16 && height > 0 && height <= 16) {
-                    println("Using fallback room headers table location: 0x${loc.toString(16)}")
-                    return loc
-                }
-            }
-        }
-        
-        return null
+    fun roomIdToPc(roomId: Int): Int {
+        val snesAddress = 0x8F0000 or (roomId and 0xFFFF)
+        return snesToPc(snesAddress)
     }
     
     /**
-     * Build a lookup table of all rooms for faster matching
-     * Returns a map of room index to Room
+     * Read a room header directly from ROM using the room ID.
+     * 
+     * Room IDs (like 0x91F8) are offsets within SNES bank $8F.
+     * The room header is at SNES address $8F:<roomId>.
+     * 
+     * Room header format (from Metroid Construction wiki):
+     *   Byte 0:    Room index
+     *   Byte 1:    Area (0=Crateria, 1=Brinstar, 2=Norfair, 3=Wrecked Ship, 4=Maridia, 5=Tourian, 6=Ceres)
+     *   Byte 2:    Map X position
+     *   Byte 3:    Map Y position
+     *   Byte 4:    Width (in screens)
+     *   Byte 5:    Height (in screens)
+     *   Byte 6:    Up scroller
+     *   Byte 7:    Down scroller
+     *   Byte 8:    CRE bitflag / special graphics
+     *   Bytes 9-10: Door out pointer (16-bit LE)
+     *   Bytes 11+:  Room state entries (variable length)
      */
-    fun buildRoomLookupTable(): Map<Int, Room> {
-        // Try to find the actual room headers table location
-        val roomHeadersTableOffset = findRoomHeadersTable() ?: snesToPc(0x8F0000)
-        val maxRooms = 200
-        val rooms = mutableMapOf<Int, Room>()
+    fun readRoomHeader(roomId: Int): Room? {
+        val pcOffset = roomIdToPc(roomId)
         
-        for (i in 0 until maxRooms) {
-            val headerOffset = roomHeadersTableOffset + (i * 38)
-            if (headerOffset < 0 || headerOffset + 38 > romData.size) {
-                break
-            }
-            
-            val room = readRoomHeaderAtOffset(headerOffset, i)
-            if (room != null) {
-                rooms[i] = room
-            }
-        }
-        
-        return rooms
-    }
-    
-    /**
-     * Read room header at a specific PC offset
-     */
-    private fun readRoomHeaderAtOffset(headerOffset: Int, roomIndex: Int): Room? {
-        if (headerOffset < 0 || headerOffset + 38 > romData.size) {
+        // Bounds check — need at least 11 bytes for the fixed header
+        if (pcOffset < 0 || pcOffset + 11 > romData.size) {
+            println("Room 0x${roomId.toString(16)}: PC offset 0x${pcOffset.toString(16)} out of bounds")
             return null
         }
         
-        val buffer = ByteBuffer.wrap(romData, headerOffset, 38)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        
-        if (buffer.remaining() < 38) {
-            return null
-        }
-        
-        try {
-            val index = buffer.get().toInt() and 0xFF
-            val area = buffer.get().toInt() and 0xFF
-            val mapX = buffer.get().toInt() and 0xFF
-            val mapY = buffer.get().toInt() and 0xFF
-            val width = buffer.get().toInt() and 0xFF
-            val height = buffer.get().toInt() and 0xFF
+        return try {
+            val index = romData[pcOffset].toInt() and 0xFF
+            val area = romData[pcOffset + 1].toInt() and 0xFF
+            val mapX = romData[pcOffset + 2].toInt() and 0xFF
+            val mapY = romData[pcOffset + 3].toInt() and 0xFF
+            val width = romData[pcOffset + 4].toInt() and 0xFF
+            val height = romData[pcOffset + 5].toInt() and 0xFF
+            val upScroller = romData[pcOffset + 6].toInt() and 0xFF
+            val downScroller = romData[pcOffset + 7].toInt() and 0xFF
+            val creBitflag = romData[pcOffset + 8].toInt() and 0xFF
+            val doorOut = readUInt16At(pcOffset + 9)
             
-            // Validate room data
+            // Validate basic room properties
             if (width == 0 || height == 0 || width > 16 || height > 16) {
+                println("Room 0x${roomId.toString(16)}: invalid dimensions ${width}x${height}")
+                return null
+            }
+            if (area > 6) {
+                println("Room 0x${roomId.toString(16)}: invalid area $area")
                 return null
             }
             
-            val scrollX = buffer.get().toInt() and 0xFF
-            val scrollY = buffer.get().toInt() and 0xFF
-            val specialGfxBitflag = buffer.get().toInt() and 0xFF
+            // Parse the first room state to get level data pointer and other info.
+            // Room states start at pcOffset + 11 (after the door out pointer).
+            // The state list ends with the default state (condition $E5E6).
+            // Each state has: condition (2 bytes) + pointer (2 bytes) + optional args.
+            // The default state ($E5E6) is followed directly by the state data (26 bytes).
+            val stateDataOffset = findDefaultStateData(pcOffset + 11)
             
-            // Read 16-bit unsigned values properly
-            fun readUInt16(): Int {
-                val low = buffer.get().toInt() and 0xFF
-                val high = buffer.get().toInt() and 0xFF
-                return (high shl 8) or low  // Little-endian
+            // State data format (26 bytes):
+            //   Bytes 0-2:  Level data pointer (3 bytes, 24-bit SNES address)
+            //   Byte 3:     Tileset
+            //   Byte 4:     Music data
+            //   Byte 5:     Music track
+            //   Bytes 6-7:  FX pointer
+            //   Bytes 8-9:  Enemy set pointer
+            //   Bytes 10-11: Enemy GFX pointer
+            //   Bytes 12-13: Background scrolling
+            //   Bytes 14-15: Room scrolls pointer
+            //   Bytes 16-17: X-ray / unused
+            //   Bytes 18-19: Main ASM pointer
+            //   Bytes 20-21: PLM set pointer
+            //   Bytes 22-23: BG data pointer
+            //   Bytes 24-25: Setup ASM pointer
+            
+            var levelDataPtr = 0
+            var tileset = 0
+            var mainAsm = 0
+            var plmSet = 0
+            var bgData = 0
+            var setupAsm = 0
+            
+            if (stateDataOffset != null && stateDataOffset + 26 <= romData.size) {
+                // 3-byte level data pointer (little-endian)
+                levelDataPtr = (romData[stateDataOffset].toInt() and 0xFF) or
+                    ((romData[stateDataOffset + 1].toInt() and 0xFF) shl 8) or
+                    ((romData[stateDataOffset + 2].toInt() and 0xFF) shl 16)
+                tileset = romData[stateDataOffset + 3].toInt() and 0xFF
+                mainAsm = readUInt16At(stateDataOffset + 18)
+                plmSet = readUInt16At(stateDataOffset + 20)
+                bgData = readUInt16At(stateDataOffset + 22)
+                setupAsm = readUInt16At(stateDataOffset + 24)
             }
             
-            val doors = readUInt16()
-            val roomState = readUInt16()
-            val roomDown = readUInt16()
-            val roomUp = readUInt16()
-            val roomLeft = readUInt16()
-            val roomRight = readUInt16()
-            val roomDownScroll = readUInt16()
-            val roomUpScroll = readUInt16()
-            val roomLeftScroll = readUInt16()
-            val roomRightScroll = readUInt16()
-            val unused1 = readUInt16()
-            val mainAsm = readUInt16()
-            val plmSet = readUInt16()
-            val bgData = readUInt16()
-            val roomSetupAsm = readUInt16()
-            
-            return Room(
-                roomId = 0, // Unknown, will be set by matcher
-                name = "Room Index $roomIndex",
-                handle = "room_index_$roomIndex",
+            Room(
+                roomId = roomId,
+                name = "Room 0x${roomId.toString(16)}",
+                handle = "room_${roomId.toString(16)}",
                 index = index,
                 area = area,
                 mapX = mapX,
                 mapY = mapY,
                 width = width,
                 height = height,
-                scrollX = scrollX,
-                scrollY = scrollY,
-                specialGfxBitflag = specialGfxBitflag,
-                doors = doors,
-                roomState = roomState,
-                roomDown = roomDown,
-                roomUp = roomUp,
-                roomLeft = roomLeft,
-                roomRight = roomRight,
-                roomDownScroll = roomDownScroll,
-                roomUpScroll = roomUpScroll,
-                roomLeftScroll = roomLeftScroll,
-                roomRightScroll = roomRightScroll,
-                unused1 = unused1,
+                scrollX = upScroller,
+                scrollY = downScroller,
+                specialGfxBitflag = creBitflag,
+                doors = doorOut,
+                roomState = 0,      // Not a single field in the real format
+                roomDown = 0,
+                roomUp = 0,
+                roomLeft = 0,
+                roomRight = 0,
+                roomDownScroll = 0,
+                roomUpScroll = 0,
+                roomLeftScroll = 0,
+                roomRightScroll = 0,
+                unused1 = 0,
                 mainAsm = mainAsm,
                 plmSet = plmSet,
                 bgData = bgData,
-                roomSetupAsm = roomSetupAsm
+                roomSetupAsm = setupAsm
             )
         } catch (e: Exception) {
-            return null
+            println("Room 0x${roomId.toString(16)}: exception ${e.message}")
+            null
         }
     }
     
     /**
-     * Read a room header from the ROM by room ID (SNES address)
-     * Room headers table starts at 0x8F0000
-     * Each room header is 38 bytes
-     * 
-     * Room IDs in the JSON (like 0x91F8) are SNES addresses.
-     * These might correspond to:
-     * 1. The room's level data address (bgData pointer)
-     * 2. The room's state data address (roomState pointer)
-     * 3. A room index in a lookup table
-     * 
-     * We try multiple matching strategies.
+     * Find the default room state data offset.
+     * Starting from the first state entry after the door out pointer,
+     * scan for the $E5E6 marker which indicates the default state.
+     * The state data immediately follows the marker.
      */
-    fun readRoomHeader(roomId: Int): Room? {
-        val roomHeadersTableOffset = snesToPc(0x8F0000)
-        val maxRooms = 200 // Approximate max rooms
+    private fun findDefaultStateData(stateListOffset: Int): Int? {
+        var offset = stateListOffset
+        val maxScan = 100  // Don't scan more than 100 bytes
         
-        // Convert roomId (SNES address) to a relative offset for comparison
-        // Room IDs are typically in bank 0x91-0xDF range
-        val roomIdBank = (roomId shr 16) and 0xFF
-        val roomIdAddress = roomId and 0xFFFF
-        
-        for (i in 0 until maxRooms) {
-            val headerOffset = roomHeadersTableOffset + (i * 38)
+        while (offset + 2 < romData.size && offset < stateListOffset + maxScan) {
+            val word = readUInt16At(offset)
             
-            // Check bounds before reading
-            if (headerOffset < 0 || headerOffset + 38 > romData.size) {
-                break
+            if (word == 0xE5E6) {
+                // Default state — state data follows immediately
+                return offset + 2
             }
             
-            val buffer = ByteBuffer.wrap(romData, headerOffset, 38)
-            buffer.order(ByteOrder.LITTLE_ENDIAN)
+            // Each non-default state entry:
+            //   $E5EB: 2 bytes condition + 2 bytes event param + 2 bytes state ptr = 6 bytes
+            //   $E5FF: 2 bytes condition + 2 bytes state ptr = 4 bytes  
+            //   $E612: 2 bytes condition + 2 bytes state ptr = 4 bytes
+            //   $E629: 2 bytes condition + 2 bytes state ptr = 4 bytes
+            //   Others: typically 2 bytes condition + 2 bytes state ptr = 4 bytes
+            // Most state entries are 4 bytes (condition + pointer)
+            // But some take extra args. We check for known multi-byte conditions.
             
-            // Check if buffer has remaining bytes before reading
-            if (buffer.remaining() < 38) {
-                continue
-            }
-            
-            try {
-                // Read header fields
-                val index = buffer.get().toInt() and 0xFF
-                val area = buffer.get().toInt() and 0xFF
-                val mapX = buffer.get().toInt() and 0xFF
-                val mapY = buffer.get().toInt() and 0xFF
-                val width = buffer.get().toInt() and 0xFF
-                val height = buffer.get().toInt() and 0xFF
-                val scrollX = buffer.get().toInt() and 0xFF
-                val scrollY = buffer.get().toInt() and 0xFF
-                val specialGfxBitflag = buffer.get().toInt() and 0xFF
-                
-                // Read 16-bit unsigned values properly
-                // Read bytes directly to avoid signed short issues
-                fun readUInt16(): Int {
-                    val low = buffer.get().toInt() and 0xFF
-                    val high = buffer.get().toInt() and 0xFF
-                    return (high shl 8) or low  // Little-endian
-                }
-                
-                val doors = readUInt16()
-                val roomState = readUInt16()
-                val roomDown = readUInt16()
-                val roomUp = readUInt16()
-                val roomLeft = readUInt16()
-                val roomRight = readUInt16()
-                val roomDownScroll = readUInt16()
-                val roomUpScroll = readUInt16()
-                val roomLeftScroll = readUInt16()
-                val roomRightScroll = readUInt16()
-                val unused1 = readUInt16()
-                val mainAsm = readUInt16()
-                val plmSet = readUInt16()
-                val bgData = readUInt16()
-                val roomSetupAsm = readUInt16()
-                
-                // Validate room data - skip invalid rooms
-                if (width == 0 || height == 0 || width > 16 || height > 16) {
-                    continue
-                }
-                
-                // Match room by checking various pointers
-                // Room IDs are SNES addresses (e.g., 0x91F8 = bank 0x91, address 0xF8)
-                // We need to check if any room pointer matches the room ID
-                
-                // Calculate full SNES addresses for pointers (they're relative to bank 0x8F)
-                val bgDataFull = 0x8F0000 + bgData
-                val roomStateFull = 0x8F0000 + roomState
-                val doorsFull = 0x8F0000 + doors
-                
-                // Also check room direction pointers
-                val roomDownFull = 0x8F0000 + roomDown
-                val roomUpFull = 0x8F0000 + roomUp
-                val roomLeftFull = 0x8F0000 + roomLeft
-                val roomRightFull = 0x8F0000 + roomRight
-                
-                // Strategy 1: Direct pointer matches
-                val directMatch = when (roomId) {
-                    bgDataFull, roomStateFull, doorsFull, 
-                    roomDownFull, roomUpFull, roomLeftFull, roomRightFull -> true
-                    else -> false
-                }
-                
-                // Strategy 2: Room ID might be the actual level data address
-                // Check if bgData points to roomId (bgData is relative to 0x8F0000)
-                // Room IDs like 0x91F8 are in bank 0x91, which is level data bank
-                val levelDataMatch = if (roomIdBank >= 0x91 && roomIdBank <= 0xDF) {
-                    // Convert roomId to PC address to compare with bgData
-                    val roomIdPc = snesToPc(roomId)
-                    val bgDataPc = snesToPc(bgDataFull)
-                    val diff = kotlin.math.abs(bgDataPc - roomIdPc)
-                    diff < 0x2000 // Within 8KB (level data can be large)
-                } else {
-                    false
-                }
-                
-                // Strategy 3: Room ID might be an index into the room table
-                // Some room IDs might actually be indices (0-199)
-                val indexMatch = roomId < 200 && roomId == i
-                
-                val matches = directMatch || levelDataMatch || indexMatch
-                
-                if (matches) {
-                    return Room(
-                        roomId = roomId,
-                        name = "Room $roomId",
-                        handle = "room_$roomId",
-                        index = index,
-                        area = area,
-                        mapX = mapX,
-                        mapY = mapY,
-                        width = width,
-                        height = height,
-                        scrollX = scrollX,
-                        scrollY = scrollY,
-                        specialGfxBitflag = specialGfxBitflag,
-                        doors = doors,
-                        roomState = roomState,
-                        roomDown = roomDown,
-                        roomUp = roomUp,
-                        roomLeft = roomLeft,
-                        roomRight = roomRight,
-                        roomDownScroll = roomDownScroll,
-                        roomUpScroll = roomUpScroll,
-                        roomLeftScroll = roomLeftScroll,
-                        roomRightScroll = roomRightScroll,
-                        unused1 = unused1,
-                        mainAsm = mainAsm,
-                        plmSet = plmSet,
-                        bgData = bgData,
-                        roomSetupAsm = roomSetupAsm
-                    )
-                }
-            } catch (e: java.nio.BufferUnderflowException) {
-                // Skip this room if we can't read it
-                continue
+            when (word) {
+                0xE5EB -> offset += 6   // Event state: condition(2) + event(2) + ptr(2)
+                0xE612 -> offset += 4   // Boss state: condition(2) + ptr(2)
+                0xE629 -> offset += 4   // Morph state: condition(2) + ptr(2)
+                0xE5FF -> offset += 4   // Powerbomb state: condition(2) + ptr(2)
+                else -> offset += 4     // Unknown state type, assume 4 bytes
             }
         }
         
-        // If no match found, try using RoomMatcher for better matching
-        val matcher = RoomMatcher(this)
-        return matcher.findRoomById(roomId)
+        // Didn't find $E5E6, try treating bytes at stateListOffset as state data directly
+        // (some rooms may have the default state first)
+        return null
     }
     
     /**
-     * Read room header by index (for fallback/debugging)
+     * Read an unsigned 16-bit little-endian value at the given PC offset.
      */
-    fun readRoomHeaderByIndex(roomIndex: Int): Room? {
-        // Try to find the actual table location first
-        val roomHeadersTableOffset = findRoomHeadersTable() ?: snesToPc(0x8F0000)
-        val headerOffset = roomHeadersTableOffset + (roomIndex * 38)
-        
-        if (headerOffset < 0 || headerOffset + 38 > romData.size) {
-            return null
-        }
-        
-        // Use the shared readRoomHeaderAtOffset method
-        return readRoomHeaderAtOffset(headerOffset, roomIndex)
+    private fun readUInt16At(offset: Int): Int {
+        val lo = romData[offset].toInt() and 0xFF
+        val hi = romData[offset + 1].toInt() and 0xFF
+        return (hi shl 8) or lo
     }
     
     /**
