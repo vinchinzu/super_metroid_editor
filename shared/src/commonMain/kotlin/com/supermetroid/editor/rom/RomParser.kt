@@ -238,23 +238,6 @@ class RomParser(private val romData: ByteArray) {
             val header = romData[pos].toInt() and 0xFF
             pos++
             
-            // Check for end-of-chunk marker (0xFF).
-            // 0xFF is a single-byte marker — do NOT consume the next byte.
-            // If we haven't decompressed enough data, skip it and continue
-            // with the next compressed chunk.
-            if (header == 0xFF) {
-                if (output.size >= 2) {
-                    val expectedSize = (output[0].toInt() and 0xFF) or 
-                        ((output[1].toInt() and 0xFF) shl 8)
-                    val minExpected = 2 + expectedSize
-                    if (output.size < minExpected) {
-                        // Not done yet — continue with next chunk
-                        continue
-                    }
-                }
-                break  // We have enough data
-            }
-            
             var cmdType = (header shr 5) and 0x07
             var length: Int
             
@@ -270,6 +253,25 @@ class RomParser(private val romData: ByteArray) {
                 pos++
                 length = ((header and 0x03) shl 8) or byte2
                 length += 1
+                
+                // cmdType 7 in extended mode = potential end marker
+                if (cmdType == 7) {
+                    // Check if we've decompressed enough data.
+                    // The first 2 bytes of output are a size header.
+                    // If we haven't reached that size yet, this 0xFF might
+                    // be a chunk boundary — skip it and continue.
+                    if (output.size >= 2) {
+                        val expectedSize = (output[0].toInt() and 0xFF) or 
+                            ((output[1].toInt() and 0xFF) shl 8)
+                        // Need: 2 (header) + expectedSize (Layer1) + expectedSize/2 (BTS)
+                        val minExpected = 2 + expectedSize
+                        if (output.size < minExpected) {
+                            // Not done yet — skip this end marker and continue
+                            continue
+                        }
+                    }
+                    break
+                }
             } else {
                 length = (header and 0x1F) + 1
             }

@@ -33,43 +33,45 @@ class MapRenderer(private val romParser: RomParser) {
     }
     
     // Block type colors (ARGB)
+    // Key insight: many block types that are "special" (bomb, shot, crumble) LOOK like
+    // solid terrain in the game. We use terrain-like colors with subtle tints to distinguish them.
     private val blockTypeColors = mapOf(
         0x0 to 0xFF0A0A14.toInt(),   // Air — near black
-        0x1 to 0xFF5A4A3A.toInt(),   // Slope — brown
+        0x1 to 0xFF687060.toInt(),   // Slope — muted terrain (slopes look like solid ground)
         0x2 to 0xFF0A0A14.toInt(),   // Air (X-ray) — near black
-        0x3 to 0xFF4A5A3A.toInt(),   // Treadmill — olive
+        0x3 to 0xFF585848.toInt(),   // Treadmill — muted olive
         0x4 to 0xFF0A0A14.toInt(),   // Air (shootable) — near black
-        0x5 to 0xFF0A0A14.toInt(),   // H-extend — near black (air-like)
+        0x5 to 0xFF0A0A14.toInt(),   // H-extend — near black
         0x6 to 0xFF0A0A14.toInt(),   // Unused — near black
         0x7 to 0xFF0A0A14.toInt(),   // Unused — near black
-        0x8 to 0xFF606878.toInt(),   // Solid — steel gray
-        0x9 to 0xFF3060D0.toInt(),   // Door — bright blue
-        0xA to 0xFFC03030.toInt(),   // Spike — red
-        0xB to 0xFFC0A030.toInt(),   // Crumble — gold/yellow
-        0xC to 0xFFD08030.toInt(),   // Shot block — orange
+        0x8 to 0xFF707880.toInt(),   // Solid — lighter steel gray
+        0x9 to 0xFF4080E0.toInt(),   // Door — bright blue (doors are important!)
+        0xA to 0xFFD04040.toInt(),   // Spike — red
+        0xB to 0xFF887848.toInt(),   // Crumble — slightly warm terrain
+        0xC to 0xFF808068.toInt(),   // Shot block — terrain with slight warm tint
         0xD to 0xFF0A0A14.toInt(),   // Extension — near black
-        0xE to 0xFF30A060.toInt(),   // Grapple — green
-        0xF to 0xFF9040C0.toInt(),   // Bomb block — purple
+        0xE to 0xFF408858.toInt(),   // Grapple — greenish terrain
+        0xF to 0xFF687080.toInt(),   // Bomb block — terrain color (same as solid, slight blue)
     )
     
-    // Darker variants for alternating tile pattern
+    // Darker variants for alternating tile pattern (subtle checkerboard within blocks)
     private val blockTypeDarkColors = mapOf(
         0x0 to 0xFF080810.toInt(),
-        0x1 to 0xFF4A3A2A.toInt(),
+        0x1 to 0xFF586858.toInt(),
         0x2 to 0xFF080810.toInt(),
-        0x3 to 0xFF3A4A2A.toInt(),
+        0x3 to 0xFF484838.toInt(),
         0x4 to 0xFF080810.toInt(),
         0x5 to 0xFF080810.toInt(),
         0x6 to 0xFF080810.toInt(),
         0x7 to 0xFF080810.toInt(),
-        0x8 to 0xFF505868.toInt(),
-        0x9 to 0xFF2050B0.toInt(),
-        0xA to 0xFFA02020.toInt(),
-        0xB to 0xFFA08020.toInt(),
-        0xC to 0xFFB07020.toInt(),
+        0x8 to 0xFF606870.toInt(),
+        0x9 to 0xFF3070D0.toInt(),
+        0xA to 0xFFB03030.toInt(),
+        0xB to 0xFF786838.toInt(),
+        0xC to 0xFF707058.toInt(),
         0xD to 0xFF080810.toInt(),
-        0xE to 0xFF208050.toInt(),
-        0xF to 0xFF7030A0.toInt(),
+        0xE to 0xFF307848.toInt(),
+        0xF to 0xFF586070.toInt(),
     )
     
     /**
