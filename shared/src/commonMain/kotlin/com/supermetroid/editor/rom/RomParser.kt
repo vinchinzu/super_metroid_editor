@@ -202,13 +202,13 @@ class RomParser(private val romData: ByteArray) {
      * LZ2 compression format.
      * 
      * Format:
-     *   0xFF = end of data
      *   Bits 7-5 of header byte = command type (0-6)
      *   Bits 4-0 = length - 1  (length 1..32)
      *   
-     *   If command type = 7 (extended header):
-     *     Byte 1 bits 4-2 = actual command type
+     *   If bits 7-5 = 7 (extended header):
+     *     Byte 1 bits 4-2 = actual command type (0-6)
      *     ((byte1 & 3) << 8) | byte2 + 1 = length (up to 1024)
+     *     If actual command type is ALSO 7: END OF DATA (e.g., 0xFF 0xFF)
      *   
      * Commands:
      *   0: Direct copy (copy next `len` bytes verbatim)
@@ -224,6 +224,12 @@ class RomParser(private val romData: ByteArray) {
         return decompressLZ2AtPc(startPc)
     }
     
+    /**
+     * Decompress LZ data. The decompressed data starts with a 2-byte LE size
+     * header indicating the expected Layer 1 size. We use this to know when
+     * to stop (not relying solely on 0xFF as end marker, since the data may
+     * span multiple compressed chunks separated by 0xFF).
+     */
     fun decompressLZ2AtPc(startPc: Int): ByteArray {
         val output = mutableListOf<Byte>()
         var pos = startPc
@@ -232,19 +238,40 @@ class RomParser(private val romData: ByteArray) {
             val header = romData[pos].toInt() and 0xFF
             pos++
             
-            if (header == 0xFF) break  // End of compressed data
-            
             var cmdType = (header shr 5) and 0x07
             var length: Int
             
             if (cmdType == 7) {
                 // Extended header: 2-byte header
+                // Bits 4-2 = actual command type (0-6)
+                // Bits 1-0 = high bits of length
+                // Next byte = low bits of length
                 cmdType = (header shr 2) and 0x07
+                
                 if (pos >= romData.size) break
                 val byte2 = romData[pos].toInt() and 0xFF
                 pos++
                 length = ((header and 0x03) shl 8) or byte2
                 length += 1
+                
+                // cmdType 7 in extended mode = potential end marker
+                if (cmdType == 7) {
+                    // Check if we've decompressed enough data.
+                    // The first 2 bytes of output are a size header.
+                    // If we haven't reached that size yet, this 0xFF might
+                    // be a chunk boundary — skip it and continue.
+                    if (output.size >= 2) {
+                        val expectedSize = (output[0].toInt() and 0xFF) or 
+                            ((output[1].toInt() and 0xFF) shl 8)
+                        // Need: 2 (header) + expectedSize (Layer1) + expectedSize/2 (BTS)
+                        val minExpected = 2 + expectedSize
+                        if (output.size < minExpected) {
+                            // Not done yet — skip this end marker and continue
+                            continue
+                        }
+                    }
+                    break
+                }
             } else {
                 length = (header and 0x1F) + 1
             }
