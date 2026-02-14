@@ -63,37 +63,42 @@ fun RoomListView(
             
             Divider()
             
+            // Group rooms by area for proper section headers
+            val groupedRooms = remember(sortedRooms, roomAreas) {
+                sortedRooms.groupBy { roomAreas[it.handle] ?: -1 }
+                    .toSortedMap()
+            }
+            
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                var lastArea = -1
-                
-                items(sortedRooms) { room ->
-                    val area = roomAreas[room.handle] ?: -1
-                    
-                    // Area section header
-                    if (area != lastArea && area >= 0) {
-                        lastArea = area
-                        val (areaName, areaColor) = areaInfo[area] ?: ("Unknown" to Color.Gray)
-                        
-                        Surface(
-                            color = areaColor.copy(alpha = 0.15f),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = areaName,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = areaColor,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                            )
+                groupedRooms.forEach { (area, areaRooms) ->
+                    // Area section header (once per area)
+                    if (area >= 0) {
+                        item(key = "header_$area") {
+                            val (areaName, areaColor) = areaInfo[area] ?: ("Unknown" to Color.Gray)
+                            Surface(
+                                color = areaColor.copy(alpha = 0.15f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = areaName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = areaColor,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                     
-                    RoomListItem(
-                        room = room,
-                        area = area,
-                        isSelected = selectedRoom?.handle == room.handle,
-                        onClick = { onRoomSelected(room) }
-                    )
+                    // Room items for this area
+                    items(areaRooms, key = { it.handle }) { room ->
+                        RoomListItem(
+                            room = room,
+                            area = area,
+                            isSelected = selectedRoom?.handle == room.handle,
+                            onClick = { onRoomSelected(room) }
+                        )
+                    }
                 }
             }
         }
