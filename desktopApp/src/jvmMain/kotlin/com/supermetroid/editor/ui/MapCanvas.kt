@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,22 +22,18 @@ import com.supermetroid.editor.rom.MapRenderer
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RoomRenderData
 import java.awt.image.BufferedImage
-import java.awt.Graphics2D
 import java.awt.RenderingHints
 
-/**
- * Property overlay types that can be toggled on/off
- */
 enum class TileOverlay(val label: String, val shortLabel: String, val color: Long) {
     SOLID("Solid", "S", 0xCC4488FF),
-    SLOPE("Slopes", "/", 0xCCFF8844),
-    DOOR("Doors", "D", 0xCC4488FF),
-    SPIKE("Spikes", "!", 0xCCFF4444),
-    BOMB("Bomb Blocks", "B", 0xCCAA44DD),
-    SHOT("Shot Blocks", "X", 0xCCFFAA22),
+    SLOPE("Slope", "/", 0xCCFF8844),
+    DOOR("Door", "D", 0xCC4488FF),
+    SPIKE("Spike", "!", 0xCCFF4444),
+    BOMB("Bomb", "B", 0xCCAA44DD),
+    SHOT("Shot", "X", 0xCCFFAA22),
     CRUMBLE("Crumble", "C", 0xCCDDAA22),
     GRAPPLE("Grapple", "G", 0xCC44CC88),
-    SPEED("Speed/Treadmill", "~", 0xCC88CCFF),
+    SPEED("Speed", "~", 0xCC88CCFF),
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
@@ -46,7 +43,6 @@ fun MapCanvas(
     romParser: RomParser?,
     modifier: Modifier = Modifier
 ) {
-    // Toolbar state
     var zoomLevel by remember { mutableStateOf(1f) }
     var showGrid by remember { mutableStateOf(true) }
     val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>() }
@@ -56,21 +52,6 @@ fun MapCanvas(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Room info header
-            Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp)) {
-                Text(
-                    text = room?.name ?: "No room selected",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                if (room != null) {
-                    Text(
-                        text = "Room ID: ${room.id}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            
             if (room != null && romParser != null) {
                 var isLoading by remember(room.id) { mutableStateOf(true) }
                 var errorMessage by remember(room.id) { mutableStateOf<String?>(null) }
@@ -81,15 +62,12 @@ fun MapCanvas(
                     isLoading = true
                     errorMessage = null
                     renderData = null
-                    
                     try {
                         val roomId = room.getRoomIdAsInt()
                         val roomHeader = romParser.readRoomHeader(roomId)
-                        
                         if (roomHeader != null) {
-                            roomInfoText = "${roomHeader.areaName}  •  ${roomHeader.width}×${roomHeader.height} screens  •  Map: (${roomHeader.mapX}, ${roomHeader.mapY})"
-                            val mapRenderer = MapRenderer(romParser)
-                            renderData = mapRenderer.renderRoom(roomHeader)
+                            roomInfoText = "${roomHeader.areaName} • ${roomHeader.width}×${roomHeader.height}"
+                            renderData = MapRenderer(romParser).renderRoom(roomHeader)
                             if (renderData == null) errorMessage = "Failed to render"
                         } else {
                             errorMessage = "Room header not found"
@@ -102,71 +80,53 @@ fun MapCanvas(
                     }
                 }
                 
-                // Room metadata
-                if (roomInfoText.isNotEmpty()) {
-                    Text(
-                        text = roomInfoText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-                }
-                
-                // ─── Toolbar ───────────────────────────────────────
-                Divider(modifier = Modifier.padding(vertical = 4.dp))
-                
+                // ─── Single compact toolbar row ─────────────────────
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Zoom controls
-                    Text("Zoom:", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                    // Room name + info
+                    Text(room.name, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 13.sp)
+                    Text(room.id, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (roomInfoText.isNotEmpty()) {
+                        Text(roomInfoText, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    
+                    // Divider
+                    Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                    
+                    // Zoom
+                    Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp, modifier = Modifier.width(32.dp))
                     Slider(
                         value = zoomLevel,
                         onValueChange = { zoomLevel = it },
                         valueRange = 0.25f..4f,
                         steps = 14,
-                        modifier = Modifier.width(120.dp)
+                        modifier = Modifier.width(80.dp)
                     )
-                    Text(
-                        "${(zoomLevel * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
-                        modifier = Modifier.width(36.dp)
-                    )
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
                     
                     // Grid toggle
                     FilterChip(
                         selected = showGrid,
                         onClick = { showGrid = !showGrid },
-                        label = { Text("Grid", fontSize = 10.sp) },
-                        modifier = Modifier.height(28.dp)
+                        label = { Text("Grid", fontSize = 9.sp) },
+                        modifier = Modifier.height(24.dp)
                     )
-                }
-                
-                // Overlay toggles row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text("Overlays:", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp,
-                        modifier = Modifier.align(Alignment.CenterVertically))
                     
+                    Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                    
+                    // Overlay chips
                     TileOverlay.values().forEach { overlay ->
                         val isOn = overlayToggles[overlay] ?: false
                         FilterChip(
                             selected = isOn,
                             onClick = { overlayToggles[overlay] = !isOn },
                             label = { Text(overlay.label, fontSize = 9.sp) },
-                            modifier = Modifier.height(26.dp),
+                            modifier = Modifier.height(24.dp),
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(overlay.color).copy(alpha = 0.3f)
                             )
@@ -174,9 +134,7 @@ fun MapCanvas(
                     }
                 }
                 
-                Divider(modifier = Modifier.padding(vertical = 2.dp))
-                
-                // ─── Map Display ───────────────────────────────────
+                // ─── Map Display ─────────────────────────────────────
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -198,16 +156,13 @@ fun MapCanvas(
                             val data = renderData!!
                             val activeOverlays = overlayToggles.filter { it.value }.keys
                             
-                            // Build the composite image with overlays
-                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid, zoomLevel) {
+                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid) {
                                 buildCompositeImage(data, activeOverlays, showGrid)
                             }
-                            
                             val bitmap = remember(compositeImage) {
                                 compositeImage.toComposeImageBitmap()
                             }
                             
-                            // Scroll states for middle-click drag panning
                             val hScrollState = rememberScrollState()
                             val vScrollState = rememberScrollState()
                             val coroutineScope = rememberCoroutineScope()
@@ -215,12 +170,17 @@ fun MapCanvas(
                             var lastDragX by remember { mutableStateOf(0f) }
                             var lastDragY by remember { mutableStateOf(0f) }
                             
-                            // Scrollable + zoomable map with middle-click drag
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    // Mouse wheel = zoom in/out
+                                    .onPointerEvent(PointerEventType.Scroll) { event ->
+                                        val scrollDelta = event.changes.first().scrollDelta.y
+                                        val zoomFactor = if (scrollDelta < 0) 1.15f else 1f / 1.15f
+                                        zoomLevel = (zoomLevel * zoomFactor).coerceIn(0.25f, 4f)
+                                    }
+                                    // Middle click = start drag
                                     .onPointerEvent(PointerEventType.Press) { event ->
-                                        // Middle mouse button = button index 2 in AWT
                                         val nativeEvent = event.nativeEvent as? MouseEvent
                                         if (nativeEvent != null && nativeEvent.button == MouseEvent.BUTTON2) {
                                             isDragging = true
@@ -242,7 +202,6 @@ fun MapCanvas(
                                             val dy = lastDragY - pos.y
                                             lastDragX = pos.x
                                             lastDragY = pos.y
-                                            
                                             coroutineScope.launch {
                                                 hScrollState.scrollTo((hScrollState.value + dx.toInt()).coerceIn(0, hScrollState.maxValue))
                                                 vScrollState.scrollTo((vScrollState.value + dy.toInt()).coerceIn(0, vScrollState.maxValue))
@@ -277,9 +236,6 @@ fun MapCanvas(
     }
 }
 
-/**
- * Build a composite BufferedImage with the rendered tiles + overlays
- */
 private fun buildCompositeImage(
     data: RoomRenderData,
     activeOverlays: Set<TileOverlay>,
@@ -301,7 +257,6 @@ private fun buildCompositeImage(
         return img
     }
     
-    // Draw overlay icons on each block
     for (by in 0 until blocksTall) {
         for (bx in 0 until blocksWide) {
             val idx = by * blocksWide + bx
@@ -311,9 +266,7 @@ private fun buildCompositeImage(
             val px = bx * 16
             val py = by * 16
             
-            // Collect active overlays that match this block type
             val matchingOverlays = mutableListOf<TileOverlay>()
-            
             if (activeOverlays.contains(TileOverlay.SOLID) && blockType == 0x8) matchingOverlays.add(TileOverlay.SOLID)
             if (activeOverlays.contains(TileOverlay.SLOPE) && blockType == 0x1) matchingOverlays.add(TileOverlay.SLOPE)
             if (activeOverlays.contains(TileOverlay.DOOR) && blockType == 0x9) matchingOverlays.add(TileOverlay.DOOR)
@@ -324,8 +277,7 @@ private fun buildCompositeImage(
             if (activeOverlays.contains(TileOverlay.GRAPPLE) && blockType == 0xE) matchingOverlays.add(TileOverlay.GRAPPLE)
             if (activeOverlays.contains(TileOverlay.SPEED) && blockType == 0x3) matchingOverlays.add(TileOverlay.SPEED)
             
-            // Draw icons from bottom-right corner, going left
-            var iconX = px + 16 - 8  // Start at bottom-right
+            var iconX = px + 16 - 8
             val iconY = py + 16 - 8
             
             for (overlay in matchingOverlays) {
@@ -335,21 +287,13 @@ private fun buildCompositeImage(
                     (overlay.color and 0xFF).toInt(),
                     ((overlay.color shr 24) and 0xFF).toInt()
                 )
-                
-                // Draw 8x8 background square
                 g.color = java.awt.Color(0, 0, 0, 160)
                 g.fillRect(iconX, iconY, 8, 8)
-                
-                // Draw colored border
                 g.color = color
                 g.drawRect(iconX, iconY, 7, 7)
-                
-                // Draw short label character
                 g.font = java.awt.Font("Monospaced", java.awt.Font.BOLD, 7)
-                g.color = color
                 g.drawString(overlay.shortLabel, iconX + 1, iconY + 7)
-                
-                iconX -= 9  // Next icon goes to the left
+                iconX -= 9
             }
         }
     }

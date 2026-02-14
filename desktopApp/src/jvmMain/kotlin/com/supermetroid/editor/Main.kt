@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import java.awt.FileDialog
@@ -21,6 +22,7 @@ import java.io.File
 fun main() = application {
     val roomRepository = remember { RoomRepository() }
     var romParser by remember { mutableStateOf<RomParser?>(null) }
+    var romFileName by remember { mutableStateOf<String?>(null) }
     var selectedRoom by remember { mutableStateOf<RoomInfo?>(null) }
     var rooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
     
@@ -33,9 +35,9 @@ fun main() = application {
         if (lastRomPath != null) {
             try {
                 romParser = RomParser.loadRom(lastRomPath)
+                romFileName = File(lastRomPath).nameWithoutExtension
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
-                e.printStackTrace()
             }
         }
     }
@@ -50,8 +52,9 @@ fun main() = application {
             ) {
                 // Menu bar
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
                         onClick = {
@@ -67,7 +70,7 @@ fun main() = application {
                                 val file = File(fileDialog.directory, selectedFile)
                                 try {
                                     romParser = RomParser.loadRom(file.absolutePath)
-                                    // Save ROM path for auto-loading next time
+                                    romFileName = file.nameWithoutExtension
                                     RomPreferences.setLastRomPath(file.absolutePath)
                                 } catch (e: Exception) {
                                     e.printStackTrace()
@@ -78,10 +81,11 @@ fun main() = application {
                         Text("Open ROM...")
                     }
                     
-                    if (romParser != null) {
+                    if (romFileName != null) {
                         Text(
-                            "ROM Loaded",
-                            modifier = Modifier.align(Alignment.CenterVertically)
+                            "Loaded: $romFileName",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -91,14 +95,13 @@ fun main() = application {
                     modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Room list (left side)
+                    // Room list (left side) — pass romParser so we can read area info
                     RoomListView(
                         rooms = rooms,
                         selectedRoom = selectedRoom,
-                        onRoomSelected = { room ->
-                            selectedRoom = room
-                        },
-                        modifier = Modifier.width(300.dp).fillMaxHeight()
+                        romParser = romParser,
+                        onRoomSelected = { room -> selectedRoom = room },
+                        modifier = Modifier.width(260.dp).fillMaxHeight()
                     )
                     
                     // Map canvas (right side)
