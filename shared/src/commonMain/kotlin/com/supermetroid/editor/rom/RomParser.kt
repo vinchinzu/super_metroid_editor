@@ -132,67 +132,50 @@ class RomParser(private val romData: ByteArray) {
     }
     
     /**
-     * Find the default room state data offset.
+     * Find room state data — prefers the FIRST conditional state over the default.
      * 
-     * Room state entries are a list of conditional states followed by
-     * the default state marker $E5E6. We must parse entry-by-entry to
-     * skip the correct number of bytes for each condition type.
+     * The first conditional state (e.g., E629 = "have morph ball") represents
+     * the most common gameplay state. The default (E5E6) is the "fresh game" state
+     * which may look different (e.g., Wrecked Ship powered off vs powered on).
      * 
-     * State entry format:
-     *   condition_code (2 bytes) — which handler to use
-     *   parameters     (varies) — depends on condition type
-     *   state_ptr      (2 bytes) — pointer to state data (bank $8F)
+     * State entries: condition(2) + [arg(1)] + statePtr(2), ending with E5E6.
+     * All non-E5E6 conditions have 5 total bytes: condition(2) + arg(1) + ptr(2).
      * 
-     * Known condition types and their TOTAL entry sizes:
-     *   $E5E6: Default state (end marker) — just 2 bytes, state data follows
-     *   $E5EB: Event set     — 2 + 1 (event byte) + 2 (ptr) = 5 bytes
-     *   $E5FF: Power bombs   — 2 + 2 (ptr) = 4 bytes
-     *   $E612: Boss defeated  — 2 + 1 (boss byte) + 2 (ptr) = 5 bytes  
-     *   $E629: Morph ball     — 2 + 2 (ptr) = 4 bytes
-     *   $E640: Morph+missiles — 2 + 2 (ptr) = 4 bytes
-     *   $E652: Power bombs    — 2 + 2 (ptr) = 4 bytes
-     *   $E669: Event set      — 2 + 1 (event byte) + 2 (ptr) = 5 bytes
-     *   $E678: Boss bits      — 2 + 1 (boss byte) + 2 (ptr) = 5 bytes
+     * Verified against ROM data: E629 for Ridley/Draygon/Wrecked Ship rooms
+     * all have 5-byte entries (condition + 1 arg byte + 2 ptr bytes).
      */
     private fun findDefaultStateData(stateListOffset: Int): Int? {
         var offset = stateListOffset
         val maxOffset = stateListOffset + 200
+        var firstConditionalStateData: Int? = null
         
         while (offset + 2 <= romData.size && offset < maxOffset) {
             val condition = readUInt16At(offset)
             
             if (condition == 0xE5E6) {
-                // Default state — 26 bytes of state data follow after the 2-byte marker
-                return offset + 2
+                // Default state marker — state data follows immediately
+                val defaultStateData = offset + 2
+                // Prefer the first conditional state if we found one
+                return firstConditionalStateData ?: defaultStateData
             }
             
-            // Determine entry size based on condition code
-            val entrySize = when (condition) {
-                // Sizes verified against SM ROM data:
-                0xE5EB -> 5  // Door event: condition(2) + door_byte(1) + ptr(2)
-                0xE5FF -> 4  // condition(2) + ptr(2)
-                0xE612 -> 5  // Boss: condition(2) + boss_byte(1) + ptr(2)
-                0xE629 -> 4  // condition(2) + ptr(2)
-                0xE640 -> 4  // condition(2) + ptr(2)
-                0xE652 -> 4  // condition(2) + ptr(2)
-                0xE669 -> 4  // Event flag: condition(2) + ptr(2) (NO extra param)
-                0xE678 -> 4  // Boss bits: condition(2) + ptr(2) (NO extra param)
-                else -> {
-                    // Unknown condition — can't safely parse further
-                    // Fall back: scan remaining bytes for $E5E6 at 2-byte aligned offsets
-                    for (scanOffset in (offset + 2) until minOf(maxOffset, romData.size - 1) step 2) {
-                        if (readUInt16At(scanOffset) == 0xE5E6) {
-                            return scanOffset + 2
-                        }
-                    }
-                    return null
+            // All conditional state entries are 5 bytes:
+            //   condition(2) + parameter(1) + statePtr(2)
+            // The statePtr points to 26 bytes of state data in bank $8F
+            if (offset + 5 <= romData.size) {
+                val statePtr = readUInt16At(offset + 3)
+                val statePc = snesToPc(0x8F0000 or statePtr)
+                
+                // Save the FIRST conditional state's data offset
+                if (firstConditionalStateData == null && statePc + 26 <= romData.size) {
+                    firstConditionalStateData = statePc
                 }
             }
             
-            offset += entrySize
+            offset += 5  // All conditional entries are 5 bytes
         }
         
-        return null
+        return firstConditionalStateData
     }
     
     // ─── LZ5 Decompression ──────────────────────────────────────────────

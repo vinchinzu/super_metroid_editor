@@ -15,8 +15,8 @@ data class RoomInfo(
     val comment: String? = null
 ) {
     fun getRoomIdAsInt(): Int {
-        // Convert "0X91F8" to 0x91F8
-        return id.removePrefix("0X").toInt(16)
+        // Convert "0x91F8" or "0X91F8" to integer
+        return id.removePrefix("0x").removePrefix("0X").toInt(16)
     }
     
     companion object {
