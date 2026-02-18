@@ -54,6 +54,27 @@ private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
 
 private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
 
+/** Named BTS options for block types that have well-known sub-types. */
+private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
+    0xC -> listOf(
+        0x00 to "Beam/Bomb (respawn)",
+        0x01 to "Beam/Bomb (no respawn)",
+        0x02 to "Beam/Bomb (respawn, speed)",
+        0x03 to "Beam/Bomb (no respawn, speed)",
+        0x04 to "Hidden (respawn)",
+        0x05 to "Hidden (no respawn)",
+        0x06 to "Hidden (respawn, alt)",
+        0x07 to "Hidden (no respawn, alt)",
+        0x08 to "Power Bomb (respawn)",
+        0x09 to "Power Bomb (no respawn)",
+        0x0A to "Super Missile (respawn)",
+        0x0B to "Super Missile (no respawn)",
+    )
+    0xF -> listOf(0x00 to "Normal")
+    0xB -> listOf(0x00 to "Normal")
+    else -> emptyList()
+}
+
 enum class TileOverlay(val label: String, val shortLabel: String, val color: Long) {
     // Block types (from level data bits 12-15)
     SOLID("Solid", "S", 0xCC4488FF),       // blue
@@ -341,6 +362,14 @@ fun MapCanvas(
                             
                             var isPainting by remember { mutableStateOf(false) }
                             
+                            // Right-click properties popup state
+                            var propsBlockX by remember { mutableStateOf(-1) }
+                            var propsBlockY by remember { mutableStateOf(-1) }
+                            var propsExpanded by remember { mutableStateOf(false) }
+                            var propsBlockType by remember { mutableStateOf(0) }
+                            var propsBts by remember { mutableStateOf(0) }
+                            var propsMetatile by remember { mutableStateOf(0) }
+                            
                             fun pointerToBlock(posX: Float, posY: Float): Pair<Int, Int> {
                                 val imgX = (posX + hScrollState.value) / zoomLevel
                                 val imgY = (posY + vScrollState.value) / zoomLevel
@@ -353,7 +382,7 @@ fun MapCanvas(
                                 if (es != null && es.workingLevelData != null) {
                                     val roomHeader = romParser.readRoomHeader(room.getRoomIdAsInt())
                                     if (roomHeader != null) {
-                                        val r = MapRenderer(romParser).renderRoomFromLevelData(roomHeader, es.workingLevelData!!)
+                                        val r = MapRenderer(romParser).renderRoomFromLevelData(roomHeader, es.workingLevelData!!, es.workingPlms)
                                         if (r != null) return@remember buildCompositeImage(r, activeOverlays, showGrid)
                                     }
                                 }
@@ -361,15 +390,19 @@ fun MapCanvas(
                             }
                             val editBitmap = remember(compositeForEdit) { compositeForEdit.toComposeImageBitmap() }
                             
-                            // Keyboard shortcuts (H, V, R, Ctrl+Z, Ctrl+Shift+Z)
+                            // Keyboard shortcuts
+                            val focusReq = remember { FocusRequester() }
+                            LaunchedEffect(Unit) { focusReq.requestFocus() }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .onKeyEvent { keyEvent ->
+                                    .focusRequester(focusReq)
+                                    .focusable()
+                                    .onPreviewKeyEvent { keyEvent ->
                                         if (keyEvent.type == KeyEventType.KeyDown && editorState != null) {
                                             when (keyEvent.key) {
                                                 Key.H -> { editorState.toggleHFlip(); true }
-                                                Key.V -> { if (!keyEvent.isCtrlPressed) { editorState.toggleVFlip(); true } else false }
+                                                Key.V -> { if (!keyEvent.isCtrlPressed && !keyEvent.isMetaPressed) { editorState.toggleVFlip(); true } else false }
                                                 Key.R -> { editorState.rotateClockwise(); true }
                                                 Key.Z -> {
                                                     if (keyEvent.isCtrlPressed || keyEvent.isMetaPressed) {
@@ -377,15 +410,14 @@ fun MapCanvas(
                                                         true
                                                     } else false
                                                 }
-                                                Key.One -> { editorState.activeTool = EditorTool.PAINT; true }
-                                                Key.Two -> { editorState.activeTool = EditorTool.FILL; true }
-                                                Key.Three -> { editorState.activeTool = EditorTool.SAMPLE; true }
-                                                else -> false
+                                Key.One -> { editorState.activeTool = EditorTool.PAINT; true }
+                                Key.Two -> { editorState.activeTool = EditorTool.FILL; true }
+                                Key.Three -> { editorState.activeTool = EditorTool.SAMPLE; true }
+                                Key.Escape -> { if (propsExpanded) { propsExpanded = false; true } else false }
+                                else -> false
                                             }
                                         } else false
                                     }
-                                    .focusRequester(remember { FocusRequester() }.also { LaunchedEffect(Unit) { it.requestFocus() } })
-                                    .focusable()
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
                                         val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
@@ -397,9 +429,21 @@ fun MapCanvas(
                                         }
                                     }
                                     .onPointerEvent(PointerEventType.Press) { event ->
+                                        focusReq.requestFocus()
                                         val ne = event.nativeEvent as? MouseEvent
                                         if (ne != null && ne.button == MouseEvent.BUTTON2) {
                                             isDragging = true; val p = event.changes.first().position; lastDragX = p.x; lastDragY = p.y
+                                        } else if (ne != null && ne.button == MouseEvent.BUTTON3 && editorState != null) {
+                                            // Right-click: open tile properties
+                                            val (bx, by) = pointerToBlock(event.changes.first().position.x, event.changes.first().position.y)
+                                            if (bx in 0 until data.blocksWide && by in 0 until data.blocksTall) {
+                                                val word = editorState.readBlockWord(bx, by)
+                                                propsBlockX = bx; propsBlockY = by
+                                                propsMetatile = word and 0x3FF
+                                                propsBlockType = (word shr 12) and 0xF
+                                                propsBts = editorState.readBts(bx, by)
+                                                propsExpanded = true
+                                            }
                                         } else if (ne != null && ne.button == MouseEvent.BUTTON1 && editorState != null) {
                                             val (bx, by) = pointerToBlock(event.changes.first().position.x, event.changes.first().position.y)
                                             when (editorState.activeTool) {
@@ -518,6 +562,307 @@ fun MapCanvas(
                                                 size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
                                             )
+                                        }
+                                    }
+                                    // Right-click selection border
+                                    if (propsExpanded && propsBlockX >= 0) {
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val tileSize = 16f * zoomLevel
+                                            drawRect(
+                                                color = Color.Yellow.copy(alpha = 0.7f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(propsBlockX * tileSize, propsBlockY * tileSize),
+                                                size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // ─── Right-click tile properties panel (floating, non-modal) ──────
+                            if (propsExpanded && editorState != null) {
+                                val editableBlockTypes = listOf(
+                                    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
+                                    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
+                                    0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
+                                    0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
+                                )
+                                val blockTypeName = editableBlockTypes.firstOrNull { it.first == propsBlockType }?.second
+                                    ?: "0x${propsBlockType.toString(16).uppercase()}"
+                                val btsOptions = btsOptionsForBlockType(propsBlockType)
+
+                                Card(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(8.dp)
+                                        .width(260.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(12.dp)
+                                            .verticalScroll(rememberScrollState())
+                                    ) {
+                                        // Header
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "Tile ($propsBlockX, $propsBlockY)  #$propsMetatile",
+                                                fontSize = 11.sp,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                            )
+                                            Text(
+                                                "✕",
+                                                modifier = Modifier
+                                                    .clickable { propsExpanded = false }
+                                                    .padding(4.dp),
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // ── Block Type selector ──
+                                        Text("Block Type", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        var btExpanded by remember { mutableStateOf(false) }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(32.dp)
+                                                    .clickable { btExpanded = true },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = MaterialTheme.colorScheme.surfaceVariant
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        "0x${propsBlockType.toString(16).uppercase()} $blockTypeName",
+                                                        fontSize = 11.sp,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Text("▾", fontSize = 10.sp)
+                                                }
+                                            }
+                                            DropdownMenu(expanded = btExpanded, onDismissRequest = { btExpanded = false }) {
+                                                for ((typeVal, typeName) in editableBlockTypes) {
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                                RadioButton(selected = propsBlockType == typeVal, onClick = null, modifier = Modifier.size(16.dp))
+                                                                Text("0x${typeVal.toString(16).uppercase()} $typeName", fontSize = 11.sp)
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            btExpanded = false
+                                                            if (typeVal != propsBlockType) {
+                                                                propsBlockType = typeVal
+                                                                editorState.setTileProperties(propsBlockX, propsBlockY, typeVal, propsBts)
+                                                            }
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // ── Sub Type (BTS) ──
+                                        val btsLabel = when (propsBlockType) {
+                                            0x9 -> "Door Connection Index"
+                                            0x1 -> "Slope Type"
+                                            else -> "Sub Type (BTS)"
+                                        }
+                                        Text(btsLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                        if (btsOptions.isNotEmpty()) {
+                                            var btsDropExpanded by remember { mutableStateOf(false) }
+                                            val btsName = btsOptions.firstOrNull { it.first == propsBts }?.second
+                                                ?: "Custom (0x${propsBts.toString(16).uppercase().padStart(2, '0')})"
+                                            Box {
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(32.dp)
+                                                        .clickable { btsDropExpanded = true },
+                                                    shape = MaterialTheme.shapes.small,
+                                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text(btsName, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                                        Text("▾", fontSize = 10.sp)
+                                                    }
+                                                }
+                                                DropdownMenu(expanded = btsDropExpanded, onDismissRequest = { btsDropExpanded = false }) {
+                                                    for ((btsVal, btsOptName) in btsOptions) {
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                                    RadioButton(selected = propsBts == btsVal, onClick = null, modifier = Modifier.size(16.dp))
+                                                                    Text("0x${btsVal.toString(16).uppercase().padStart(2, '0')} $btsOptName", fontSize = 11.sp)
+                                                                }
+                                                            },
+                                                            onClick = {
+                                                                btsDropExpanded = false
+                                                                if (btsVal != propsBts) {
+                                                                    propsBts = btsVal
+                                                                    editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, btsVal)
+                                                                }
+                                                            },
+                                                            modifier = Modifier.height(28.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        }
+
+                                        // Raw hex input (always visible)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(if (btsOptions.isNotEmpty()) "Raw:" else "BTS:", fontSize = 10.sp)
+                                            var rawText by remember(propsBlockX, propsBlockY, propsBts) {
+                                                mutableStateOf(propsBts.toString(16).uppercase().padStart(2, '0'))
+                                            }
+                                            OutlinedTextField(
+                                                value = rawText,
+                                                onValueChange = { s ->
+                                                    rawText = s
+                                                    val v = s.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
+                                                    if (v != null && v in 0..255 && v != propsBts) {
+                                                        propsBts = v
+                                                        editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, v)
+                                                    }
+                                                },
+                                                modifier = Modifier.width(80.dp).height(36.dp),
+                                                textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
+                                                singleLine = true
+                                            )
+                                        }
+
+                                        // ── Items / PLMs at this tile ──
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Divider()
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("Items / PLMs", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                                        val plmsHere = editorState.getPlmsAt(propsBlockX, propsBlockY)
+                                        val itemPlms = plmsHere.filter { RomParser.isItemPlm(it.id) }
+                                        val otherPlms = plmsHere.filter { !RomParser.isItemPlm(it.id) }
+
+                                        if (itemPlms.isEmpty() && otherPlms.isEmpty()) {
+                                            Text("None", fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                        for (plm in itemPlms) {
+                                            val iName = RomParser.itemNameForPlm(plm.id) ?: "PLM 0x${plm.id.toString(16)}"
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column {
+                                                    Text(iName, fontSize = 10.sp)
+                                                    Text(
+                                                        "bit: 0x${plm.param.toString(16).uppercase().padStart(2, '0')}",
+                                                        fontSize = 8.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                Text(
+                                                    "✕",
+                                                    modifier = Modifier
+                                                        .clickable { editorState.removePlm(plm.x, plm.y, plm.id) }
+                                                        .padding(horizontal = 4.dp),
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
+                                        for (plm in otherPlms) {
+                                            val pName = RomParser.doorCapColor(plm.id)?.let { "Door Cap" }
+                                                ?: "PLM 0x${plm.id.toString(16).uppercase()}"
+                                            Text(pName, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                        }
+
+                                        // Add Item button + dropdown
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        var addItemExpanded by remember { mutableStateOf(false) }
+                                        var addItemStyle by remember { mutableStateOf(0) }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                    .clickable { addItemExpanded = true },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = MaterialTheme.colorScheme.primaryContainer
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("+ Add Item", fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = addItemExpanded,
+                                                onDismissRequest = { addItemExpanded = false }
+                                            ) {
+                                                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    listOf("Visible" to 0, "Chozo" to 1, "Hidden" to 2).forEach { (label, idx) ->
+                                                        FilterChip(
+                                                            selected = addItemStyle == idx,
+                                                            onClick = { addItemStyle = idx },
+                                                            label = { Text(label, fontSize = 9.sp) },
+                                                            modifier = Modifier.height(24.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Divider()
+                                                for (item in RomParser.ITEM_DEFS) {
+                                                    val plmId = when (addItemStyle) {
+                                                        1 -> item.chozoId
+                                                        2 -> item.hiddenId
+                                                        else -> item.visibleId
+                                                    }
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                verticalAlignment = Alignment.CenterVertically) {
+                                                                Text(item.shortLabel, fontSize = 9.sp,
+                                                                    color = MaterialTheme.colorScheme.primary,
+                                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                                Text(item.name, fontSize = 11.sp)
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            addItemExpanded = false
+                                                            editorState.addPlm(plmId, propsBlockX, propsBlockY, 0)
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }

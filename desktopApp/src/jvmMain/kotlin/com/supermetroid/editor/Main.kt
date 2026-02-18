@@ -122,28 +122,16 @@ fun main() = application {
                 var tilesetHeightDp by remember { mutableStateOf(400f) }  // 2x default height
                 var verticalDragging by remember { mutableStateOf(false) }
                 var horizontalDragging by remember { mutableStateOf(false) }
-                val endVerticalDrag = { verticalDragging = false }
-                val endHorizontalDrag = { horizontalDragging = false }
                 @OptIn(ExperimentalComposeUiApi::class)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val contentHeightPx = with(density) { maxHeight.toPx() }
                     val dividerHeightPx = with(density) { 10.dp.toPx() }
-                    // Absolute position: divider tracks mouse so resize keeps up
-                    val maxLeftWidth = maxWidth.value - 100f  // leave room for map
-                    val onVerticalDragPosition: (Float) -> Unit = { xPx ->
-                        leftColumnWidthDp = (xPx / density.density).coerceIn(150f, maxLeftWidth)
-                    }
-                    val onHorizontalDragPosition: (Float, Float) -> Unit = { _yPx, contentHeight ->
-                        // Divider at yPx; tileset below it. tilesetHeight = contentHeight - yPx - divider
-                        val h = (contentHeight - _yPx - dividerHeightPx) / density.density
-                        tilesetHeightDp = h.coerceIn(120f, 700f)
-                    }
+                    val maxLeftWidth = maxWidth.value - 100f
                     Box(modifier = Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
-                        // Left column: room list + resizable tileset preview
                         Column(
                             modifier = Modifier
                                 .width(leftColumnWidthDp.dp)
@@ -159,10 +147,7 @@ fun main() = application {
                             )
                             DraggableDividerHorizontal(
                                 onDragStart = { horizontalDragging = true },
-                                onDragEnd = endHorizontalDrag,
-                                onDragDelta = { dy ->
-                                    tilesetHeightDp = (tilesetHeightDp - dy / density.density).coerceIn(120f, 700f)
-                                }
+                                onDragEnd = { horizontalDragging = false }
                             )
                             TilesetPreview(
                                 room = selectedRoom,
@@ -175,12 +160,8 @@ fun main() = application {
                         }
                         DraggableDividerVertical(
                             onDragStart = { verticalDragging = true },
-                            onDragEnd = endVerticalDrag,
-                            onDragDelta = { dx ->
-                                leftColumnWidthDp = (leftColumnWidthDp + dx / density.density).coerceIn(150f, maxLeftWidth)
-                            }
+                            onDragEnd = { verticalDragging = false }
                         )
-                        // Map (full right side)
                         MapCanvas(
                             room = selectedRoom,
                             romParser = romParser,
@@ -188,15 +169,20 @@ fun main() = application {
                             modifier = Modifier.fillMaxSize()
                         )
                     }
-                    // Full-area overlay: divider follows mouse (absolute position = instant track)
+                    // Full-area overlay captures all movement with absolute coordinates
                     if (verticalDragging || horizontalDragging) {
                         Box(
                             Modifier
                                 .matchParentSize()
                                 .onPointerEvent(PointerEventType.Move) {
                                     val pos = it.changes.firstOrNull()?.position ?: return@onPointerEvent
-                                    if (verticalDragging) onVerticalDragPosition(pos.x)
-                                    if (horizontalDragging) onHorizontalDragPosition(pos.y, contentHeightPx)
+                                    if (verticalDragging) {
+                                        leftColumnWidthDp = (pos.x / density.density).coerceIn(150f, maxLeftWidth)
+                                    }
+                                    if (horizontalDragging) {
+                                        val h = (contentHeightPx - pos.y - dividerHeightPx) / density.density
+                                        tilesetHeightDp = h.coerceIn(120f, 700f)
+                                    }
                                 }
                                 .onPointerEvent(PointerEventType.Release) {
                                     verticalDragging = false

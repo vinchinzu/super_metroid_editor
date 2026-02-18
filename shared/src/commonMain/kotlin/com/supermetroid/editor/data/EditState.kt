@@ -27,12 +27,26 @@ data class EditOperation(
 )
 
 /**
+ * A PLM (Post Load Modification) change: add or remove a PLM entry.
+ * Used for item placement and other PLM edits.
+ */
+@Serializable
+data class PlmChange(
+    val action: String,      // "add" or "remove"
+    val plmId: Int,
+    val x: Int,
+    val y: Int,
+    val param: Int = 0
+)
+
+/**
  * Per-room edit state: all operations applied to a specific room.
  */
 @Serializable
 data class RoomEdits(
     val roomId: Int,             // e.g. 0x91F8
-    val operations: MutableList<EditOperation> = mutableListOf()
+    val operations: MutableList<EditOperation> = mutableListOf(),
+    val plmChanges: MutableList<PlmChange> = mutableListOf()
 )
 
 /**

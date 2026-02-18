@@ -95,6 +95,7 @@ fun TilesetPreview(
                             )
                         }
 
+                        val scrollSpeed = 48f
                         Box(
                             modifier = Modifier.fillMaxSize()
                                 .onPointerEvent(PointerEventType.Scroll) { event ->
@@ -103,8 +104,8 @@ fun TilesetPreview(
                                     val sd = event.changes.first().scrollDelta
                                     if (zoom) { zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.5f, 4f) }
                                     else coroutineScope.launch {
-                                        hScroll.scrollTo((hScroll.value + sd.x).toInt().coerceIn(0, hScroll.maxValue))
-                                        vScroll.scrollTo((vScroll.value + sd.y).toInt().coerceIn(0, vScroll.maxValue))
+                                        hScroll.scrollTo((hScroll.value + (sd.x * scrollSpeed).toInt()).coerceIn(0, hScroll.maxValue))
+                                        vScroll.scrollTo((vScroll.value + (sd.y * scrollSpeed).toInt()).coerceIn(0, vScroll.maxValue))
                                     }
                                 }
                                 .onPointerEvent(PointerEventType.Press) { event ->

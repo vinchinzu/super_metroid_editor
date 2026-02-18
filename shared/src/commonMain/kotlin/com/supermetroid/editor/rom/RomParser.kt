@@ -385,6 +385,22 @@ class RomParser(private val romData: ByteArray) {
     }
     
     fun getRomData(): ByteArray = romData
+
+    /** Convert PC offset back to SNES address (LoROM). */
+    fun pcToSnes(pcOffset: Int): Int {
+        val adjusted = pcOffset - romStartOffset
+        val bank = (adjusted / 0x8000) or 0x80
+        val offset = (adjusted % 0x8000) + 0x8000
+        return (bank shl 16) or offset
+    }
+
+    /** Get the PC offset of the default state data block for a room.
+     *  The PLM set pointer is at stateDataPcOffset + 20. */
+    fun getStateDataPcOffset(roomId: Int): Int? {
+        val pcOffset = roomIdToPc(roomId)
+        if (pcOffset < 0 || pcOffset + 11 > romData.size) return null
+        return findDefaultStateData(pcOffset + 11)
+    }
     
     // ─── PLM (Post Load Modification) parsing ───────────────────────
     
@@ -424,6 +440,44 @@ class RomParser(private val romData: ByteArray) {
      * Returns ARGB color or null if not a door cap PLM.
      */
     companion object {
+        // ─── Item PLM catalog ──────────────────────────────────────
+        data class ItemDef(val name: String, val shortLabel: String, val chozoId: Int, val visibleId: Int, val hiddenId: Int)
+
+        val ITEM_DEFS = listOf(
+            ItemDef("Energy Tank",   "ET", 0xEED7, 0xEF2B, 0xEF7F),
+            ItemDef("Missile",       "Mi", 0xEEDB, 0xEF2F, 0xEF83),
+            ItemDef("Super Missile", "Su", 0xEEDF, 0xEF33, 0xEF87),
+            ItemDef("Power Bomb",    "PB", 0xEEE3, 0xEF37, 0xEF8B),
+            ItemDef("Bomb",          "Bo", 0xEEE7, 0xEF3B, 0xEF8F),
+            ItemDef("Charge Beam",   "Ch", 0xEEEB, 0xEF3F, 0xEF93),
+            ItemDef("Ice Beam",      "Ic", 0xEEEF, 0xEF43, 0xEF97),
+            ItemDef("Hi-Jump Boots", "HJ", 0xEEF3, 0xEF47, 0xEF9B),
+            ItemDef("Speed Booster", "Sp", 0xEEF7, 0xEF4B, 0xEF9F),
+            ItemDef("Wave Beam",     "Wa", 0xEEFB, 0xEF4F, 0xEFA3),
+            ItemDef("Spazer",        "Sz", 0xEEFF, 0xEF53, 0xEFA7),
+            ItemDef("Spring Ball",   "SB", 0xEF03, 0xEF57, 0xEFAB),
+            ItemDef("Varia Suit",    "Va", 0xEF07, 0xEF5B, 0xEFAF),
+            ItemDef("Gravity Suit",  "Gr", 0xEF0B, 0xEF5F, 0xEFB3),
+            ItemDef("X-Ray Scope",   "XR", 0xEF0F, 0xEF63, 0xEFB7),
+            ItemDef("Plasma Beam",   "Pl", 0xEF13, 0xEF67, 0xEFBB),
+            ItemDef("Grapple Beam",  "Gp", 0xEF17, 0xEF6B, 0xEFBF),
+            ItemDef("Space Jump",    "SJ", 0xEF1B, 0xEF6F, 0xEFC3),
+            ItemDef("Screw Attack",  "SA", 0xEF1F, 0xEF73, 0xEFC7),
+            ItemDef("Morph Ball",    "MB", 0xEF23, 0xEF77, 0xEFCB),
+            ItemDef("Reserve Tank",  "RT", 0xEF27, 0xEF7B, 0xEFCF),
+        )
+
+        private val plmToItemName: Map<Int, String> = buildMap {
+            for (item in ITEM_DEFS) {
+                put(item.chozoId,  "${item.name} (Chozo)")
+                put(item.visibleId, "${item.name} (Visible)")
+                put(item.hiddenId, "${item.name} (Hidden)")
+            }
+        }
+
+        fun itemNameForPlm(plmId: Int): String? = plmToItemName[plmId]
+        fun isItemPlm(plmId: Int): Boolean = plmId in plmToItemName
+
         // Door cap colors matching the in-game door shield appearance
         val DOOR_CAP_BLUE   = 0xFF3880D0.toInt()   // Blue: opens with any weapon
         val DOOR_CAP_RED    = 0xFFD05050.toInt()    // Red/Pink: 5 missiles or 1 super

@@ -64,7 +64,7 @@ class MapRenderer(private val romParser: RomParser) {
     }
     
     /** Render from already-decompressed (possibly edited) level data. */
-    fun renderRoomFromLevelData(room: Room, levelData: ByteArray): RoomRenderData? {
+    fun renderRoomFromLevelData(room: Room, levelData: ByteArray, plmOverrides: List<RomParser.PlmEntry>? = null): RoomRenderData? {
         if (levelData.size < 2) return renderGrid(room)
         
         val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
@@ -88,8 +88,8 @@ class MapRenderer(private val romParser: RomParser) {
         pixels.fill(bgColor)
         val btsDataStart = tileDataStart + layer1Size
         
-        // Parse PLM set for door cap coloring
-        val plms = romParser.parsePlmSet(room.plmSetPtr)
+        // Parse PLM set for door cap coloring and item positions
+        val plms = plmOverrides ?: romParser.parsePlmSet(room.plmSetPtr)
         // Build map: block (x,y) → door cap ARGB color
         val doorCapColors = mutableMapOf<Long, Int>()
         for (plm in plms) {
@@ -174,7 +174,15 @@ class MapRenderer(private val romParser: RomParser) {
         
         // Grid is drawn in the UI layer when "Grid" is toggled on (see MapCanvas.buildCompositeImage)
         
-        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes, itemBlocks = emptySet())
+        val itemBlockSet = mutableSetOf<Int>()
+        for (plm in plms) {
+            if (RomParser.isItemPlm(plm.id)) {
+                val idx = plm.y * blocksWide + plm.x
+                if (idx in 0 until totalBlocks) itemBlockSet.add(idx)
+            }
+        }
+
+        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes, itemBlocks = itemBlockSet)
     }
     
     /** Pack two ints into a Long key for map lookup. */

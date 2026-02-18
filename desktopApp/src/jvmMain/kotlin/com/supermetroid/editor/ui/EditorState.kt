@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.data.EditOperation
+import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.rom.RomParser
@@ -100,12 +101,22 @@ class EditorState {
     var tileGraphics: TileGraphics? = null
         private set
 
+    /** Metatile index → most common block type, learned from room data + user edits. */
+    var metatileBlockTypePresets: Map<Int, Int> = emptyMap()
+        private set
+
+    /** Working PLMs for the current room (includes edits). */
+    private val _workingPlms = mutableListOf<RomParser.PlmEntry>()
+    val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
+    private var originalPlmCount = 0
+
     // ─── Tile selection ─────────────────────────────────────────
 
     fun selectMetatile(index: Int, gridCols: Int = 32) {
         tilesetSelStart = Pair(index % gridCols, index / gridCols)
         tilesetSelEnd = tilesetSelStart
-        brush = TileBrush.single(index)
+        val blockType = metatileBlockTypePresets[index] ?: 0x8
+        brush = TileBrush.single(index, blockType)
     }
 
     fun beginTilesetDrag(col: Int, row: Int) {
@@ -128,7 +139,9 @@ class EditorState {
         val tiles = (r0..r1).map { r ->
             (c0..c1).map { c -> r * gridCols + c }
         }
-        brush = TileBrush(tiles = tiles)
+        val primaryIdx = tiles.first().first()
+        val blockType = metatileBlockTypePresets[primaryIdx] ?: 0x8
+        brush = TileBrush(tiles = tiles, blockType = blockType)
     }
 
     fun toggleHFlip() { brush = brush?.copy(hFlip = !brush!!.hFlip) }
@@ -194,23 +207,66 @@ class EditorState {
         workingLevelData = levelData.copyOf()
         workingBlocksWide = room.width * 16
         workingBlocksTall = room.height * 16
+
+        // Build metatile → block type presets by scanning room data
+        val typeCounts = mutableMapOf<Int, MutableMap<Int, Int>>()
+        for (y in 0 until workingBlocksTall) {
+            for (x in 0 until workingBlocksWide) {
+                val word = readBlockWord(x, y)
+                val meta = word and 0x3FF
+                val bt = (word shr 12) and 0xF
+                if (bt != 0x0 && bt != 0x5 && bt != 0xD) {
+                    typeCounts.getOrPut(meta) { mutableMapOf() }.merge(bt, 1, Int::plus)
+                }
+            }
+        }
+        val roomPresets = typeCounts.mapValues { (_, counts) ->
+            counts.maxByOrNull { it.value }?.key ?: 0x8
+        }
+        // Merge with existing presets: prefer non-Solid (non-0x8) types
+        val merged = metatileBlockTypePresets.toMutableMap()
+        for ((meta, bt) in roomPresets) {
+            val existing = merged[meta]
+            if (existing == null || (bt != 0x8 && existing == 0x8)) {
+                merged[meta] = bt
+            }
+        }
+        metatileBlockTypePresets = merged
+
         undoStack.clear()
         redoStack.clear()
         pendingEdits.clear()
         pendingPositions.clear()
 
+        // Load PLMs for this room
+        _workingPlms.clear()
+        val plms = romParser.parsePlmSet(room.plmSetPtr)
+        _workingPlms.addAll(plms)
+        originalPlmCount = plms.size
+
         val roomKey = project.roomKey(roomId)
         val savedRoom = project.rooms[roomKey]
-        if (savedRoom != null && savedRoom.operations.isNotEmpty()) {
-            var count = 0
-            for (op in savedRoom.operations) {
-                for (edit in op.edits) {
-                    writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
-                    count++
+        if (savedRoom != null) {
+            // Replay saved tile edits
+            if (savedRoom.operations.isNotEmpty()) {
+                var count = 0
+                for (op in savedRoom.operations) {
+                    for (edit in op.edits) {
+                        writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
+                        if (edit.newBts != edit.oldBts) writeBts(edit.blockX, edit.blockY, edit.newBts)
+                        count++
+                    }
+                    undoStack.add(op)
                 }
-                undoStack.add(op)
+                println("Replayed $count saved edits for room 0x$roomKey")
             }
-            println("Replayed $count saved edits for room 0x$roomKey")
+            // Replay saved PLM changes
+            for (change in savedRoom.plmChanges) {
+                when (change.action) {
+                    "add" -> _workingPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
+                    "remove" -> _workingPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
+                }
+            }
         }
         // Bump version so map renders from working data immediately
         editVersion++
@@ -231,6 +287,14 @@ class EditorState {
         val btsOffset = 2 + layer1Size + idx
         if (btsOffset >= data.size) return 0
         return data[btsOffset].toInt() and 0xFF
+    }
+
+    private fun writeBts(bx: Int, by: Int, bts: Int) {
+        val data = workingLevelData ?: return
+        val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
+        val idx = by * workingBlocksWide + bx
+        val btsOffset = 2 + layer1Size + idx
+        if (btsOffset < data.size) data[btsOffset] = bts.toByte()
     }
 
     private fun writeBlockWord(bx: Int, by: Int, word: Int) {
@@ -264,12 +328,85 @@ class EditorState {
                 val newWord = b.blockWordAt(r, c)
                 if (oldWord == newWord) continue
                 writeBlockWord(tx, ty, newWord)
-                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, readBts(tx, ty), 0))
+                val bts = readBts(tx, ty)
+                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, bts, bts))
                 pendingPositions.add(key)
                 changed = true
             }
         }
         return changed
+    }
+
+    /** Set block type and BTS for a single tile (used by right-click properties).
+     *  Coalesces consecutive changes on the same tile into one undo entry. */
+    fun setTileProperties(bx: Int, by: Int, blockType: Int, bts: Int) {
+        if (bx < 0 || by < 0 || bx >= workingBlocksWide || by >= workingBlocksTall) return
+        val oldWord = readBlockWord(bx, by)
+        val oldBts = readBts(bx, by)
+        val metatile = oldWord and 0x3FF
+        val flips = oldWord and 0x0C00
+        val newWord = metatile or flips or ((blockType and 0xF) shl 12)
+        if (oldWord == newWord && oldBts == bts) return
+
+        writeBlockWord(bx, by, newWord)
+        writeBts(bx, by, bts)
+
+        val roomOps = project.getOrCreateRoom(currentRoomId).operations
+        val lastOp = undoStack.lastOrNull()
+        if (lastOp != null && lastOp.edits.size == 1 &&
+            lastOp.edits[0].blockX == bx && lastOp.edits[0].blockY == by &&
+            lastOp.description.startsWith("Properties")) {
+            val origEdit = lastOp.edits[0]
+            val merged = EditOperation("Properties ($bx,$by)", listOf(
+                TileEdit(bx, by, origEdit.oldBlockWord, newWord, origEdit.oldBts, bts)
+            ))
+            undoStack[undoStack.lastIndex] = merged
+            if (roomOps.isNotEmpty()) roomOps[roomOps.lastIndex] = merged
+        } else {
+            val op = EditOperation("Properties ($bx,$by)", listOf(
+                TileEdit(bx, by, oldWord, newWord, oldBts, bts)
+            ))
+            undoStack.add(op)
+            roomOps.add(op)
+        }
+        redoStack.clear()
+        dirty = true
+        editVersion++
+        // Learn this metatile → block type mapping for future brush presets
+        if (blockType != 0x0) {
+            val meta = (readBlockWord(bx, by) and 0x3FF)
+            metatileBlockTypePresets = metatileBlockTypePresets + (meta to blockType)
+        }
+    }
+
+    // ─── PLM editing ────────────────────────────────────────────
+
+    fun getPlmsAt(x: Int, y: Int): List<RomParser.PlmEntry> =
+        _workingPlms.filter { it.x == x && it.y == y }
+
+    fun addPlm(plmId: Int, x: Int, y: Int, param: Int) {
+        // Auto-assign collection bit for items when param is 0
+        val actualParam = if (param == 0 && RomParser.isItemPlm(plmId)) {
+            val usedBits = _workingPlms.filter { RomParser.isItemPlm(it.id) }.map { it.param }.toSet()
+            var bit = 1
+            while (bit in usedBits && bit < 256) bit = bit shl 1
+            if (bit >= 256) 1 else bit
+        } else param
+        _workingPlms.add(RomParser.PlmEntry(plmId, x, y, actualParam))
+        project.getOrCreateRoom(currentRoomId).plmChanges.add(
+            PlmChange("add", plmId, x, y, actualParam)
+        )
+        dirty = true
+        editVersion++
+    }
+
+    fun removePlm(x: Int, y: Int, plmId: Int) {
+        _workingPlms.removeAll { it.x == x && it.y == y && it.id == plmId }
+        project.getOrCreateRoom(currentRoomId).plmChanges.add(
+            PlmChange("remove", plmId, x, y, 0)
+        )
+        dirty = true
+        editVersion++
     }
 
     /** Flood fill: replace all connected tiles matching the one at (bx, by) with brush. */
@@ -293,7 +430,8 @@ class EditorState {
             visited.add(key)
             if (readBlockWord(cx, cy) != targetWord) continue
             writeBlockWord(cx, cy, newWord)
-            pendingEdits.add(TileEdit(cx, cy, targetWord, newWord, readBts(cx, cy), 0))
+            val bts = readBts(cx, cy)
+            pendingEdits.add(TileEdit(cx, cy, targetWord, newWord, bts, bts))
             changed = true
             queue.add(Pair(cx - 1, cy))
             queue.add(Pair(cx + 1, cy))
@@ -325,7 +463,10 @@ class EditorState {
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
         val op = undoStack.removeAt(undoStack.lastIndex)
-        for (edit in op.edits.reversed()) writeBlockWord(edit.blockX, edit.blockY, edit.oldBlockWord)
+        for (edit in op.edits.reversed()) {
+            writeBlockWord(edit.blockX, edit.blockY, edit.oldBlockWord)
+            writeBts(edit.blockX, edit.blockY, edit.oldBts)
+        }
         redoStack.add(op)
         val roomEdits = project.rooms[project.roomKey(currentRoomId)]
         if (roomEdits != null && roomEdits.operations.isNotEmpty())
@@ -338,7 +479,10 @@ class EditorState {
     fun redo(): Boolean {
         if (redoStack.isEmpty()) return false
         val op = redoStack.removeAt(redoStack.lastIndex)
-        for (edit in op.edits) writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
+        for (edit in op.edits) {
+            writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
+            writeBts(edit.blockX, edit.blockY, edit.newBts)
+        }
         undoStack.add(op)
         project.getOrCreateRoom(currentRoomId).operations.add(op)
         dirty = true
@@ -367,25 +511,98 @@ class EditorState {
         if (romPath.isEmpty()) return null
         val romData = romParser.getRomData().copyOf()
         var patchedRooms = 0
+
+        // Free space allocator for bank $8F (PLM sets live here)
+        val bank8FEnd = romParser.snesToPc(0x8FFFFF) + 1
+        val bank8FStart = romParser.snesToPc(0x8F8000)
+        var freePtr = bank8FEnd
+        while (freePtr > bank8FStart) {
+            val b = romData[freePtr - 1].toInt() and 0xFF
+            if (b != 0xFF && b != 0x00) break
+            freePtr--
+        }
+        freePtr++ // first free byte after last used data
+
         for ((roomKey, roomEdits) in project.rooms) {
-            if (roomEdits.operations.isEmpty()) continue
+            val hasTileEdits = roomEdits.operations.isNotEmpty()
+            val hasPlmEdits = roomEdits.plmChanges.isNotEmpty()
+            if (!hasTileEdits && !hasPlmEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
-            if (room.levelDataPtr == 0) continue
-            val (originalData, origSize) = romParser.decompressLZ2WithSize(room.levelDataPtr)
-            val editedData = originalData.copyOf()
-            val bw = room.width * 16
-            for (op in roomEdits.operations) for (edit in op.edits) {
-                val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
-                if (off + 1 < editedData.size) { editedData[off] = (edit.newBlockWord and 0xFF).toByte(); editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte() }
+
+            // Patch tile data
+            if (hasTileEdits && room.levelDataPtr != 0) {
+                val (originalData, origSize) = romParser.decompressLZ2WithSize(room.levelDataPtr)
+                val editedData = originalData.copyOf()
+                val bw = room.width * 16
+                val layer1Size = (editedData[0].toInt() and 0xFF) or ((editedData[1].toInt() and 0xFF) shl 8)
+                for (op in roomEdits.operations) for (edit in op.edits) {
+                    val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
+                    if (off + 1 < editedData.size) { editedData[off] = (edit.newBlockWord and 0xFF).toByte(); editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte() }
+                    if (edit.newBts != edit.oldBts) { val btsOff = 2 + layer1Size + idx; if (btsOff < editedData.size) editedData[btsOff] = edit.newBts.toByte() }
+                }
+                val compressed = lz5Compress(editedData)
+                val pcOff = romParser.snesToPc(room.levelDataPtr)
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
+                    for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
+                    patchedRooms++
+                } else println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize — skipped tiles")
             }
-            val compressed = lz5Compress(editedData)
-            val pcOff = romParser.snesToPc(room.levelDataPtr)
-            if (compressed.size <= origSize) {
-                System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
-                for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
+
+            // Patch PLM set
+            if (hasPlmEdits && room.plmSetPtr != 0 && room.plmSetPtr != 0xFFFF) {
+                val originalPlms = romParser.parsePlmSet(room.plmSetPtr)
+                val modifiedPlms = originalPlms.toMutableList()
+                for (change in roomEdits.plmChanges) {
+                    when (change.action) {
+                        "add" -> modifiedPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
+                        "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
+                    }
+                }
+                val originalSize = originalPlms.size * 6 + 2
+                val newSize = modifiedPlms.size * 6 + 2
+                val plmPc = romParser.snesToPc(0x8F0000 or room.plmSetPtr)
+
+                val writePc: Int
+                if (newSize <= originalSize) {
+                    writePc = plmPc
+                } else if (freePtr + newSize <= bank8FEnd) {
+                    // Reallocate: write to free space at end of bank $8F
+                    writePc = freePtr
+                    freePtr += newSize
+                    // Update PLM set pointer in state data
+                    val stateDataPc = romParser.getStateDataPcOffset(roomId)
+                    if (stateDataPc != null) {
+                        val newSnes = romParser.pcToSnes(writePc)
+                        val newPtr = newSnes and 0xFFFF
+                        romData[stateDataPc + 20] = (newPtr and 0xFF).toByte()
+                        romData[stateDataPc + 21] = ((newPtr shr 8) and 0xFF).toByte()
+                    }
+                    // Clear old location
+                    for (i in plmPc until plmPc + originalSize) romData[i] = 0
+                    println("Room 0x$roomKey: relocated PLM set to 0x${romParser.pcToSnes(writePc).toString(16)}")
+                } else {
+                    println("WARN: Room 0x$roomKey no free space for expanded PLM set — skipped")
+                    continue
+                }
+
+                var offset = writePc
+                for (plm in modifiedPlms) {
+                    romData[offset] = (plm.id and 0xFF).toByte()
+                    romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
+                    romData[offset + 2] = plm.x.toByte()
+                    romData[offset + 3] = plm.y.toByte()
+                    romData[offset + 4] = (plm.param and 0xFF).toByte()
+                    romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
+                    offset += 6
+                }
+                romData[offset] = 0; romData[offset + 1] = 0
+                if (writePc == plmPc) {
+                    for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                }
                 patchedRooms++
-            } else println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize — skipped")
+            }
         }
         if (patchedRooms == 0) return null
         val orig = File(romPath)
