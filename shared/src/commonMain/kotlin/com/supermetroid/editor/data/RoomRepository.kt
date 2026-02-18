@@ -29,8 +29,7 @@ class RoomRepository {
     }
     
     fun getRoomById(roomId: Int): RoomInfo? {
-        val hexId = "0X${roomId.toString(16).uppercase().padStart(4, '0')}"
-        return loadRoomMapping().rooms.values.firstOrNull { it.id == hexId }
+        return loadRoomMapping().rooms.values.firstOrNull { it.getRoomIdAsInt() == roomId }
     }
     
     fun getRoomByHandle(handle: String): RoomInfo? {

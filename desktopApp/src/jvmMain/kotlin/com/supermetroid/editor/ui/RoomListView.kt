@@ -144,7 +144,7 @@ fun RoomListItem(
                     fontSize = 13.sp
                 )
                 Text(
-                    text = room.id,
+                    text = "0x${room.getRoomIdAsInt().toString(16).lowercase().padStart(4, '0')}",
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

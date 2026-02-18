@@ -47,21 +47,24 @@ class MapRenderer(private val romParser: RomParser) {
     )
     
     private val bgColor = 0xFF0C0C18.toInt()       // Deep dark background
-    private val doorColor = 0xFF4090F0.toInt()      // Bright blue doors
     private val spikeColor = 0xFFD04040.toInt()     // Red spikes
+    private val doorColor = 0xFF4090F0.toInt()      // Fallback blue doors (no tile graphics)
     private val edgeColor = 0xFF1A1A28.toInt()      // Dark edge highlight
     private val gridColor = 0x30FFFFFF              // Subtle screen grid
     
     fun renderRoom(room: Room): RoomRenderData? {
         if (room.levelDataPtr == 0) return renderGrid(room)
-        
         val levelData: ByteArray
         try {
             levelData = romParser.decompressLZ2(room.levelDataPtr)
         } catch (e: Exception) {
             return renderGrid(room)
         }
-        
+        return renderRoomFromLevelData(room, levelData)
+    }
+    
+    /** Render from already-decompressed (possibly edited) level data. */
+    fun renderRoomFromLevelData(room: Room, levelData: ByteArray): RoomRenderData? {
         if (levelData.size < 2) return renderGrid(room)
         
         val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
@@ -83,6 +86,20 @@ class MapRenderer(private val romParser: RomParser) {
         val pixelHeight = blocksTall * BLOCK_SIZE
         val pixels = IntArray(pixelWidth * pixelHeight)
         pixels.fill(bgColor)
+        val btsDataStart = tileDataStart + layer1Size
+        
+        // Parse PLM set for door cap coloring
+        val plms = romParser.parsePlmSet(room.plmSetPtr)
+        // Build map: block (x,y) → door cap ARGB color
+        val doorCapColors = mutableMapOf<Long, Int>()
+        for (plm in plms) {
+            val capColor = RomParser.doorCapColor(plm.id) ?: continue
+            // Door caps are 4 blocks tall (left/right doors)
+            for (dy in 0 until 4) {
+                val key = packXY(plm.x, plm.y + dy)
+                doorCapColors[key] = capColor
+            }
+        }
         
         // Parse and render each block
         for (tileIdx in 0 until totalBlocks) {
@@ -104,16 +121,14 @@ class MapRenderer(private val romParser: RomParser) {
             val py = by * BLOCK_SIZE
             
             if (hasTileGraphics) {
-                // Render actual tile graphics
                 val metatilePixels = tileGraphics.renderMetatile(metatileIndex)
                 if (metatilePixels != null) {
-                    // Draw the 16x16 metatile with flip support
                     for (ty in 0 until 16) {
                         for (tx in 0 until 16) {
                             val sx = if (hFlip != 0) 15 - tx else tx
                             val sy = if (vFlip != 0) 15 - ty else ty
                             val argb = metatilePixels[sy * 16 + sx]
-                            if (argb != 0) { // Skip transparent pixels
+                            if (argb != 0) {
                                 setPixel(pixels, pixelWidth, pixelHeight, px + tx, py + ty, argb)
                             }
                         }
@@ -132,11 +147,16 @@ class MapRenderer(private val romParser: RomParser) {
                     fillBlock(pixels, pixelWidth, pixelHeight, px, py, color)
                 }
             }
+            
+            // Tint door cap blocks: recolor blue pixels to the correct door color
+            val capColor = doorCapColors[packXY(bx, by)]
+            if (capColor != null && capColor != RomParser.DOOR_CAP_BLUE) {
+                tintDoorCap(pixels, pixelWidth, pixelHeight, px, py, capColor)
+            }
         }
         
-        // Parse block types and BTS data for overlay system
+        // Parse block types and BTS data for overlay system.
         val blockTypes = IntArray(totalBlocks)
-        val btsDataStart = tileDataStart + layer1Size
         val btsBytes = ByteArray(totalBlocks)
         
         for (i in 0 until totalBlocks) {
@@ -152,10 +172,42 @@ class MapRenderer(private val romParser: RomParser) {
             }
         }
         
-        // Draw screen grid
-        drawScreenGrid(pixels, pixelWidth, pixelHeight, room.width, room.height)
+        // Grid is drawn in the UI layer when "Grid" is toggled on (see MapCanvas.buildCompositeImage)
         
-        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes)
+        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes, itemBlocks = emptySet())
+    }
+    
+    /** Pack two ints into a Long key for map lookup. */
+    private fun packXY(x: Int, y: Int): Long = (x.toLong() shl 32) or (y.toLong() and 0xFFFFFFFFL)
+    
+    /**
+     * Tint blue door cap pixels to a target color. Scans the 16×16 block for
+     * "blue-ish" pixels (blue dominant) and recolors them, preserving brightness.
+     */
+    private fun tintDoorCap(pixels: IntArray, w: Int, h: Int, px: Int, py: Int, targetColor: Int) {
+        val tr = (targetColor shr 16) and 0xFF
+        val tg = (targetColor shr 8) and 0xFF
+        val tb = targetColor and 0xFF
+        for (dy in 0 until BLOCK_SIZE) {
+            for (dx in 0 until BLOCK_SIZE) {
+                val x = px + dx
+                val y = py + dy
+                if (x !in 0 until w || y !in 0 until h) continue
+                val idx = y * w + x
+                val pixel = pixels[idx]
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                // Is this pixel "blue enough" to be part of the door cap?
+                if (b > 60 && b > r + 15 && b > g + 15) {
+                    val brightness = b.toFloat() / 255f
+                    val newR = (tr * brightness).toInt().coerceIn(0, 255)
+                    val newG = (tg * brightness).toInt().coerceIn(0, 255)
+                    val newB = (tb * brightness).toInt().coerceIn(0, 255)
+                    pixels[idx] = (0xFF shl 24) or (newR shl 16) or (newG shl 8) or newB
+                }
+            }
+        }
     }
     
     private fun fillBlock(pixels: IntArray, w: Int, h: Int, px: Int, py: Int, color: Int) {
@@ -193,7 +245,6 @@ class MapRenderer(private val romParser: RomParser) {
         val pixels = IntArray(pw * ph)
         val tc = areaTerrainColors[room.area]?.get(1) ?: 0xFF2A2A2A.toInt()
         pixels.fill(tc)
-        drawScreenGrid(pixels, pw, ph, room.width, room.height)
         return RoomRenderData(pw, ph, pixels)
     }
     
@@ -216,4 +267,5 @@ data class RoomRenderData(
     val blocksTall: Int = 0,  // Height in 16x16 blocks
     val blockTypes: IntArray = IntArray(0),  // Block type per tile (0-15)
     val btsData: ByteArray = ByteArray(0),   // BTS byte per tile
+    val itemBlocks: Set<Int> = emptySet(),   // Block indices that have items (from PLM; empty until we parse PLM set)
 )

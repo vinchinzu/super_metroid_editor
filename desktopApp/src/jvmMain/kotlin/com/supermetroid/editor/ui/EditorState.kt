@@ -1,0 +1,419 @@
+package com.supermetroid.editor.ui
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.supermetroid.editor.data.EditOperation
+import com.supermetroid.editor.data.SmEditProject
+import com.supermetroid.editor.data.TileEdit
+import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.rom.TileGraphics
+import kotlinx.serialization.json.Json
+import java.io.File
+
+// ─── Brush: single or multi-tile selection ──────────────────────
+
+/**
+ * A brush can be 1×1 (single tile) or NxM (rectangle from tileset).
+ * tiles[row][col] = metatile index. hFlip/vFlip apply to the whole grid.
+ */
+data class TileBrush(
+    val tiles: List<List<Int>>,  // [row][col] of metatile indices
+    val blockType: Int = 0x8,
+    val hFlip: Boolean = false,
+    val vFlip: Boolean = false
+) {
+    val cols get() = tiles.firstOrNull()?.size ?: 0
+    val rows get() = tiles.size
+
+    /** Encode one tile at (r, c) as a 16-bit block word. */
+    fun blockWordAt(r: Int, c: Int): Int {
+        val idx = tiles.getOrNull(r)?.getOrNull(c) ?: return 0
+        var word = idx and 0x3FF
+        if (hFlip) word = word or (1 shl 10)
+        if (vFlip) word = word or (1 shl 11)
+        word = word or ((blockType and 0xF) shl 12)
+        return word
+    }
+
+    /** For display: the first tile's metatile index. */
+    val primaryIndex get() = tiles.firstOrNull()?.firstOrNull() ?: 0
+
+    companion object {
+        fun single(metatileIndex: Int, blockType: Int = 0x8) =
+            TileBrush(tiles = listOf(listOf(metatileIndex)), blockType = blockType)
+    }
+}
+
+enum class EditorTool { PAINT, FILL, SAMPLE }
+
+// ─── Editor State ───────────────────────────────────────────────
+
+class EditorState {
+    var brush by mutableStateOf<TileBrush?>(null)
+        private set
+
+    var activeTool by mutableStateOf(EditorTool.PAINT)
+
+    /** Selection rectangle in tileset: (startCol, startRow, endCol, endRow). */
+    var tilesetSelStart by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+    var tilesetSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+
+    val undoStack = mutableStateListOf<EditOperation>()
+    val redoStack = mutableStateListOf<EditOperation>()
+
+    private val pendingEdits = mutableListOf<TileEdit>()
+    private val pendingPositions = mutableSetOf<Long>()
+
+    var project by mutableStateOf(SmEditProject(romPath = ""))
+        private set
+    var projectFilePath: String = ""
+        private set
+
+    var workingLevelData: ByteArray? = null
+        private set
+    var workingBlocksWide: Int = 0
+        private set
+    var workingBlocksTall: Int = 0
+        private set
+    var currentRoomId: Int = 0
+        private set
+    var dirty by mutableStateOf(false)
+        private set
+
+    /** Incremented on every edit to trigger map re-render. */
+    var editVersion by mutableStateOf(0)
+        private set
+
+    /** Mouse position on the map in block coordinates (for cursor preview). -1 = off map. */
+    var hoverBlockX by mutableStateOf(-1)
+    var hoverBlockY by mutableStateOf(-1)
+
+    /** Tile info at hover position (metatile index, block type). */
+    var hoverTileWord by mutableStateOf(0)
+        private set
+
+    /** TileGraphics for rendering brush preview. Set when room loads. */
+    var tileGraphics: TileGraphics? = null
+        private set
+
+    // ─── Tile selection ─────────────────────────────────────────
+
+    fun selectMetatile(index: Int, gridCols: Int = 32) {
+        tilesetSelStart = Pair(index % gridCols, index / gridCols)
+        tilesetSelEnd = tilesetSelStart
+        brush = TileBrush.single(index)
+    }
+
+    fun beginTilesetDrag(col: Int, row: Int) {
+        tilesetSelStart = Pair(col, row)
+        tilesetSelEnd = Pair(col, row)
+    }
+
+    fun updateTilesetDrag(col: Int, row: Int) {
+        tilesetSelEnd = Pair(col, row)
+    }
+
+    /** Finalize rectangle selection → build multi-tile brush. */
+    fun endTilesetDrag(gridCols: Int) {
+        val s = tilesetSelStart ?: return
+        val e = tilesetSelEnd ?: return
+        val c0 = minOf(s.first, e.first)
+        val c1 = maxOf(s.first, e.first)
+        val r0 = minOf(s.second, e.second)
+        val r1 = maxOf(s.second, e.second)
+        val tiles = (r0..r1).map { r ->
+            (c0..c1).map { c -> r * gridCols + c }
+        }
+        brush = TileBrush(tiles = tiles)
+    }
+
+    fun toggleHFlip() { brush = brush?.copy(hFlip = !brush!!.hFlip) }
+    fun toggleVFlip() { brush = brush?.copy(vFlip = !brush!!.vFlip) }
+
+    fun rotateClockwise() {
+        val b = brush ?: return
+        // Transpose + reverse rows = 90° CW for the tile grid
+        val oldTiles = b.tiles
+        val newRows = oldTiles[0].indices.map { c -> oldTiles.indices.reversed().map { r -> oldTiles[r][c] } }
+        brush = b.copy(tiles = newRows, hFlip = !b.vFlip, vFlip = b.hFlip)
+    }
+
+    fun setBlockType(type: Int) { brush = brush?.copy(blockType = type) }
+
+    /** Update hover info when mouse moves on map. */
+    fun updateHover(bx: Int, by: Int) {
+        hoverBlockX = bx; hoverBlockY = by
+        hoverTileWord = if (bx >= 0 && by >= 0) readBlockWord(bx, by) else 0
+    }
+
+    /** Sample (eyedropper): pick the tile at (bx, by) from the map as the current brush. */
+    fun sampleTile(bx: Int, by: Int, gridCols: Int = 32) {
+        if (bx < 0 || by < 0 || bx >= workingBlocksWide || by >= workingBlocksTall) return
+        val word = readBlockWord(bx, by)
+        val metatileIdx = word and 0x3FF
+        val hf = (word shr 10) and 1 != 0
+        val vf = (word shr 11) and 1 != 0
+        val bt = (word shr 12) and 0xF
+        brush = TileBrush(tiles = listOf(listOf(metatileIdx)), blockType = bt, hFlip = hf, vFlip = vf)
+        tilesetSelStart = Pair(metatileIdx % gridCols, metatileIdx / gridCols)
+        tilesetSelEnd = tilesetSelStart
+        activeTool = EditorTool.PAINT
+    }
+
+    // ─── Project lifecycle ──────────────────────────────────────
+
+    fun initForRom(romPath: String) {
+        projectFilePath = romPath.replaceAfterLast('.', "smedit")
+        val file = File(projectFilePath)
+        if (file.exists()) {
+            try {
+                project = json.decodeFromString(SmEditProject.serializer(), file.readText())
+                println("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms)")
+            } catch (e: Exception) {
+                println("Failed to load project: ${e.message}")
+                project = SmEditProject(romPath = romPath)
+            }
+        } else {
+            project = SmEditProject(romPath = romPath)
+        }
+        dirty = false
+    }
+
+    // ─── Working level data ─────────────────────────────────────
+
+    fun loadRoom(roomId: Int, romParser: RomParser, room: com.supermetroid.editor.data.Room) {
+        currentRoomId = roomId
+        // Load tile graphics for brush preview rendering
+        val tg = TileGraphics(romParser)
+        if (tg.loadTileset(room.tileset)) tileGraphics = tg
+        val levelData = romParser.decompressLZ2(room.levelDataPtr)
+        workingLevelData = levelData.copyOf()
+        workingBlocksWide = room.width * 16
+        workingBlocksTall = room.height * 16
+        undoStack.clear()
+        redoStack.clear()
+        pendingEdits.clear()
+        pendingPositions.clear()
+
+        val roomKey = project.roomKey(roomId)
+        val savedRoom = project.rooms[roomKey]
+        if (savedRoom != null && savedRoom.operations.isNotEmpty()) {
+            var count = 0
+            for (op in savedRoom.operations) {
+                for (edit in op.edits) {
+                    writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
+                    count++
+                }
+                undoStack.add(op)
+            }
+            println("Replayed $count saved edits for room 0x$roomKey")
+        }
+        // Bump version so map renders from working data immediately
+        editVersion++
+    }
+
+    fun readBlockWord(bx: Int, by: Int): Int {
+        val data = workingLevelData ?: return 0
+        val idx = by * workingBlocksWide + bx
+        val offset = 2 + idx * 2
+        if (offset + 1 >= data.size) return 0
+        return ((data[offset + 1].toInt() and 0xFF) shl 8) or (data[offset].toInt() and 0xFF)
+    }
+
+    fun readBts(bx: Int, by: Int): Int {
+        val data = workingLevelData ?: return 0
+        val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
+        val idx = by * workingBlocksWide + bx
+        val btsOffset = 2 + layer1Size + idx
+        if (btsOffset >= data.size) return 0
+        return data[btsOffset].toInt() and 0xFF
+    }
+
+    private fun writeBlockWord(bx: Int, by: Int, word: Int) {
+        val data = workingLevelData ?: return
+        val idx = by * workingBlocksWide + bx
+        val offset = 2 + idx * 2
+        if (offset + 1 >= data.size) return
+        data[offset] = (word and 0xFF).toByte()
+        data[offset + 1] = ((word shr 8) and 0xFF).toByte()
+    }
+
+    // ─── Paint / Erase / Fill ───────────────────────────────────
+
+    fun beginStroke() {
+        pendingEdits.clear()
+        pendingPositions.clear()
+    }
+
+    /** Paint the full brush at map position (bx, by). Returns true if anything changed. */
+    fun paintAt(bx: Int, by: Int): Boolean {
+        val b = brush ?: return false
+        var changed = false
+        for (r in 0 until b.rows) {
+            for (c in 0 until b.cols) {
+                val tx = bx + if (b.hFlip) (b.cols - 1 - c) else c
+                val ty = by + if (b.vFlip) (b.rows - 1 - r) else r
+                if (tx < 0 || ty < 0 || tx >= workingBlocksWide || ty >= workingBlocksTall) continue
+                val key = (tx.toLong() shl 32) or (ty.toLong() and 0xFFFFFFFFL)
+                if (pendingPositions.contains(key)) continue
+                val oldWord = readBlockWord(tx, ty)
+                val newWord = b.blockWordAt(r, c)
+                if (oldWord == newWord) continue
+                writeBlockWord(tx, ty, newWord)
+                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, readBts(tx, ty), 0))
+                pendingPositions.add(key)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    /** Flood fill: replace all connected tiles matching the one at (bx, by) with brush. */
+    fun floodFill(bx: Int, by: Int): Boolean {
+        val b = brush ?: return false
+        if (b.cols != 1 || b.rows != 1) return false  // fill only works with 1×1 brush
+        if (bx < 0 || by < 0 || bx >= workingBlocksWide || by >= workingBlocksTall) return false
+        val targetWord = readBlockWord(bx, by)
+        val newWord = b.blockWordAt(0, 0)
+        if (targetWord == newWord) return false
+
+        val visited = mutableSetOf<Long>()
+        val queue = ArrayDeque<Pair<Int, Int>>()
+        queue.add(Pair(bx, by))
+        var changed = false
+        while (queue.isNotEmpty()) {
+            val (cx, cy) = queue.removeFirst()
+            if (cx < 0 || cy < 0 || cx >= workingBlocksWide || cy >= workingBlocksTall) continue
+            val key = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+            if (visited.contains(key)) continue
+            visited.add(key)
+            if (readBlockWord(cx, cy) != targetWord) continue
+            writeBlockWord(cx, cy, newWord)
+            pendingEdits.add(TileEdit(cx, cy, targetWord, newWord, readBts(cx, cy), 0))
+            changed = true
+            queue.add(Pair(cx - 1, cy))
+            queue.add(Pair(cx + 1, cy))
+            queue.add(Pair(cx, cy - 1))
+            queue.add(Pair(cx, cy + 1))
+        }
+        return changed
+    }
+
+    fun endStroke() {
+        if (pendingEdits.isEmpty()) return
+        val desc = when (activeTool) {
+            EditorTool.PAINT -> "Paint ${pendingEdits.size} tile(s)"
+            EditorTool.FILL -> "Fill ${pendingEdits.size} tile(s)"
+            EditorTool.SAMPLE -> "Sample"
+        }
+        val op = EditOperation(desc, pendingEdits.toList())
+        undoStack.add(op)
+        redoStack.clear()
+        project.getOrCreateRoom(currentRoomId).operations.add(op)
+        dirty = true
+        editVersion++
+        pendingEdits.clear()
+        pendingPositions.clear()
+    }
+
+    // ─── Undo / Redo ────────────────────────────────────────────
+
+    fun undo(): Boolean {
+        if (undoStack.isEmpty()) return false
+        val op = undoStack.removeAt(undoStack.lastIndex)
+        for (edit in op.edits.reversed()) writeBlockWord(edit.blockX, edit.blockY, edit.oldBlockWord)
+        redoStack.add(op)
+        val roomEdits = project.rooms[project.roomKey(currentRoomId)]
+        if (roomEdits != null && roomEdits.operations.isNotEmpty())
+            roomEdits.operations.removeAt(roomEdits.operations.lastIndex)
+        dirty = true
+        editVersion++
+        return true
+    }
+
+    fun redo(): Boolean {
+        if (redoStack.isEmpty()) return false
+        val op = redoStack.removeAt(redoStack.lastIndex)
+        for (edit in op.edits) writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
+        undoStack.add(op)
+        project.getOrCreateRoom(currentRoomId).operations.add(op)
+        dirty = true
+        editVersion++
+        return true
+    }
+
+    // ─── Project file I/O ───────────────────────────────────────
+
+    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+
+    fun saveProject(): Boolean {
+        if (projectFilePath.isEmpty()) return false
+        return try {
+            File(projectFilePath).writeText(json.encodeToString(SmEditProject.serializer(), project))
+            dirty = false
+            println("Project saved: $projectFilePath")
+            true
+        } catch (e: Exception) { println("Save failed: ${e.message}"); false }
+    }
+
+    // ─── Export: patch ROM ──────────────────────────────────────
+
+    fun exportToRom(romParser: RomParser): String? {
+        val romPath = project.romPath
+        if (romPath.isEmpty()) return null
+        val romData = romParser.getRomData().copyOf()
+        var patchedRooms = 0
+        for ((roomKey, roomEdits) in project.rooms) {
+            if (roomEdits.operations.isEmpty()) continue
+            val roomId = roomKey.toIntOrNull(16) ?: continue
+            val room = romParser.readRoomHeader(roomId) ?: continue
+            if (room.levelDataPtr == 0) continue
+            val (originalData, origSize) = romParser.decompressLZ2WithSize(room.levelDataPtr)
+            val editedData = originalData.copyOf()
+            val bw = room.width * 16
+            for (op in roomEdits.operations) for (edit in op.edits) {
+                val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
+                if (off + 1 < editedData.size) { editedData[off] = (edit.newBlockWord and 0xFF).toByte(); editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte() }
+            }
+            val compressed = lz5Compress(editedData)
+            val pcOff = romParser.snesToPc(room.levelDataPtr)
+            if (compressed.size <= origSize) {
+                System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
+                for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
+                patchedRooms++
+            } else println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize — skipped")
+        }
+        if (patchedRooms == 0) return null
+        val orig = File(romPath)
+        val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
+        out.writeBytes(romData)
+        println("Exported: ${out.absolutePath} ($patchedRooms rooms)")
+        return out.absolutePath
+    }
+
+    // ─── LZ5 Compressor ─────────────────────────────────────────
+
+    private fun lz5Compress(data: ByteArray): ByteArray {
+        val out = mutableListOf<Byte>(); val rawBuf = mutableListOf<Byte>(); var pos = 0
+        fun flushRaw() { var i = 0; while (i < rawBuf.size) { val c = minOf(rawBuf.size - i, 1024); emitCmd(out, 0, c); for (j in 0 until c) out.add(rawBuf[i + j]); i += c }; rawBuf.clear() }
+        while (pos < data.size) {
+            val (dL, dA) = findDictMatch(data, pos); val bL = countByteFill(data, pos); val wL = countWordFill(data, pos)
+            val dS = if (dL >= 3) dL - (if (dL <= 32) 3 else 4) else 0; val bS = if (bL >= 3) bL - (if (bL <= 32) 2 else 3) else 0; val wS = if (wL >= 4) wL - (if (wL <= 32) 3 else 4) else 0
+            when { dS > 0 && dS >= bS && dS >= wS -> { flushRaw(); val l = minOf(dL, 1024); emitCmd(out, 4, l); out.add((dA and 0xFF).toByte()); out.add(((dA shr 8) and 0xFF).toByte()); pos += l }
+                bS > 0 && bS >= wS -> { flushRaw(); val l = minOf(bL, 1024); emitCmd(out, 1, l); out.add(data[pos]); pos += l }
+                wS > 0 -> { flushRaw(); val l = minOf(wL, 1024); emitCmd(out, 2, l); out.add(data[pos]); out.add(data[pos + 1]); pos += l }
+                else -> { rawBuf.add(data[pos]); pos++ } }
+        }; flushRaw(); out.add(0xFF.toByte()); return out.toByteArray()
+    }
+    private fun findDictMatch(d: ByteArray, p: Int): Pair<Int, Int> {
+        if (p < 3) return Pair(0, 0); var bL = 0; var bA = 0; val mx = minOf(p, 0xFFFF); val st = if (p > 4000) 2 else 1; var s = 0
+        while (s < mx) { var m = 0; val mm = minOf(d.size - p, 1024); while (m < mm && d[s + m] == d[p + m]) m++; if (m > bL) { bL = m; bA = s; if (m >= 64) break }; s += st }; return Pair(bL, bA)
+    }
+    private fun countByteFill(d: ByteArray, p: Int): Int { if (p >= d.size) return 0; val b = d[p]; var c = 1; while (p + c < d.size && c < 1024 && d[p + c] == b) c++; return c }
+    private fun countWordFill(d: ByteArray, p: Int): Int { if (p + 1 >= d.size) return 0; val a = d[p]; val b = d[p + 1]; var c = 2; while (p + c < d.size && c < 1024) { if (d[p + c] != (if (c % 2 == 0) a else b)) break; c++ }; return c }
+    private fun emitCmd(o: MutableList<Byte>, cmd: Int, len: Int) { if (len <= 32) o.add(((cmd shl 5) or (len - 1)).toByte()) else { val l = len - 1; o.add((0xE0 or ((cmd and 7) shl 2) or ((l shr 8) and 0x03)).toByte()); o.add((l and 0xFF).toByte()) } }
+}

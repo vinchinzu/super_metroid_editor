@@ -188,6 +188,47 @@ class RomParser(private val romData: ByteArray) {
     }
     
     /**
+     * Decompress and return both the data and the number of ROM bytes consumed.
+     * Used by the export system to know how much space is available for recompression.
+     */
+    fun decompressLZ2WithSize(snesAddress: Int): Pair<ByteArray, Int> {
+        val startPc = snesToPc(snesAddress)
+        return decompressLZ5AtPcWithSize(startPc)
+    }
+    
+    /** Decompress LZ5 and return (decompressed data, ROM bytes consumed). */
+    fun decompressLZ5AtPcWithSize(startPc: Int): Pair<ByteArray, Int> {
+        val result = decompressLZ5AtPc(startPc)
+        // Re-scan to find end position (where 0xFF terminator is)
+        var pos = startPc
+        while (pos < romData.size) {
+            val cmd = romData[pos].toInt() and 0xFF
+            if (cmd == 0xFF) { pos++; break }
+            val topBits = (cmd shr 5) and 7
+            val length: Int
+            if (topBits == 7) {
+                val cmdCode = (cmd shr 2) and 7
+                length = ((cmd and 0x03) shl 8 or (romData[pos + 1].toInt() and 0xFF)) + 1
+                pos += 2
+            } else {
+                val cmdCode = topBits
+                length = (cmd and 0x1F) + 1
+                pos += 1
+            }
+            val cmdCode = if (topBits == 7) (cmd shr 2) and 7 else topBits
+            when (cmdCode) {
+                0 -> pos += length       // direct copy: skip length data bytes
+                1 -> pos += 1            // byte fill: 1 byte
+                2 -> pos += 2            // word fill: 2 bytes
+                3 -> pos += 1            // increasing fill: 1 byte
+                4, 5 -> pos += 2         // absolute copy: 2-byte address
+                6, 7 -> pos += 1         // relative copy: 1 byte offset
+            }
+        }
+        return Pair(result, pos - startPc)
+    }
+    
+    /**
      * Decompress LZ5 data starting at the given PC offset.
      * Ported directly from aremath/sm_rando decompress.py
      */
@@ -345,7 +386,70 @@ class RomParser(private val romData: ByteArray) {
     
     fun getRomData(): ByteArray = romData
     
+    // ─── PLM (Post Load Modification) parsing ───────────────────────
+    
+    data class PlmEntry(val id: Int, val x: Int, val y: Int, val param: Int)
+    
+    /**
+     * Parse the PLM set for a room. plmSetPtr is a 16-bit pointer in bank $8F.
+     * Each PLM entry is 6 bytes: 2-byte ID, 1-byte X, 1-byte Y, 2-byte param.
+     * Terminated by ID == 0x0000.
+     */
+    fun parsePlmSet(plmSetPtr: Int): List<PlmEntry> {
+        if (plmSetPtr == 0 || plmSetPtr == 0xFFFF) return emptyList()
+        val snesAddr = 0x8F0000 or plmSetPtr
+        var pc = snesToPc(snesAddr)
+        val entries = mutableListOf<PlmEntry>()
+        var safety = 0
+        while (pc + 5 < romData.size && safety < 256) {
+            val id = readUInt16At(pc)
+            if (id == 0) break
+            val x = romData[pc + 2].toInt() and 0xFF
+            val y = romData[pc + 3].toInt() and 0xFF
+            val param = readUInt16At(pc + 4)
+            entries.add(PlmEntry(id, x, y, param))
+            pc += 6
+            safety++
+        }
+        return entries
+    }
+    
+    /**
+     * Door cap colors from PLM type IDs.
+     * Door caps in SM are PLMs placed at door positions. The PLM ID determines color:
+     *   $C842/$C848 = Blue (beam)
+     *   $C85A/$C860 = Red/Pink (5 missiles)
+     *   $C866/$C86C = Green (super missile)
+     *   $C872/$C878 = Yellow (power bomb)
+     * Returns ARGB color or null if not a door cap PLM.
+     */
     companion object {
+        // Door cap colors matching the in-game door shield appearance
+        val DOOR_CAP_BLUE   = 0xFF3880D0.toInt()   // Blue: opens with any weapon
+        val DOOR_CAP_RED    = 0xFFD05050.toInt()    // Red/Pink: 5 missiles or 1 super
+        val DOOR_CAP_GREEN  = 0xFF40C048.toInt()    // Green: super missile
+        val DOOR_CAP_YELLOW = 0xFFD8C830.toInt()    // Yellow/Orange: power bomb
+        val DOOR_CAP_GREY   = 0xFF808088.toInt()    // Grey: boss/event dependent
+        
+        /**
+         * Returns ARGB door cap color for a PLM type ID, or null if not a door cap.
+         * Based on Kejardon's PLM documentation:
+         *   $C842-$C855 = Grey (boss/event)   facing L/R/U/D
+         *   $C85A-$C86D = Orange/Yellow (PB)   facing L/R/U/D
+         *   $C872-$C885 = Green (super)        facing L/R/U/D
+         *   $C88A-$C89D = Red (missile)        facing L/R/U/D
+         *   $C8A2-$C8B5 = Blue (beam) opening  facing L/R/U/D
+         *   $C8BA-$C8CD = Blue (beam) closing   facing L/R/U/D
+         */
+        fun doorCapColor(plmId: Int): Int? = when (plmId) {
+            in 0xC842..0xC855 -> DOOR_CAP_GREY      // Grey door caps (boss/event)
+            in 0xC85A..0xC86D -> DOOR_CAP_YELLOW     // Orange/Yellow (power bomb)
+            in 0xC872..0xC885 -> DOOR_CAP_GREEN      // Green (super missile)
+            in 0xC88A..0xC89D -> DOOR_CAP_RED        // Red (5 missiles)
+            in 0xC8A2..0xC8CD -> DOOR_CAP_BLUE       // Blue (beam/anything)
+            else -> null
+        }
+        
         fun loadRom(filePath: String): RomParser {
             val file = java.io.File(filePath)
             if (!file.exists()) {

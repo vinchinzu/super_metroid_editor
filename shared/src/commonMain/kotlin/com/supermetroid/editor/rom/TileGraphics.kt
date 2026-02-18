@@ -53,6 +53,10 @@ class TileGraphics(private val romParser: RomParser) {
     /**
      * Load a complete tileset (graphics + tile table + palette).
      * Returns true if successful.
+     *
+     * Note: Ceres (area 6) rooms may show odd tiles because the game can use
+     * Ceres-specific graphics or a different loading path; the main tileset
+     * table is shared but in-game behaviour may differ for Ceres.
      */
     fun loadTileset(tilesetId: Int): Boolean {
         if (tilesetId == cachedTilesetId && rawTileData != null) return true
@@ -158,6 +162,40 @@ class TileGraphics(private val romParser: RomParser) {
         }
         
         return pixels
+    }
+    
+    /**
+     * Render all metatiles (0..1023) in index order into a single grid image.
+     * Layout: 32 columns × 32 rows of 16×16 metatiles → 512×512 pixels.
+     * Returns null if tileset is not loaded.
+     */
+    fun renderTilesetGrid(): TilesetGridData? {
+        if (metatiles == null || cachedTilesetId < 0) return null
+        val gridCols = 32
+        val gridRows = (METATILE_COUNT + gridCols - 1) / gridCols
+        val tilePx = 16
+        val width = gridCols * tilePx
+        val height = gridRows * tilePx
+        val pixels = IntArray(width * height)
+        val bg = 0xFF0C0C18.toInt()
+        pixels.fill(bg)
+        for (i in 0 until METATILE_COUNT) {
+            val metaPixels = renderMetatile(i) ?: continue
+            val col = i % gridCols
+            val row = i / gridCols
+            val dx = col * tilePx
+            val dy = row * tilePx
+            for (py in 0 until 16) {
+                for (px in 0 until 16) {
+                    val dstIdx = (dy + py) * width + (dx + px)
+                    val srcIdx = py * 16 + px
+                    if (dstIdx in pixels.indices && srcIdx in metaPixels.indices) {
+                        pixels[dstIdx] = metaPixels[srcIdx]
+                    }
+                }
+            }
+        }
+        return TilesetGridData(width, height, pixels, gridCols, gridRows)
     }
     
     // ─── Internal helpers ──────────────────────────────────────────────
@@ -277,4 +315,21 @@ class TileGraphics(private val romParser: RomParser) {
             ((data[offset + 1].toInt() and 0xFF) shl 8) or
             ((data[offset + 2].toInt() and 0xFF) shl 16)
     }
+}
+
+/**
+ * Rendered grid of all metatiles for the current tileset (index order).
+ * Used by the tileset preview panel.
+ */
+data class TilesetGridData(
+    val width: Int,
+    val height: Int,
+    val pixels: IntArray,
+    val gridCols: Int = 32,
+    val gridRows: Int = 32
+) {
+    override fun equals(other: Any?) = other is TilesetGridData &&
+        width == other.width && height == other.height && gridCols == other.gridCols && gridRows == other.gridRows &&
+        pixels.contentEquals(other.pixels)
+    override fun hashCode() = (width * 31 + height) * 31 + pixels.contentHashCode()
 }

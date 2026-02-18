@@ -1,0 +1,263 @@
+{
+    "romPath": "",
+    "rooms": {
+        "91F8": {
+            "roomId": 37368,
+            "operations": [
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 92,
+                            "blockY": 73,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33024
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 93,
+                            "blockY": 73,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33025
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 73,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33025
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 73,
+                            "oldBlockWord": 33025,
+                            "newBlockWord": 33026
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 73,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33027
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 92,
+                            "blockY": 74,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33056
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 93,
+                            "blockY": 74,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33057
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 74,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33058
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 74,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33059
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 96,
+                            "blockY": 73,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33028
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 96,
+                            "blockY": 74,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33060
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 72,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32962
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 71,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32964
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 94,
+                            "blockY": 70,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32932
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 93,
+                            "blockY": 70,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32931
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 93,
+                            "blockY": 71,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32963
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 71,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32963
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 96,
+                            "blockY": 71,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32963
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 71,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32963
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 71,
+                            "oldBlockWord": 32963,
+                            "newBlockWord": 33987
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 70,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32931
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 70,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 32931
+                        }
+                    ]
+                },
+                {
+                    "description": "Paint 1 tile(s)",
+                    "edits": [
+                        {
+                            "blockX": 95,
+                            "blockY": 70,
+                            "oldBlockWord": 255,
+                            "newBlockWord": 33955
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

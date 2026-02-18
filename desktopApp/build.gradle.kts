@@ -28,7 +28,11 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "com.supermetroid.editor.MainKt"
-        
+        // macOS trackpad pinch-to-zoom (magnification gesture)
+        jvmArgs(
+            "--add-exports", "java.desktop/com.apple.eawt.event=ALL-UNNAMED",
+            "--add-opens", "java.desktop/com.apple.eawt.event=ALL-UNNAMED"
+        )
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg)
             packageName = "Super Metroid Editor"
