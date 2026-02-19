@@ -5,11 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.ui.DraggableDividerHorizontal
@@ -117,17 +113,10 @@ fun main() = application {
                 }
                 
                 // Main content: resizable left column + map
-                val density = LocalDensity.current
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }  // 2x default height
-                var verticalDragging by remember { mutableStateOf(false) }
-                var horizontalDragging by remember { mutableStateOf(false) }
-                @OptIn(ExperimentalComposeUiApi::class)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val contentHeightPx = with(density) { maxHeight.toPx() }
-                    val dividerHeightPx = with(density) { 10.dp.toPx() }
                     val maxLeftWidth = maxWidth.value - 100f
-                    Box(modifier = Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
@@ -146,8 +135,9 @@ fun main() = application {
                                 modifier = Modifier.weight(1f)
                             )
                             DraggableDividerHorizontal(
-                                onDragStart = { horizontalDragging = true },
-                                onDragEnd = { horizontalDragging = false }
+                                onDelta = { dy ->
+                                    tilesetHeightDp = (tilesetHeightDp - dy).coerceIn(120f, 700f)
+                                }
                             )
                             TilesetPreview(
                                 room = selectedRoom,
@@ -159,37 +149,17 @@ fun main() = application {
                             )
                         }
                         DraggableDividerVertical(
-                            onDragStart = { verticalDragging = true },
-                            onDragEnd = { verticalDragging = false }
+                            onDelta = { dx ->
+                                leftColumnWidthDp = (leftColumnWidthDp + dx).coerceIn(150f, maxLeftWidth)
+                            }
                         )
                         MapCanvas(
                             room = selectedRoom,
                             romParser = romParser,
                             editorState = editorState,
+                            rooms = rooms,
                             modifier = Modifier.fillMaxSize()
                         )
-                    }
-                    // Full-area overlay captures all movement with absolute coordinates
-                    if (verticalDragging || horizontalDragging) {
-                        Box(
-                            Modifier
-                                .matchParentSize()
-                                .onPointerEvent(PointerEventType.Move) {
-                                    val pos = it.changes.firstOrNull()?.position ?: return@onPointerEvent
-                                    if (verticalDragging) {
-                                        leftColumnWidthDp = (pos.x / density.density).coerceIn(150f, maxLeftWidth)
-                                    }
-                                    if (horizontalDragging) {
-                                        val h = (contentHeightPx - pos.y - dividerHeightPx) / density.density
-                                        tilesetHeightDp = h.coerceIn(120f, 700f)
-                                    }
-                                }
-                                .onPointerEvent(PointerEventType.Release) {
-                                    verticalDragging = false
-                                    horizontalDragging = false
-                                }
-                        )
-                    }
                     }
                 }
             }

@@ -86,6 +86,10 @@ fun TilesetPreview(
                         val vScroll = rememberScrollState()
                         val coroutineScope = rememberCoroutineScope()
 
+                        var isPanning by remember { mutableStateOf(false) }
+                        var lastPanX by remember { mutableStateOf(0f) }
+                        var lastPanY by remember { mutableStateOf(0f) }
+
                         fun pointerToTile(px: Float, py: Float): Pair<Int, Int> {
                             val tx = ((px + hScroll.value) / zoomLevel / 16).toInt()
                             val ty = ((py + vScroll.value) / zoomLevel / 16).toInt()
@@ -95,22 +99,28 @@ fun TilesetPreview(
                             )
                         }
 
-                        val scrollSpeed = 48f
                         Box(
                             modifier = Modifier.fillMaxSize()
                                 .onPointerEvent(PointerEventType.Scroll) { event ->
                                     val ne = event.nativeEvent as? MouseEvent
-                                    val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
                                     val sd = event.changes.first().scrollDelta
-                                    if (zoom) { zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.5f, 4f) }
-                                    else coroutineScope.launch {
-                                        hScroll.scrollTo((hScroll.value + (sd.x * scrollSpeed).toInt()).coerceIn(0, hScroll.maxValue))
-                                        vScroll.scrollTo((vScroll.value + (sd.y * scrollSpeed).toInt()).coerceIn(0, vScroll.maxValue))
+                                    val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
+                                    if (zoom) {
+                                        zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.5f, 4f)
+                                    } else if (ne?.isShiftDown == true) {
+                                        val delta = if (sd.x != 0f) sd.x else sd.y
+                                        coroutineScope.launch {
+                                            hScroll.scrollTo((hScroll.value + delta.toInt()).coerceIn(0, hScroll.maxValue))
+                                        }
                                     }
                                 }
                                 .onPointerEvent(PointerEventType.Press) { event ->
-                                    val ne = event.nativeEvent as? MouseEvent
-                                    if (ne != null && ne.button == MouseEvent.BUTTON1 && editorState != null) {
+                                    val ne = event.nativeEvent as? MouseEvent ?: return@onPointerEvent
+                                    if (ne.button == MouseEvent.BUTTON2) {
+                                        isPanning = true
+                                        val p = event.changes.first().position
+                                        lastPanX = p.x; lastPanY = p.y
+                                    } else if (ne.button == MouseEvent.BUTTON1 && editorState != null) {
                                         val pos = event.changes.first().position
                                         val (tx, ty) = pointerToTile(pos.x, pos.y)
                                         editorState.beginTilesetDrag(tx, ty)
@@ -118,13 +128,23 @@ fun TilesetPreview(
                                     }
                                 }
                                 .onPointerEvent(PointerEventType.Move) { event ->
+                                    val pos = event.changes.first().position
+                                    if (isPanning) {
+                                        val dx = lastPanX - pos.x; val dy = lastPanY - pos.y
+                                        lastPanX = pos.x; lastPanY = pos.y
+                                        coroutineScope.launch {
+                                            hScroll.scrollTo((hScroll.value + dx.toInt()).coerceIn(0, hScroll.maxValue))
+                                            vScroll.scrollTo((vScroll.value + dy.toInt()).coerceIn(0, vScroll.maxValue))
+                                        }
+                                    }
                                     if (isDragging && editorState != null) {
-                                        val pos = event.changes.first().position
                                         val (tx, ty) = pointerToTile(pos.x, pos.y)
                                         editorState.updateTilesetDrag(tx, ty)
                                     }
                                 }
-                                .onPointerEvent(PointerEventType.Release) {
+                                .onPointerEvent(PointerEventType.Release) { event ->
+                                    val ne = event.nativeEvent as? MouseEvent
+                                    if (ne == null || ne.button == MouseEvent.BUTTON2) isPanning = false
                                     if (isDragging && editorState != null) {
                                         isDragging = false
                                         editorState.endTilesetDrag(gridData!!.gridCols)

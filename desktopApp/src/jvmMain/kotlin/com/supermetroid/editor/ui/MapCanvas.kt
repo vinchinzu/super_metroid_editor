@@ -124,6 +124,7 @@ fun MapCanvas(
     room: RoomInfo?,
     romParser: RomParser?,
     editorState: EditorState? = null,
+    rooms: List<RoomInfo> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val zoomState = remember { mutableStateOf(1f) }
@@ -599,7 +600,8 @@ fun MapCanvas(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .padding(8.dp)
-                                        .width(260.dp),
+                                        .width(260.dp)
+                                        .heightIn(max = 600.dp),
                                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                                 ) {
                                     Column(
@@ -758,6 +760,100 @@ fun MapCanvas(
                                                 textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
                                                 singleLine = true
                                             )
+                                        }
+
+                                        // ── Door Connection Info (when block type = Door) ──
+                                        if (propsBlockType == 0x9) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Divider()
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text("Door Connection", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Spacer(modifier = Modifier.height(2.dp))
+
+                                            val allDoors = editorState.doorEntries
+                                            val roomIdToName = remember(rooms) {
+                                                rooms.associate {
+                                                    it.getRoomIdAsInt() to it.name
+                                                }
+                                            }
+
+                                            if (allDoors.isEmpty()) {
+                                                Text("No door entries found", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            } else {
+                                                // Door index dropdown (BTS selects which door)
+                                                var doorDropExpanded by remember { mutableStateOf(false) }
+                                                val currentDoor = allDoors.getOrNull(propsBts)
+                                                val doorLabel = if (currentDoor != null) {
+                                                    val destName = roomIdToName[currentDoor.destRoomPtr]
+                                                        ?: "Room 0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
+                                                    "#$propsBts → $destName"
+                                                } else {
+                                                    "#$propsBts (invalid index)"
+                                                }
+                                                Box {
+                                                    Surface(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(32.dp)
+                                                            .clickable { doorDropExpanded = true },
+                                                        shape = MaterialTheme.shapes.small,
+                                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Text(doorLabel, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                                            Text("▾", fontSize = 10.sp)
+                                                        }
+                                                    }
+                                                    DropdownMenu(
+                                                        expanded = doorDropExpanded,
+                                                        onDismissRequest = { doorDropExpanded = false }
+                                                    ) {
+                                                        for ((idx, door) in allDoors.withIndex()) {
+                                                            val dName = roomIdToName[door.destRoomPtr]
+                                                                ?: "Room 0x${door.destRoomPtr.toString(16).uppercase()}"
+                                                            val elevTag = if (door.isElevator) " ⇕" else ""
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                                        RadioButton(selected = propsBts == idx, onClick = null, modifier = Modifier.size(16.dp))
+                                                                        Text("#$idx → $dName (${door.directionName}$elevTag)", fontSize = 10.sp)
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    doorDropExpanded = false
+                                                                    if (idx != propsBts) {
+                                                                        propsBts = idx
+                                                                        editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, idx)
+                                                                    }
+                                                                },
+                                                                modifier = Modifier.height(28.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                // Show destination details for current door
+                                                if (currentDoor != null) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    val destName = roomIdToName[currentDoor.destRoomPtr]
+                                                        ?: "0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
+                                                    Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                        Text("Dest: $destName", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(
+                                                            "Dir: ${currentDoor.directionName}  Screen: (${currentDoor.screenX}, ${currentDoor.screenY})",
+                                                            fontSize = 9.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        if (currentDoor.isElevator) {
+                                                            Text("Elevator transition", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         // ── Items / PLMs at this tile ──

@@ -8,6 +8,7 @@ import com.supermetroid.editor.data.EditOperation
 import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.TileEdit
+import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
 import kotlinx.serialization.json.Json
@@ -109,6 +110,10 @@ class EditorState {
     private val _workingPlms = mutableListOf<RomParser.PlmEntry>()
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
     private var originalPlmCount = 0
+
+    /** Door entries for the current room (parsed from ROM, read-only). */
+    var doorEntries: List<RomParser.DoorEntry> = emptyList()
+        private set
 
     // ─── Tile selection ─────────────────────────────────────────
 
@@ -243,6 +248,9 @@ class EditorState {
         val plms = romParser.parsePlmSet(room.plmSetPtr)
         _workingPlms.addAll(plms)
         originalPlmCount = plms.size
+
+        // Parse door entries for this room
+        doorEntries = romParser.parseDoorList(room.doorOut)
 
         val roomKey = project.roomKey(roomId)
         val savedRoom = project.rooms[roomKey]
@@ -385,12 +393,40 @@ class EditorState {
         _workingPlms.filter { it.x == x && it.y == y }
 
     fun addPlm(plmId: Int, x: Int, y: Int, param: Int) {
-        // Auto-assign collection bit for items when param is 0
+        // Remove any existing item PLM at the same position to avoid duplicates
+        if (RomParser.isItemPlm(plmId)) {
+            val existing = _workingPlms.filter { it.x == x && it.y == y && RomParser.isItemPlm(it.id) }
+            for (old in existing) {
+                _workingPlms.remove(old)
+                project.getOrCreateRoom(currentRoomId).plmChanges.add(
+                    PlmChange("remove", old.id, old.x, old.y, 0)
+                )
+            }
+        }
+
+        // Auto-assign collection index for items when param is 0.
+        // SM uses sequential indices stored in a ~20-byte collection bit array.
+        // Original items use: Crateria 0x00-0x0B, Brinstar 0x0D-0x30,
+        // Norfair 0x31-0x50, Wrecked Ship 0x80-0x87, Maridia 0x88-0x9A.
+        // The gap 0x51-0x7F (47 slots) is unused and safe for new items.
+        // WARNING: 0xA0+ overflows the collection array and corrupts save data!
         val actualParam = if (param == 0 && RomParser.isItemPlm(plmId)) {
-            val usedBits = _workingPlms.filter { RomParser.isItemPlm(it.id) }.map { it.param }.toSet()
-            var bit = 1
-            while (bit in usedBits && bit < 256) bit = bit shl 1
-            if (bit >= 256) 1 else bit
+            val usedIndices = mutableSetOf<Int>()
+            for ((_, roomEdits) in project.rooms) {
+                for (change in roomEdits.plmChanges) {
+                    if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+                }
+            }
+            for (plm in _workingPlms) {
+                if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
+            }
+            var idx = 0x51
+            while (idx in usedIndices && idx <= 0x7F) idx++
+            if (idx > 0x7F) {
+                idx = 0x9B
+                while (idx in usedIndices && idx <= 0x9F) idx++
+            }
+            if (idx > 0x9F) 0x06 else idx
         } else param
         _workingPlms.add(RomParser.PlmEntry(plmId, x, y, actualParam))
         project.getOrCreateRoom(currentRoomId).plmChanges.add(
@@ -560,8 +596,20 @@ class EditorState {
                         "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
                     }
                 }
+                // Deduplicate: if multiple item PLMs at the same (x,y), keep last one
+                val seen = mutableSetOf<Long>()
+                val deduped = mutableListOf<RomParser.PlmEntry>()
+                for (plm in modifiedPlms.reversed()) {
+                    val key = (plm.x.toLong() shl 16) or plm.y.toLong()
+                    if (RomParser.isItemPlm(plm.id)) {
+                        if (key in seen) continue
+                        seen.add(key)
+                    }
+                    deduped.add(plm)
+                }
+                deduped.reverse()
                 val originalSize = originalPlms.size * 6 + 2
-                val newSize = modifiedPlms.size * 6 + 2
+                val newSize = deduped.size * 6 + 2
                 val plmPc = romParser.snesToPc(0x8F0000 or room.plmSetPtr)
 
                 val writePc: Int
@@ -588,7 +636,7 @@ class EditorState {
                 }
 
                 var offset = writePc
-                for (plm in modifiedPlms) {
+                for (plm in deduped) {
                     romData[offset] = (plm.id and 0xFF).toByte()
                     romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
                     romData[offset + 2] = plm.x.toByte()
@@ -612,25 +660,5 @@ class EditorState {
         return out.absolutePath
     }
 
-    // ─── LZ5 Compressor ─────────────────────────────────────────
-
-    private fun lz5Compress(data: ByteArray): ByteArray {
-        val out = mutableListOf<Byte>(); val rawBuf = mutableListOf<Byte>(); var pos = 0
-        fun flushRaw() { var i = 0; while (i < rawBuf.size) { val c = minOf(rawBuf.size - i, 1024); emitCmd(out, 0, c); for (j in 0 until c) out.add(rawBuf[i + j]); i += c }; rawBuf.clear() }
-        while (pos < data.size) {
-            val (dL, dA) = findDictMatch(data, pos); val bL = countByteFill(data, pos); val wL = countWordFill(data, pos)
-            val dS = if (dL >= 3) dL - (if (dL <= 32) 3 else 4) else 0; val bS = if (bL >= 3) bL - (if (bL <= 32) 2 else 3) else 0; val wS = if (wL >= 4) wL - (if (wL <= 32) 3 else 4) else 0
-            when { dS > 0 && dS >= bS && dS >= wS -> { flushRaw(); val l = minOf(dL, 1024); emitCmd(out, 4, l); out.add((dA and 0xFF).toByte()); out.add(((dA shr 8) and 0xFF).toByte()); pos += l }
-                bS > 0 && bS >= wS -> { flushRaw(); val l = minOf(bL, 1024); emitCmd(out, 1, l); out.add(data[pos]); pos += l }
-                wS > 0 -> { flushRaw(); val l = minOf(wL, 1024); emitCmd(out, 2, l); out.add(data[pos]); out.add(data[pos + 1]); pos += l }
-                else -> { rawBuf.add(data[pos]); pos++ } }
-        }; flushRaw(); out.add(0xFF.toByte()); return out.toByteArray()
-    }
-    private fun findDictMatch(d: ByteArray, p: Int): Pair<Int, Int> {
-        if (p < 3) return Pair(0, 0); var bL = 0; var bA = 0; val mx = minOf(p, 0xFFFF); val st = if (p > 4000) 2 else 1; var s = 0
-        while (s < mx) { var m = 0; val mm = minOf(d.size - p, 1024); while (m < mm && d[s + m] == d[p + m]) m++; if (m > bL) { bL = m; bA = s; if (m >= 64) break }; s += st }; return Pair(bL, bA)
-    }
-    private fun countByteFill(d: ByteArray, p: Int): Int { if (p >= d.size) return 0; val b = d[p]; var c = 1; while (p + c < d.size && c < 1024 && d[p + c] == b) c++; return c }
-    private fun countWordFill(d: ByteArray, p: Int): Int { if (p + 1 >= d.size) return 0; val a = d[p]; val b = d[p + 1]; var c = 2; while (p + c < d.size && c < 1024) { if (d[p + c] != (if (c % 2 == 0) a else b)) break; c++ }; return c }
-    private fun emitCmd(o: MutableList<Byte>, cmd: Int, len: Int) { if (len <= 32) o.add(((cmd shl 5) or (len - 1)).toByte()) else { val l = len - 1; o.add((0xE0 or ((cmd and 7) shl 2) or ((l shr 8) and 0x03)).toByte()); o.add((l and 0xFF).toByte()) } }
+    private fun lz5Compress(data: ByteArray) = LZ5Compressor.compress(data)
 }

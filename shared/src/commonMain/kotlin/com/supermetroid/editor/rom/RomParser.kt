@@ -405,6 +405,26 @@ class RomParser(private val romData: ByteArray) {
     // ─── PLM (Post Load Modification) parsing ───────────────────────
     
     data class PlmEntry(val id: Int, val x: Int, val y: Int, val param: Int)
+    data class RoomItemInfo(val roomId: Int, val area: Int, val plm: PlmEntry)
+
+    /**
+     * Scan all rooms for item PLMs and return a list with room/area metadata.
+     * Useful for finding used collection bit parameters per area.
+     */
+    fun scanAllItemPlms(roomIds: List<Int>): List<RoomItemInfo> {
+        val result = mutableListOf<RoomItemInfo>()
+        for (rid in roomIds) {
+            val room = readRoomHeader(rid) ?: continue
+            if (room.plmSetPtr == 0 || room.plmSetPtr == 0xFFFF) continue
+            val plms = parsePlmSet(room.plmSetPtr)
+            for (plm in plms) {
+                if (isItemPlm(plm.id)) {
+                    result.add(RoomItemInfo(rid, room.area, plm))
+                }
+            }
+        }
+        return result
+    }
     
     /**
      * Parse the PLM set for a room. plmSetPtr is a 16-bit pointer in bank $8F.
@@ -430,6 +450,76 @@ class RomParser(private val romData: ByteArray) {
         return entries
     }
     
+    // ─── Door entry parsing ──────────────────────────────────────────
+
+    /**
+     * 12-byte door entry in bank $83. Format (LE):
+     *   +0  destRoomPtr  (2) destination room ID within bank $8F
+     *   +2  bitflag      (2) direction (high byte) + flags (low byte: bit7=elevator)
+     *   +4  doorCapCode  (2) ASM pointer ($8F) for scroll changes on entry
+     *   +6  screenX      (1) spawn screen X
+     *   +7  screenY      (1) spawn screen Y
+     *   +8  distFromDoor (2) Samus distance from door edge (0x8000 = default)
+     *   +10 entryCode    (2) ASM pointer ($8F) to run on arrival
+     */
+    data class DoorEntry(
+        val destRoomPtr: Int,
+        val bitflag: Int,
+        val doorCapCode: Int,
+        val screenX: Int,
+        val screenY: Int,
+        val distFromDoor: Int,
+        val entryCode: Int
+    ) {
+        val direction: Int get() = (bitflag shr 8) and 0xFF
+        val directionName: String get() = when (direction and 0x03) {
+            0 -> "Right"
+            1 -> "Left"
+            2 -> "Down"
+            3 -> "Up"
+            else -> "?"
+        }
+        val isElevator: Boolean get() = (bitflag and 0x80) != 0
+    }
+
+    /**
+     * Read a single door entry by index from the room's door-out list.
+     * doorOutPtr is within bank $8F; each list slot is a 2-byte pointer into bank $83.
+     */
+    fun parseDoorEntry(doorOutPtr: Int, doorIndex: Int): DoorEntry? {
+        if (doorOutPtr == 0 || doorOutPtr == 0xFFFF) return null
+        val listPc = snesToPc(0x8F0000 or doorOutPtr)
+        val ptrOff = listPc + doorIndex * 2
+        if (ptrOff + 1 >= romData.size) return null
+        val entryPtr = readUInt16At(ptrOff)
+        if (entryPtr < 0x8000) return null
+        val entryPc = snesToPc(0x830000 or entryPtr)
+        if (entryPc + 11 >= romData.size) return null
+        val destRoom = readUInt16At(entryPc)
+        if (destRoom < 0x8000 || destRoom == 0xFFFF) return null
+        return DoorEntry(
+            destRoomPtr = destRoom,
+            bitflag = readUInt16At(entryPc + 2),
+            doorCapCode = readUInt16At(entryPc + 4),
+            screenX = romData[entryPc + 6].toInt() and 0xFF,
+            screenY = romData[entryPc + 7].toInt() and 0xFF,
+            distFromDoor = readUInt16At(entryPc + 8),
+            entryCode = readUInt16At(entryPc + 10)
+        )
+    }
+
+    /**
+     * Parse all door entries for a room. Reads the door-out list until an
+     * invalid pointer is encountered, up to [maxDoors].
+     */
+    fun parseDoorList(doorOutPtr: Int, maxDoors: Int = 16): List<DoorEntry> {
+        val entries = mutableListOf<DoorEntry>()
+        for (i in 0 until maxDoors) {
+            entries.add(parseDoorEntry(doorOutPtr, i) ?: break)
+        }
+        return entries
+    }
+
     /**
      * Door cap colors from PLM type IDs.
      * Door caps in SM are PLMs placed at door positions. The PLM ID determines color:
