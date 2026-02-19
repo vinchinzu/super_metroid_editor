@@ -41,26 +41,29 @@ import com.supermetroid.editor.ui.LocalSwingWindow
  *   Setup $B3C1 (BTS 0x04-0x07): Hidden shot blocks (look solid, beam-breakable when revealed)
  *   Setup $CF2E (BTS 0x08-0x09): Power bomb breakable
  *   Setup $CF67 (BTS 0x0A-0x0B): Super missile required
- *   BTS 0x40-0x4F: Door cap / gate mechanisms (not real shot blocks)
+ *   BTS bit 6 (0x40): chain-react — breaks adjacent same-type blocks
+ *     0x40-0x41: chain-react beam, 0x42-0x43: chain-react speed booster
  */
 private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
-    0x00, 0x01, 0x02, 0x03 -> ShotCategory.BEAM    // beam/missile/bomb (setup $CE6B)
-    0x04, 0x05, 0x06, 0x07 -> ShotCategory.HIDDEN   // hidden (setup $B3C1)
-    0x08, 0x09 -> ShotCategory.PB                    // power bomb (setup $CF2E)
-    0x0A, 0x0B -> ShotCategory.SUPER                 // super missile (setup $CF67)
-    in 0x40..0x4F -> ShotCategory.DOOR               // door cap / gate mechanism
-    else -> ShotCategory.BEAM                         // default
+    0x00, 0x01 -> ShotCategory.BEAM
+    0x02, 0x03 -> ShotCategory.SPEED
+    0x04, 0x05, 0x06, 0x07 -> ShotCategory.HIDDEN
+    0x08, 0x09 -> ShotCategory.PB
+    0x0A, 0x0B -> ShotCategory.SUPER
+    0x40, 0x41 -> ShotCategory.BEAM
+    0x42, 0x43 -> ShotCategory.SPEED
+    else -> ShotCategory.BEAM
 }
 
-private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
+private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, SPEED }
 
 /** Named BTS options for block types that have well-known sub-types. */
 private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
     0xC -> listOf(
-        0x00 to "Beam/Bomb (respawn)",
-        0x01 to "Beam/Bomb (no respawn)",
-        0x02 to "Beam/Bomb (respawn, speed)",
-        0x03 to "Beam/Bomb (no respawn, speed)",
+        0x00 to "Any weapon (respawn)",
+        0x01 to "Any weapon (no respawn)",
+        0x02 to "Speed Booster only (respawn)",
+        0x03 to "Speed Booster only (no respawn)",
         0x04 to "Hidden (respawn)",
         0x05 to "Hidden (no respawn)",
         0x06 to "Hidden (respawn, alt)",
@@ -69,11 +72,23 @@ private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = wh
         0x09 to "Power Bomb (no respawn)",
         0x0A to "Super Missile (respawn)",
         0x0B to "Super Missile (no respawn)",
+        0x40 to "Chain-react (respawn)",
+        0x41 to "Chain-react (no respawn)",
+        0x42 to "Chain-react Speed (respawn)",
+        0x43 to "Chain-react Speed (no respawn)",
     )
     0xF -> listOf(0x00 to "Normal")
     0xB -> listOf(0x00 to "Normal")
     else -> emptyList()
 }
+
+private val blockTypeNames = mapOf(
+    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
+    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid", 0x9 to "Door",
+    0xA to "Spike", 0xB to "Crumble", 0xC to "Shot Block", 0xD to "V-Extend",
+    0xE to "Grapple", 0xF to "Bomb Block"
+)
+private fun blockTypeName(type: Int): String = blockTypeNames[type] ?: "0x${type.toString(16).uppercase()}"
 
 enum class TileOverlay(val label: String, val shortLabel: String, val color: Long) {
     // Block types (from level data bits 12-15)
@@ -305,9 +320,11 @@ fun MapCanvas(
                         // Brush info + hover tile info
                         val brush = editorState.brush
                         if (brush != null) {
+                            val bt = brush.blockType
                             Text(
                                 "${brush.cols}×${brush.rows}" +
                                     " #${brush.primaryIndex}" +
+                                    " 0x${bt.toString(16).uppercase()} ${blockTypeName(bt)}" +
                                     (if (brush.hFlip) " H" else "") +
                                     (if (brush.vFlip) " V" else ""),
                                 fontSize = 9.sp,
@@ -320,7 +337,7 @@ fun MapCanvas(
                             val hIdx = hw and 0x3FF
                             val hType = (hw shr 12) and 0xF
                             Text(
-                                "Tile #$hIdx Type 0x${hType.toString(16)}",
+                                "#$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
                                 fontSize = 9.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -592,8 +609,7 @@ fun MapCanvas(
                                     0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
                                     0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
                                 )
-                                val blockTypeName = editableBlockTypes.firstOrNull { it.first == propsBlockType }?.second
-                                    ?: "0x${propsBlockType.toString(16).uppercase()}"
+                                val propsTypeName = blockTypeName(propsBlockType)
                                 val btsOptions = btsOptionsForBlockType(propsBlockType)
 
                                 Card(
@@ -616,7 +632,7 @@ fun MapCanvas(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                "Tile ($propsBlockX, $propsBlockY)  #$propsMetatile",
+                                                "($propsBlockX, $propsBlockY) #$propsMetatile 0x${propsBlockType.toString(16).uppercase()} $propsTypeName",
                                                 fontSize = 11.sp,
                                                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                                             )
@@ -651,7 +667,7 @@ fun MapCanvas(
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
                                                     Text(
-                                                        "0x${propsBlockType.toString(16).uppercase()} $blockTypeName",
+                                                        "0x${propsBlockType.toString(16).uppercase()} $propsTypeName",
                                                         fontSize = 11.sp,
                                                         modifier = Modifier.weight(1f)
                                                     )
@@ -1043,7 +1059,7 @@ private fun buildCompositeImage(
                     ShotCategory.SUPER -> if (activeOverlays.contains(TileOverlay.SHOT_SUPER)) matchingOverlays.add(TileOverlay.SHOT_SUPER)
                     ShotCategory.PB -> if (activeOverlays.contains(TileOverlay.SHOT_PB)) matchingOverlays.add(TileOverlay.SHOT_PB)
                     ShotCategory.HIDDEN -> if (activeOverlays.contains(TileOverlay.SHOT_BEAM)) matchingOverlays.add(TileOverlay.SHOT_BEAM)
-                    ShotCategory.DOOR -> {} // Door cap blocks in shot type — skip, shown by Door overlay
+                    ShotCategory.SPEED -> if (activeOverlays.contains(TileOverlay.SPEED)) matchingOverlays.add(TileOverlay.SPEED)
                 }
             }
             if (activeOverlays.contains(TileOverlay.CRUMBLE) && blockType == 0xB) matchingOverlays.add(TileOverlay.CRUMBLE)

@@ -14,20 +14,83 @@ import com.supermetroid.editor.rom.TileGraphics
 import kotlinx.serialization.json.Json
 import java.io.File
 
+// ─── Tileset defaults: metatile → (block type, BTS) ─────────────
+
+data class TileDefault(val blockType: Int, val bts: Int = 0)
+
+/**
+ * Hardcoded defaults for well-known metatiles. When a tile from the tileset
+ * is placed on the map, these defaults are applied automatically so the user
+ * doesn't have to right-click and set properties for every block.
+ *
+ * Block types: 0x0=Air, 0x4=Shot, 0x5=H-Extend, 0x8=Solid, 0x9=Door,
+ *   0xA=Spike, 0xB=Crumble, 0xC=Shot(reform), 0xD=V-Extend, 0xE=Grapple,
+ *   0xF=Bomb(reform)
+ *
+ * Shot/reform BTS low nibble: 0x00=any weapon, 0x02=speed booster, 0x08=power bomb,
+ *   0x09=power bomb(no respawn), 0x0A=super missile, 0x0B=super missile(no respawn)
+ * BTS bit 6 (0x40): chain-react — shooting one breaks all adjacent blocks of same type/BTS
+ */
+object TilesetDefaults {
+    val defaults: Map<Int, TileDefault> = mapOf(
+        // Item containers (shot blocks — player shoots to reveal PLM item)
+        74  to TileDefault(0x4),              // Energy Tank
+        76  to TileDefault(0x4),              // Missile
+        78  to TileDefault(0x4),              // Super Missile
+        80  to TileDefault(0x4),              // Power Bomb
+
+        // Standard interactive blocks
+        82  to TileDefault(0xC, 0x00),        // Shootable block (reforms, any weapon)
+        86  to TileDefault(0xA),              // Spike
+        87  to TileDefault(0xC, 0x08),        // Power bombable block (reforms)
+        88  to TileDefault(0xF),              // Bombable block (reforms)
+        114 to TileDefault(0x4, 0x00),        // Shootable item block (chozo, one-time)
+        155 to TileDefault(0xE),              // Grapple block
+        156 to TileDefault(0xA),              // Spike (alt tile)
+        159 to TileDefault(0xC, 0x0A),        // Super missile breakable (reforms)
+        182 to TileDefault(0xC, 0x02),        // Speed booster breakable (reforms)
+        183 to TileDefault(0xE),              // Crumble grapple (grapple primary; user can set crumble via properties)
+        188 to TileDefault(0xB),              // Crumble block
+
+        // Multi-tile shot blocks: chain-react (BTS bit 6)
+        // All tiles in a group use the same type+BTS; shooting one breaks all adjacent
+        150 to TileDefault(0xC, 0x40),        // 2×1 shot block (left, chain-react)
+        151 to TileDefault(0xC, 0x40),        // 2×1 shot block (right, chain-react)
+        152 to TileDefault(0xC, 0x40),        // 1×2 shot block (top, chain-react)
+        184 to TileDefault(0xC, 0x40),        // 1×2 shot block (bottom, chain-react)
+        153 to TileDefault(0xC, 0x40),        // 2×2 shot block (top-left, chain-react)
+        154 to TileDefault(0xC, 0x40),        // 2×2 shot block (top-right, chain-react)
+        185 to TileDefault(0xC, 0x40),        // 2×2 shot block (bottom-left, chain-react)
+        186 to TileDefault(0xC, 0x40),        // 2×2 shot block (bottom-right, chain-react)
+    )
+
+    fun get(metatileIndex: Int): TileDefault? = defaults[metatileIndex]
+}
+
 // ─── Brush: single or multi-tile selection ──────────────────────
 
 /**
  * A brush can be 1×1 (single tile) or NxM (rectangle from tileset).
  * tiles[row][col] = metatile index. hFlip/vFlip apply to the whole grid.
+ *
+ * Per-tile overrides allow different block types and BTS values within
+ * a multi-tile brush (e.g., shot block + H-extend pairs).
  */
 data class TileBrush(
     val tiles: List<List<Int>>,  // [row][col] of metatile indices
     val blockType: Int = 0x8,
     val hFlip: Boolean = false,
-    val vFlip: Boolean = false
+    val vFlip: Boolean = false,
+    val blockTypeOverrides: Map<Long, Int> = emptyMap(),
+    val btsOverrides: Map<Long, Int> = emptyMap()
 ) {
     val cols get() = tiles.firstOrNull()?.size ?: 0
     val rows get() = tiles.size
+
+    private fun key(r: Int, c: Int) = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+
+    fun blockTypeAt(r: Int, c: Int): Int = blockTypeOverrides[key(r, c)] ?: blockType
+    fun btsAt(r: Int, c: Int): Int = btsOverrides[key(r, c)] ?: 0
 
     /** Encode one tile at (r, c) as a 16-bit block word. */
     fun blockWordAt(r: Int, c: Int): Int {
@@ -35,7 +98,7 @@ data class TileBrush(
         var word = idx and 0x3FF
         if (hFlip) word = word or (1 shl 10)
         if (vFlip) word = word or (1 shl 11)
-        word = word or ((blockType and 0xF) shl 12)
+        word = word or ((blockTypeAt(r, c) and 0xF) shl 12)
         return word
     }
 
@@ -43,8 +106,14 @@ data class TileBrush(
     val primaryIndex get() = tiles.firstOrNull()?.firstOrNull() ?: 0
 
     companion object {
-        fun single(metatileIndex: Int, blockType: Int = 0x8) =
-            TileBrush(tiles = listOf(listOf(metatileIndex)), blockType = blockType)
+        fun single(metatileIndex: Int, blockType: Int = 0x8, bts: Int = 0): TileBrush {
+            val btsMap = if (bts != 0) mapOf(0L to bts) else emptyMap()
+            return TileBrush(
+                tiles = listOf(listOf(metatileIndex)),
+                blockType = blockType,
+                btsOverrides = btsMap
+            )
+        }
     }
 }
 
@@ -120,8 +189,10 @@ class EditorState {
     fun selectMetatile(index: Int, gridCols: Int = 32) {
         tilesetSelStart = Pair(index % gridCols, index / gridCols)
         tilesetSelEnd = tilesetSelStart
-        val blockType = metatileBlockTypePresets[index] ?: 0x8
-        brush = TileBrush.single(index, blockType)
+        val td = TilesetDefaults.get(index)
+        val blockType = td?.blockType ?: metatileBlockTypePresets[index] ?: 0x8
+        val bts = td?.bts ?: 0
+        brush = TileBrush.single(index, blockType, bts)
     }
 
     fun beginTilesetDrag(col: Int, row: Int) {
@@ -133,7 +204,7 @@ class EditorState {
         tilesetSelEnd = Pair(col, row)
     }
 
-    /** Finalize rectangle selection → build multi-tile brush. */
+    /** Finalize rectangle selection → build multi-tile brush with per-tile defaults. */
     fun endTilesetDrag(gridCols: Int) {
         val s = tilesetSelStart ?: return
         val e = tilesetSelEnd ?: return
@@ -144,9 +215,36 @@ class EditorState {
         val tiles = (r0..r1).map { r ->
             (c0..c1).map { c -> r * gridCols + c }
         }
+
+        // Build per-tile overrides from TilesetDefaults and learned presets
+        val btOverrides = mutableMapOf<Long, Int>()
+        val btsOverrides = mutableMapOf<Long, Int>()
+        for ((ri, row) in tiles.withIndex()) {
+            for ((ci, meta) in row.withIndex()) {
+                val key = (ri.toLong() shl 32) or (ci.toLong() and 0xFFFFFFFFL)
+                val td = TilesetDefaults.get(meta)
+                if (td != null) {
+                    btOverrides[key] = td.blockType
+                    if (td.bts != 0) btsOverrides[key] = td.bts
+                } else {
+                    val learned = metatileBlockTypePresets[meta]
+                    if (learned != null) btOverrides[key] = learned
+                }
+            }
+        }
+        // Use the primary tile's block type as the brush default
         val primaryIdx = tiles.first().first()
-        val blockType = metatileBlockTypePresets[primaryIdx] ?: 0x8
-        brush = TileBrush(tiles = tiles, blockType = blockType)
+        val primaryTd = TilesetDefaults.get(primaryIdx)
+        val fallbackBlockType = primaryTd?.blockType
+            ?: metatileBlockTypePresets[primaryIdx]
+            ?: 0x8
+
+        brush = TileBrush(
+            tiles = tiles,
+            blockType = fallbackBlockType,
+            blockTypeOverrides = btOverrides,
+            btsOverrides = btsOverrides
+        )
     }
 
     fun toggleHFlip() { brush = brush?.copy(hFlip = !brush!!.hFlip) }
@@ -176,7 +274,9 @@ class EditorState {
         val hf = (word shr 10) and 1 != 0
         val vf = (word shr 11) and 1 != 0
         val bt = (word shr 12) and 0xF
-        brush = TileBrush(tiles = listOf(listOf(metatileIdx)), blockType = bt, hFlip = hf, vFlip = vf)
+        val sampledBts = readBts(bx, by)
+        val btsMap = if (sampledBts != 0) mapOf(0L to sampledBts) else emptyMap()
+        brush = TileBrush(tiles = listOf(listOf(metatileIdx)), blockType = bt, hFlip = hf, vFlip = vf, btsOverrides = btsMap)
         tilesetSelStart = Pair(metatileIdx % gridCols, metatileIdx / gridCols)
         tilesetSelEnd = tilesetSelStart
         activeTool = EditorTool.PAINT
@@ -334,10 +434,12 @@ class EditorState {
                 if (pendingPositions.contains(key)) continue
                 val oldWord = readBlockWord(tx, ty)
                 val newWord = b.blockWordAt(r, c)
-                if (oldWord == newWord) continue
+                val oldBts = readBts(tx, ty)
+                val newBts = b.btsAt(r, c)
+                if (oldWord == newWord && oldBts == newBts) continue
                 writeBlockWord(tx, ty, newWord)
-                val bts = readBts(tx, ty)
-                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, bts, bts))
+                writeBts(tx, ty, newBts)
+                pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, oldBts, newBts))
                 pendingPositions.add(key)
                 changed = true
             }
@@ -452,6 +554,7 @@ class EditorState {
         if (bx < 0 || by < 0 || bx >= workingBlocksWide || by >= workingBlocksTall) return false
         val targetWord = readBlockWord(bx, by)
         val newWord = b.blockWordAt(0, 0)
+        val newBts = b.btsAt(0, 0)
         if (targetWord == newWord) return false
 
         val visited = mutableSetOf<Long>()
@@ -466,8 +569,9 @@ class EditorState {
             visited.add(key)
             if (readBlockWord(cx, cy) != targetWord) continue
             writeBlockWord(cx, cy, newWord)
-            val bts = readBts(cx, cy)
-            pendingEdits.add(TileEdit(cx, cy, targetWord, newWord, bts, bts))
+            val oldBts = readBts(cx, cy)
+            writeBts(cx, cy, newBts)
+            pendingEdits.add(TileEdit(cx, cy, targetWord, newWord, oldBts, newBts))
             changed = true
             queue.add(Pair(cx - 1, cy))
             queue.add(Pair(cx + 1, cy))

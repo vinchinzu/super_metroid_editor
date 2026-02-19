@@ -162,75 +162,15 @@ class EditRoundTripTest {
     }
 
     @Test
-    fun `debug state list bytes for Landing Site`() {
+    fun `Landing Site state list starts with E612 condition`() {
         val parser = loadTestRom() ?: return
         val romData = parser.getRomData()
         val roomPc = parser.roomIdToPc(0x91F8)
         val stateListOff = roomPc + 11
-        val sb = StringBuilder()
-        sb.appendLine("ROM size: ${romData.size} (0x${romData.size.toString(16)})")
-        sb.appendLine("roomPc = 0x${roomPc.toString(16)}")
-        sb.appendLine("stateListOff = 0x${stateListOff.toString(16)}")
-        sb.appendLine("State list bytes:")
-        for (i in 0 until 60) {
-            val b = romData[stateListOff + i].toInt() and 0xFF
-            sb.append("%02x ".format(b))
-            if ((i + 1) % 16 == 0) sb.appendLine()
-        }
-        sb.appendLine()
-
-        // Manual parse
-        var pos = stateListOff
-        var iter = 0
-        while (iter < 10 && pos < stateListOff + 200) {
-            val code = (romData[pos].toInt() and 0xFF) or ((romData[pos+1].toInt() and 0xFF) shl 8)
-            sb.appendLine("iter $iter: pos=0x${pos.toString(16)}, code=0x${code.toString(16).padStart(4,'0')}")
-            when (code) {
-                0xE5E6 -> {
-                    sb.appendLine("  → E5E6 default. State data at 0x${(pos+2).toString(16)}")
-                    break
-                }
-                0xE612, 0xE629 -> {
-                    val flag = romData[pos+2].toInt() and 0xFF
-                    val ptr = (romData[pos+3].toInt() and 0xFF) or ((romData[pos+4].toInt() and 0xFF) shl 8)
-                    val statePc = parser.snesToPc(0x8F0000 or ptr)
-                    sb.appendLine("  → flag=0x${flag.toString(16)}, statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
-                    pos += 5
-                }
-                0xE640, 0xE652, 0xE669, 0xE678 -> {
-                    val ptr = (romData[pos+2].toInt() and 0xFF) or ((romData[pos+3].toInt() and 0xFF) shl 8)
-                    val statePc = parser.snesToPc(0x8F0000 or ptr)
-                    sb.appendLine("  → statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
-                    pos += 4
-                }
-                0xE5EB, 0xE5FF -> {
-                    val event = (romData[pos+2].toInt() and 0xFF) or ((romData[pos+3].toInt() and 0xFF) shl 8)
-                    val ptr = (romData[pos+4].toInt() and 0xFF) or ((romData[pos+5].toInt() and 0xFF) shl 8)
-                    val statePc = parser.snesToPc(0x8F0000 or ptr)
-                    sb.appendLine("  → event=0x${event.toString(16)}, statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
-                    pos += 6
-                }
-                else -> {
-                    sb.appendLine("  → UNKNOWN code, stopping")
-                    break
-                }
-            }
-            iter++
-        }
-
-        // Also show what findAllStateDataOffsets returns
-        val allStates = parser.findAllStateDataOffsets(0x91F8)
-        sb.appendLine("\nfindAllStateDataOffsets returned ${allStates.size} states:")
-        for ((i, off) in allStates.withIndex()) {
-            val plmPtr = (romData[off + 20].toInt() and 0xFF) or ((romData[off + 21].toInt() and 0xFF) shl 8)
-            sb.appendLine("  #$i: PC=0x${off.toString(16)}, plmPtr=0x${plmPtr.toString(16)}")
-        }
-
-        // Also show what getStateDataPcOffset returns
-        val singleState = parser.getStateDataPcOffset(0x91F8)
-        sb.appendLine("\ngetStateDataPcOffset: ${singleState?.let { "0x${it.toString(16)}" } ?: "null"}")
-
-        File("/tmp/sm_state_debug.txt").writeText(sb.toString())
+        val firstCode = (romData[stateListOff].toInt() and 0xFF) or
+                ((romData[stateListOff + 1].toInt() and 0xFF) shl 8)
+        assertEquals(0xE612, firstCode,
+            "Landing Site state list should start with E612 (boss check)")
     }
 
     @Test
