@@ -23,13 +23,13 @@ data class TileDefault(val blockType: Int, val bts: Int = 0)
  * is placed on the map, these defaults are applied automatically so the user
  * doesn't have to right-click and set properties for every block.
  *
- * Block types: 0x0=Air, 0x4=Shot, 0x5=H-Extend, 0x8=Solid, 0x9=Door,
- *   0xA=Spike, 0xB=Crumble, 0xC=Shot(reform), 0xD=V-Extend, 0xE=Grapple,
- *   0xF=Bomb(reform)
+ * Block types: 0x0=Air, 0x3=Speed Booster, 0x4=Shot, 0x5=H-Extend, 0x8=Solid,
+ *   0x9=Door, 0xA=Spike, 0xB=Crumble, 0xC=Shot(reform), 0xD=V-Extend,
+ *   0xE=Grapple, 0xF=Bomb(reform)
  *
- * Shot/reform BTS low nibble: 0x00=any weapon, 0x02=speed booster, 0x08=power bomb,
- *   0x09=power bomb(no respawn), 0x0A=super missile, 0x0B=super missile(no respawn)
- * BTS bit 6 (0x40): chain-react — shooting one breaks all adjacent blocks of same type/BTS
+ * Type 0xC BTS: 0x00=beam/bomb(reform), 0x01=beam/bomb(no reform),
+ *   0x04-0x07=hidden, 0x08-0x09=power bomb, 0x0A-0x0B=super missile
+ * Type 0x3: speed booster breakable (solid, immune to shots/bombs, breaks on speed boost)
  */
 object TilesetDefaults {
     val defaults: Map<Int, TileDefault> = mapOf(
@@ -48,20 +48,20 @@ object TilesetDefaults {
         155 to TileDefault(0xE),              // Grapple block
         156 to TileDefault(0xA),              // Spike (alt tile)
         159 to TileDefault(0xC, 0x0A),        // Super missile breakable (reforms)
-        182 to TileDefault(0xC, 0x02),        // Speed booster breakable (reforms)
+        182 to TileDefault(0x3),              // Speed booster breakable (type 0x3 — solid, shot-immune)
         183 to TileDefault(0xE),              // Crumble grapple (grapple primary; user can set crumble via properties)
         188 to TileDefault(0xB),              // Crumble block
 
-        // Multi-tile shot blocks: chain-react (BTS bit 6)
-        // All tiles in a group use the same type+BTS; shooting one breaks all adjacent
-        150 to TileDefault(0xC, 0x40),        // 2×1 shot block (left, chain-react)
-        151 to TileDefault(0xC, 0x40),        // 2×1 shot block (right, chain-react)
-        152 to TileDefault(0xC, 0x40),        // 1×2 shot block (top, chain-react)
-        184 to TileDefault(0xC, 0x40),        // 1×2 shot block (bottom, chain-react)
-        153 to TileDefault(0xC, 0x40),        // 2×2 shot block (top-left, chain-react)
-        154 to TileDefault(0xC, 0x40),        // 2×2 shot block (top-right, chain-react)
-        185 to TileDefault(0xC, 0x40),        // 2×2 shot block (bottom-left, chain-react)
-        186 to TileDefault(0xC, 0x40),        // 2×2 shot block (bottom-right, chain-react)
+        // Multi-tile shot blocks: each tile is an independent shot block
+        // Player must shoot each tile separately; no linking mechanism
+        150 to TileDefault(0xC, 0x00),        // 2×1 shot block (left, reform)
+        151 to TileDefault(0xC, 0x00),        // 2×1 shot block (right, reform)
+        152 to TileDefault(0xC, 0x00),        // 1×2 shot block (top, reform)
+        184 to TileDefault(0xC, 0x00),        // 1×2 shot block (bottom, reform)
+        153 to TileDefault(0xC, 0x00),        // 2×2 shot block (top-left, reform)
+        154 to TileDefault(0xC, 0x00),        // 2×2 shot block (top-right, reform)
+        185 to TileDefault(0xC, 0x00),        // 2×2 shot block (bottom-left, reform)
+        186 to TileDefault(0xC, 0x00),        // 2×2 shot block (bottom-right, reform)
     )
 
     fun get(metatileIndex: Int): TileDefault? = defaults[metatileIndex]

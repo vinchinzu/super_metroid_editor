@@ -41,41 +41,34 @@ import com.supermetroid.editor.ui.LocalSwingWindow
  *   Setup $B3C1 (BTS 0x04-0x07): Hidden shot blocks (look solid, beam-breakable when revealed)
  *   Setup $CF2E (BTS 0x08-0x09): Power bomb breakable
  *   Setup $CF67 (BTS 0x0A-0x0B): Super missile required
- *   BTS bit 6 (0x40): chain-react — breaks adjacent same-type blocks
- *     0x40-0x41: chain-react beam, 0x42-0x43: chain-react speed booster
+ *   BTS 0x40-0x4F: door cap PLMs (managed by door PLMs, not user-editable)
  */
 private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
-    0x00, 0x01 -> ShotCategory.BEAM
-    0x02, 0x03 -> ShotCategory.SPEED
+    0x00, 0x01, 0x02, 0x03 -> ShotCategory.BEAM
     0x04, 0x05, 0x06, 0x07 -> ShotCategory.HIDDEN
     0x08, 0x09 -> ShotCategory.PB
     0x0A, 0x0B -> ShotCategory.SUPER
-    0x40, 0x41 -> ShotCategory.BEAM
-    0x42, 0x43 -> ShotCategory.SPEED
+    in 0x40..0x4F -> ShotCategory.DOOR
     else -> ShotCategory.BEAM
 }
 
-private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, SPEED }
+private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
 
 /** Named BTS options for block types that have well-known sub-types. */
 private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
     0xC -> listOf(
-        0x00 to "Any weapon (respawn)",
-        0x01 to "Any weapon (no respawn)",
-        0x02 to "Speed Booster only (respawn)",
-        0x03 to "Speed Booster only (no respawn)",
-        0x04 to "Hidden (respawn)",
-        0x05 to "Hidden (no respawn)",
-        0x06 to "Hidden (respawn, alt)",
-        0x07 to "Hidden (no respawn, alt)",
-        0x08 to "Power Bomb (respawn)",
-        0x09 to "Power Bomb (no respawn)",
-        0x0A to "Super Missile (respawn)",
-        0x0B to "Super Missile (no respawn)",
-        0x40 to "Chain-react (respawn)",
-        0x41 to "Chain-react (no respawn)",
-        0x42 to "Chain-react Speed (respawn)",
-        0x43 to "Chain-react Speed (no respawn)",
+        0x00 to "Beam/Bomb (reform)",
+        0x01 to "Beam/Bomb (no reform)",
+        0x02 to "Beam/Bomb (reform, alt)",
+        0x03 to "Beam/Bomb (no reform, alt)",
+        0x04 to "Hidden (reform)",
+        0x05 to "Hidden (no reform)",
+        0x06 to "Hidden (reform, alt)",
+        0x07 to "Hidden (no reform, alt)",
+        0x08 to "Power Bomb (reform)",
+        0x09 to "Power Bomb (no reform)",
+        0x0A to "Super Missile (reform)",
+        0x0B to "Super Missile (no reform)",
     )
     0xF -> listOf(0x00 to "Normal")
     0xB -> listOf(0x00 to "Normal")
@@ -1059,7 +1052,7 @@ private fun buildCompositeImage(
                     ShotCategory.SUPER -> if (activeOverlays.contains(TileOverlay.SHOT_SUPER)) matchingOverlays.add(TileOverlay.SHOT_SUPER)
                     ShotCategory.PB -> if (activeOverlays.contains(TileOverlay.SHOT_PB)) matchingOverlays.add(TileOverlay.SHOT_PB)
                     ShotCategory.HIDDEN -> if (activeOverlays.contains(TileOverlay.SHOT_BEAM)) matchingOverlays.add(TileOverlay.SHOT_BEAM)
-                    ShotCategory.SPEED -> if (activeOverlays.contains(TileOverlay.SPEED)) matchingOverlays.add(TileOverlay.SPEED)
+                    ShotCategory.DOOR -> {}
                 }
             }
             if (activeOverlays.contains(TileOverlay.CRUMBLE) && blockType == 0xB) matchingOverlays.add(TileOverlay.CRUMBLE)
