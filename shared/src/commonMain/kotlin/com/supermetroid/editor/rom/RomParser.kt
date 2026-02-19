@@ -401,6 +401,69 @@ class RomParser(private val romData: ByteArray) {
         if (pcOffset < 0 || pcOffset + 11 > romData.size) return null
         return findDefaultStateData(pcOffset + 11)
     }
+
+    /**
+     * Find ALL state data PC offsets for a room by parsing the state condition list.
+     * Each room can have multiple state conditions (E629 boss check, E612 event, etc.)
+     * plus the E5E6 default. Returns PC offsets of every 26-byte state data block.
+     *
+     * State condition entry sizes (from SM disassembly):
+     *   E5E6: default (terminates list), 26-byte state data follows inline
+     *   E5EB: code(2)+doorEvent(2)+statePtr(2) = 6 bytes
+     *   E5FF: code(2)+event(2)+statePtr(2) = 6 bytes
+     *   E612: code(2)+bossFlag(1)+statePtr(2) = 5 bytes
+     *   E629: code(2)+bossFlag(1)+statePtr(2) = 5 bytes
+     *   E640/E652/E669/E678: code(2)+statePtr(2) = 4 bytes
+     */
+    fun findAllStateDataOffsets(roomId: Int): List<Int> {
+        val pcOffset = roomIdToPc(roomId)
+        if (pcOffset < 0 || pcOffset + 11 > romData.size) return emptyList()
+
+        val stateListOffset = pcOffset + 11
+        val results = mutableListOf<Int>()
+        var pos = stateListOffset
+        val maxPos = minOf(stateListOffset + 200, romData.size - 1)
+
+        while (pos + 1 < maxPos) {
+            val code = readUInt16At(pos)
+            when (code) {
+                0xE5E6 -> {
+                    val statePc = pos + 2
+                    if (statePc + 26 <= romData.size) results.add(statePc)
+                    return results
+                }
+                0xE5EB, 0xE5FF -> {
+                    // 2-byte event arg + 2-byte state pointer = 6 bytes total
+                    if (pos + 5 < romData.size) {
+                        val statePtr = readUInt16At(pos + 4)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        if (statePc + 26 <= romData.size) results.add(statePc)
+                    }
+                    pos += 6
+                }
+                0xE612, 0xE629 -> {
+                    // 1-byte boss/event flag + 2-byte state pointer = 5 bytes total
+                    if (pos + 4 < romData.size) {
+                        val statePtr = readUInt16At(pos + 3)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        if (statePc + 26 <= romData.size) results.add(statePc)
+                    }
+                    pos += 5
+                }
+                0xE640, 0xE652, 0xE669, 0xE678 -> {
+                    // 2-byte state pointer only = 4 bytes total
+                    if (pos + 3 < romData.size) {
+                        val statePtr = readUInt16At(pos + 2)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        if (statePc + 26 <= romData.size) results.add(statePc)
+                    }
+                    pos += 4
+                }
+                else -> return results
+            }
+        }
+        return results
+    }
     
     // ─── PLM (Post Load Modification) parsing ───────────────────────
     

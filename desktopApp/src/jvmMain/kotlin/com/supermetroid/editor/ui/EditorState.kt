@@ -548,13 +548,14 @@ class EditorState {
         val romData = romParser.getRomData().copyOf()
         var patchedRooms = 0
 
-        // Free space allocator for bank $8F (PLM sets live here)
+        // Free space allocator for bank $8F (PLM sets live here).
+        // Only treat 0xFF as free (0x00 is valid data: PLM terminators, etc.)
         val bank8FEnd = romParser.snesToPc(0x8FFFFF) + 1
         val bank8FStart = romParser.snesToPc(0x8F8000)
         var freePtr = bank8FEnd
         while (freePtr > bank8FStart) {
             val b = romData[freePtr - 1].toInt() and 0xFF
-            if (b != 0xFF && b != 0x00) break
+            if (b != 0xFF) break
             freePtr--
         }
         freePtr++ // first free byte after last used data
@@ -616,20 +617,29 @@ class EditorState {
                 if (newSize <= originalSize) {
                     writePc = plmPc
                 } else if (freePtr + newSize <= bank8FEnd) {
-                    // Reallocate: write to free space at end of bank $8F
                     writePc = freePtr
                     freePtr += newSize
-                    // Update PLM set pointer in state data
-                    val stateDataPc = romParser.getStateDataPcOffset(roomId)
-                    if (stateDataPc != null) {
-                        val newSnes = romParser.pcToSnes(writePc)
-                        val newPtr = newSnes and 0xFFFF
-                        romData[stateDataPc + 20] = (newPtr and 0xFF).toByte()
-                        romData[stateDataPc + 21] = ((newPtr shr 8) and 0xFF).toByte()
+                    // Update PLM set pointer in ALL state data blocks for this room.
+                    // Rooms can have multiple state conditions (E629, E612, E5E6, etc.)
+                    // that share the same PLM set pointer. We must update all of them
+                    // or the game will read the old (now stale) location for those states.
+                    val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                    val newSnes = romParser.pcToSnes(writePc)
+                    val newPtr = newSnes and 0xFFFF
+                    var updatedStates = 0
+                    for (stateOffset in allStateOffsets) {
+                        val existingPlmPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                                ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                        if (existingPlmPtr == room.plmSetPtr) {
+                            romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
+                            romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
+                            updatedStates++
+                        }
                     }
-                    // Clear old location
-                    for (i in plmPc until plmPc + originalSize) romData[i] = 0
-                    println("Room 0x$roomKey: relocated PLM set to 0x${romParser.pcToSnes(writePc).toString(16)}")
+                    // Do NOT zero the old PLM set location — other state conditions
+                    // with different PLM pointers may share adjacent data, and states
+                    // we didn't match above still need the original data intact.
+                    println("Room 0x$roomKey: relocated PLM set to 0x${newSnes.toString(16)} (updated $updatedStates/${allStateOffsets.size} states)")
                 } else {
                     println("WARN: Room 0x$roomKey no free space for expanded PLM set — skipped")
                     continue

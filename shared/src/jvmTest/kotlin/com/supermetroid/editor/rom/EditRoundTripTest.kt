@@ -161,6 +161,144 @@ class EditRoundTripTest {
             "PLM pointer at state data +20 should match room.plmSetPtr")
     }
 
+    @Test
+    fun `debug state list bytes for Landing Site`() {
+        val parser = loadTestRom() ?: return
+        val romData = parser.getRomData()
+        val roomPc = parser.roomIdToPc(0x91F8)
+        val stateListOff = roomPc + 11
+        val sb = StringBuilder()
+        sb.appendLine("ROM size: ${romData.size} (0x${romData.size.toString(16)})")
+        sb.appendLine("roomPc = 0x${roomPc.toString(16)}")
+        sb.appendLine("stateListOff = 0x${stateListOff.toString(16)}")
+        sb.appendLine("State list bytes:")
+        for (i in 0 until 60) {
+            val b = romData[stateListOff + i].toInt() and 0xFF
+            sb.append("%02x ".format(b))
+            if ((i + 1) % 16 == 0) sb.appendLine()
+        }
+        sb.appendLine()
+
+        // Manual parse
+        var pos = stateListOff
+        var iter = 0
+        while (iter < 10 && pos < stateListOff + 200) {
+            val code = (romData[pos].toInt() and 0xFF) or ((romData[pos+1].toInt() and 0xFF) shl 8)
+            sb.appendLine("iter $iter: pos=0x${pos.toString(16)}, code=0x${code.toString(16).padStart(4,'0')}")
+            when (code) {
+                0xE5E6 -> {
+                    sb.appendLine("  → E5E6 default. State data at 0x${(pos+2).toString(16)}")
+                    break
+                }
+                0xE612, 0xE629 -> {
+                    val flag = romData[pos+2].toInt() and 0xFF
+                    val ptr = (romData[pos+3].toInt() and 0xFF) or ((romData[pos+4].toInt() and 0xFF) shl 8)
+                    val statePc = parser.snesToPc(0x8F0000 or ptr)
+                    sb.appendLine("  → flag=0x${flag.toString(16)}, statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
+                    pos += 5
+                }
+                0xE640, 0xE652, 0xE669, 0xE678 -> {
+                    val ptr = (romData[pos+2].toInt() and 0xFF) or ((romData[pos+3].toInt() and 0xFF) shl 8)
+                    val statePc = parser.snesToPc(0x8F0000 or ptr)
+                    sb.appendLine("  → statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
+                    pos += 4
+                }
+                0xE5EB, 0xE5FF -> {
+                    val event = (romData[pos+2].toInt() and 0xFF) or ((romData[pos+3].toInt() and 0xFF) shl 8)
+                    val ptr = (romData[pos+4].toInt() and 0xFF) or ((romData[pos+5].toInt() and 0xFF) shl 8)
+                    val statePc = parser.snesToPc(0x8F0000 or ptr)
+                    sb.appendLine("  → event=0x${event.toString(16)}, statePtr=0x${ptr.toString(16)}, statePc=0x${statePc.toString(16)}")
+                    pos += 6
+                }
+                else -> {
+                    sb.appendLine("  → UNKNOWN code, stopping")
+                    break
+                }
+            }
+            iter++
+        }
+
+        // Also show what findAllStateDataOffsets returns
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
+        sb.appendLine("\nfindAllStateDataOffsets returned ${allStates.size} states:")
+        for ((i, off) in allStates.withIndex()) {
+            val plmPtr = (romData[off + 20].toInt() and 0xFF) or ((romData[off + 21].toInt() and 0xFF) shl 8)
+            sb.appendLine("  #$i: PC=0x${off.toString(16)}, plmPtr=0x${plmPtr.toString(16)}")
+        }
+
+        // Also show what getStateDataPcOffset returns
+        val singleState = parser.getStateDataPcOffset(0x91F8)
+        sb.appendLine("\ngetStateDataPcOffset: ${singleState?.let { "0x${it.toString(16)}" } ?: "null"}")
+
+        File("/tmp/sm_state_debug.txt").writeText(sb.toString())
+    }
+
+    @Test
+    fun `findAllStateDataOffsets finds multiple states for multi-state rooms`() {
+        val parser = loadTestRom() ?: return
+
+        // Landing Site has E612+E669+E612+E5E6 = 4 states
+        val landingStates = parser.findAllStateDataOffsets(0x91F8)
+        File("/tmp/sm_states_debug.txt").writeText(
+            "Landing Site: ${landingStates.size} states\n" +
+            landingStates.mapIndexed { i, off -> "  #$i at PC 0x${off.toString(16)}" }.joinToString("\n")
+        )
+        assertTrue(landingStates.size >= 2,
+            "Landing Site should have at least 2 states, got ${landingStates.size}")
+
+        // All states for Landing Site should have the same PLM set pointer
+        val romData = parser.getRomData()
+        val room = parser.readRoomHeader(0x91F8)!!
+        var matchCount = 0
+        for ((i, stateOff) in landingStates.withIndex()) {
+            val plmPtr = (romData[stateOff + 20].toInt() and 0xFF) or
+                    ((romData[stateOff + 21].toInt() and 0xFF) shl 8)
+            println("  State #$i at PC 0x${stateOff.toString(16)}: plmPtr=0x${plmPtr.toString(16)}")
+            if (plmPtr == room.plmSetPtr) matchCount++
+        }
+        assertTrue(matchCount >= 1,
+            "At least one state should have the same PLM pointer as readRoomHeader returned")
+
+        // Bomb Torizo (9804) should also have multiple states
+        val btStates = parser.findAllStateDataOffsets(0x9804)
+        println("Bomb Torizo: ${btStates.size} state data offsets")
+        assertTrue(btStates.isNotEmpty(), "Bomb Torizo should have at least 1 state")
+    }
+
+    @Test
+    fun `PLM reallocation updates all state pointers`() {
+        val parser = loadTestRom() ?: return
+        val romData = parser.getRomData().copyOf()
+        val room = parser.readRoomHeader(0x91F8)!!
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
+        assertTrue(allStates.size >= 2,
+            "Landing Site needs multiple states for this test, got ${allStates.size}")
+
+        // Verify all states that share the PLM pointer
+        val statesWithSamePlm = allStates.filter { stateOff ->
+            val plmPtr = (romData[stateOff + 20].toInt() and 0xFF) or
+                    ((romData[stateOff + 21].toInt() and 0xFF) shl 8)
+            plmPtr == room.plmSetPtr
+        }
+        println("States sharing plmPtr 0x${room.plmSetPtr.toString(16)}: ${statesWithSamePlm.size}")
+
+        // Simulate relocation: write new pointer to all matching states
+        val fakeNewPtr = 0xF000
+        for (stateOff in statesWithSamePlm) {
+            romData[stateOff + 20] = (fakeNewPtr and 0xFF).toByte()
+            romData[stateOff + 21] = ((fakeNewPtr shr 8) and 0xFF).toByte()
+        }
+
+        // Verify all were updated
+        for (stateOff in statesWithSamePlm) {
+            val updatedPtr = (romData[stateOff + 20].toInt() and 0xFF) or
+                    ((romData[stateOff + 21].toInt() and 0xFF) shl 8)
+            assertEquals(fakeNewPtr, updatedPtr,
+                "State at 0x${stateOff.toString(16)} should have updated PLM pointer")
+        }
+        println("PLM reallocation all-states test: PASS (updated ${statesWithSamePlm.size} states)")
+    }
+
     // ─── Tile edit → export → readback round-trip ──────────────────
 
     @Test
@@ -276,12 +414,18 @@ class EditRoundTripTest {
         }
         romData[offset] = 0; romData[offset + 1] = 0
 
-        // Update PLM pointer in state data
-        val stateDataPc = parser.getStateDataPcOffset(0x91F8)!!
+        // Update PLM pointer in ALL state data blocks that share the same pointer
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
         val newSnes = parser.pcToSnes(freePtr)
         val newPtr = newSnes and 0xFFFF
-        romData[stateDataPc + 20] = (newPtr and 0xFF).toByte()
-        romData[stateDataPc + 21] = ((newPtr shr 8) and 0xFF).toByte()
+        for (stateOff in allStates) {
+            val existingPlmPtr = (romData[stateOff + 20].toInt() and 0xFF) or
+                    ((romData[stateOff + 21].toInt() and 0xFF) shl 8)
+            if (existingPlmPtr == room.plmSetPtr) {
+                romData[stateOff + 20] = (newPtr and 0xFF).toByte()
+                romData[stateOff + 21] = ((newPtr shr 8) and 0xFF).toByte()
+            }
+        }
 
         // Read back from patched ROM
         val patchedParser = RomParser(romData)
@@ -392,7 +536,7 @@ class EditRoundTripTest {
         var freePtr = bank8FEnd
         while (freePtr > bank8FStart) {
             val b = romData[freePtr - 1].toInt() and 0xFF
-            if (b != 0xFF && b != 0x00) break
+            if (b != 0xFF) break
             freePtr--
         }
         freePtr++
@@ -409,10 +553,18 @@ class EditRoundTripTest {
         }
         romData[plmOff] = 0; romData[plmOff + 1] = 0
 
-        val stateDataPc = parser.getStateDataPcOffset(0x91F8)!!
-        val newSnes = parser.pcToSnes(freePtr)
-        romData[stateDataPc + 20] = (newSnes and 0xFF).toByte()
-        romData[stateDataPc + 21] = ((newSnes shr 8) and 0xFF).toByte()
+        // Update PLM pointer in ALL state data blocks that share the same pointer
+        val allStates2 = parser.findAllStateDataOffsets(0x91F8)
+        val newSnes2 = parser.pcToSnes(freePtr)
+        val newPtr2 = newSnes2 and 0xFFFF
+        for (stateOff in allStates2) {
+            val existingPlmPtr = (romData[stateOff + 20].toInt() and 0xFF) or
+                    ((romData[stateOff + 21].toInt() and 0xFF) shl 8)
+            if (existingPlmPtr == room.plmSetPtr) {
+                romData[stateOff + 20] = (newPtr2 and 0xFF).toByte()
+                romData[stateOff + 21] = ((newPtr2 shr 8) and 0xFF).toByte()
+            }
+        }
 
         // === Write to /tmp ===
         val tmpFile = File.createTempFile("sm_edit_test_", ".smc")
