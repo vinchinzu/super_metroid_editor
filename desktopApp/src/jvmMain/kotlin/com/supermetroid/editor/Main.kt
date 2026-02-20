@@ -20,7 +20,9 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.MapCanvas
 import com.supermetroid.editor.ui.TilesetPreview
-import com.supermetroid.editor.ui.TilesetEditor
+import com.supermetroid.editor.ui.TilesetListPanel
+import com.supermetroid.editor.ui.TilesetCanvas
+import com.supermetroid.editor.ui.TilesetEditorState
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -113,23 +115,24 @@ fun main() = application {
                     }
                 }
                 
-                // Main content: resizable left column + map
+                // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
                 var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets
+                val tilesetEditorState = remember { TilesetEditorState() }
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
+                        // ── Left column ──
                         Column(
                             modifier = Modifier
                                 .width(leftColumnWidthDp.dp)
                                 .fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
-                            // Tab bar
                             TabRow(
                                 selectedTabIndex = leftTab,
                                 modifier = Modifier.fillMaxWidth().height(32.dp)
@@ -168,26 +171,38 @@ fun main() = application {
                                     )
                                 }
                                 1 -> {
-                                    TilesetEditor(
+                                    TilesetListPanel(
                                         romParser = romParser,
                                         editorState = editorState,
+                                        tilesetEditorState = tilesetEditorState,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
                         }
+
                         DraggableDividerVertical(
                             onDelta = { dx ->
                                 leftColumnWidthDp = (leftColumnWidthDp + dx).coerceIn(150f, maxLeftWidth)
                             }
                         )
-                        MapCanvas(
-                            room = selectedRoom,
-                            romParser = romParser,
-                            editorState = editorState,
-                            rooms = rooms,
-                            modifier = Modifier.fillMaxSize()
-                        )
+
+                        // ── Right canvas: swaps between map editor and tileset viewer ──
+                        when (leftTab) {
+                            0 -> MapCanvas(
+                                room = selectedRoom,
+                                romParser = romParser,
+                                editorState = editorState,
+                                rooms = rooms,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            1 -> TilesetCanvas(
+                                romParser = romParser,
+                                editorState = editorState,
+                                tilesetEditorState = tilesetEditorState,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
