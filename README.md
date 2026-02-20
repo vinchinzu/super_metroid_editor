@@ -3,8 +3,10 @@
 
 The MS Paint of Super Metroid editing. A native desktop ROM editor built with Kotlin/Compose.
 
-![Room Editor](screenshots/smedit_01.png)
-![Tileset Editor](screenshots/smedit_02.png)
+<p>
+  <img src="screenshots/smedit_01.png" width="49%" alt="Room Editor" />
+  <img src="screenshots/smedit_02.png" width="49%" alt="Tileset Editor" />
+</p>
 
 ## What it does
 
