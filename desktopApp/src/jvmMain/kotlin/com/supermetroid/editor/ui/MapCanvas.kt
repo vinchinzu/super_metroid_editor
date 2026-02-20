@@ -99,6 +99,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     SHOT_PB("Shot (PB)", "Xp", 0xCCCC44AA),         // magenta: power bomb
     // Items/powerups (from PLM data; drawn when we have item positions)
     ITEMS("Items", "I", 0xCCFFCC00),       // gold/yellow
+    // Enemies (from enemy population data in bank $A1)
+    ENEMIES("Enemies", "E", 0xCCFF6644),   // orange-red
 }
 
 /** Shared tile-meta icon: black fill, colored 2px border, centered white letter (matches map). */
@@ -140,7 +142,10 @@ fun MapCanvas(
     AttachMacPinchZoom(LocalSwingWindow.current, zoomState, minZoom = 0.25f, maxZoom = 4f)
     var showGrid by remember { mutableStateOf(true) }
     var tileMetaExpanded by remember { mutableStateOf(false) }
-    val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>() }
+    val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>(
+        TileOverlay.ITEMS to true,
+        TileOverlay.ENEMIES to true,
+    ) }
     val overlayCount = overlayToggles.values.count { it }
     
     Card(
@@ -1088,6 +1093,72 @@ private fun buildCompositeImage(
         }
     }
     
+    // Draw item labels (positioned at PLM block coordinates)
+    if (activeOverlays.contains(TileOverlay.ITEMS) && data.plmEntries.isNotEmpty()) {
+        val g2 = g as java.awt.Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        val labelFont = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
+        g.font = labelFont
+        val fm = g.fontMetrics
+        for (plm in data.plmEntries) {
+            val itemDef = RomParser.ITEM_DEFS.find { it.chozoId == plm.id || it.visibleId == plm.id || it.hiddenId == plm.id }
+                ?: continue
+            val name = itemDef.name
+            val cx = plm.x * 16 + 8
+            val cy = plm.y * 16 + 8
+            val textWidth = fm.stringWidth(name)
+            val badgeW = textWidth + 6
+            val badgeH = fm.height + 2
+            val bx = cx - badgeW / 2
+            val by = cy - badgeH / 2
+            g2.color = java.awt.Color(0, 0, 0, 200)
+            g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = java.awt.Color(0xFF, 0xCC, 0x00)
+            g2.drawRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = java.awt.Color.WHITE
+            g2.drawString(name, bx + 3, by + fm.ascent + 1)
+        }
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF)
+    }
+
+    // Draw enemy markers (positioned at enemy pixel coordinates)
+    if (activeOverlays.contains(TileOverlay.ENEMIES) && data.enemyEntries.isNotEmpty()) {
+        val g2 = g as java.awt.Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        val labelFont = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
+        g.font = labelFont
+        val fm = g.fontMetrics
+        val markerColor = java.awt.Color(0xFF, 0x66, 0x44)
+        for (enemy in data.enemyEntries) {
+            val name = RomParser.enemyName(enemy.id)
+            val ex = enemy.x
+            val ey = enemy.y
+            if (ex < 0 || ex >= data.width || ey < 0 || ey >= data.height) continue
+            val diamondSize = 6
+            val dx = intArrayOf(ex, ex + diamondSize, ex, ex - diamondSize)
+            val dy = intArrayOf(ey - diamondSize, ey, ey + diamondSize, ey)
+            g2.color = java.awt.Color(0xFF, 0x44, 0x22, 180)
+            g2.fillPolygon(dx, dy, 4)
+            g2.color = markerColor
+            g2.stroke = java.awt.BasicStroke(1.5f)
+            g2.drawPolygon(dx, dy, 4)
+            g2.stroke = java.awt.BasicStroke(1f)
+
+            val textWidth = fm.stringWidth(name)
+            val badgeW = textWidth + 6
+            val badgeH = fm.height + 2
+            val bx = ex - badgeW / 2
+            val by = ey - diamondSize - badgeH - 2
+            g2.color = java.awt.Color(0, 0, 0, 200)
+            g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = markerColor
+            g2.drawRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = java.awt.Color.WHITE
+            g2.drawString(name, bx + 3, by + fm.ascent + 1)
+        }
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF)
+    }
+
     g.dispose()
     return img
 }

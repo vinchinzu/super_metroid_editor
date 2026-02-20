@@ -513,6 +513,35 @@ class RomParser(private val romData: ByteArray) {
         return entries
     }
     
+    // ─── Enemy population parsing ─────────────────────────────────────
+
+    data class EnemyEntry(val id: Int, val x: Int, val y: Int, val initParam: Int, val properties: Int)
+
+    /**
+     * Parse enemy population data. enemySetPtr is a 16-bit pointer in bank $A1.
+     * Each entry is 16 bytes: 2-byte ID, 2-byte X (pixels), 2-byte Y (pixels),
+     * 2-byte init param, 2-byte properties, 6 bytes extra. Terminated by ID=0xFFFF.
+     */
+    fun parseEnemyPopulation(enemySetPtr: Int): List<EnemyEntry> {
+        if (enemySetPtr == 0 || enemySetPtr == 0xFFFF) return emptyList()
+        val snesAddr = 0xA10000 or enemySetPtr
+        var pc = snesToPc(snesAddr)
+        val entries = mutableListOf<EnemyEntry>()
+        var safety = 0
+        while (pc + 15 < romData.size && safety < 64) {
+            val id = readUInt16At(pc)
+            if (id == 0xFFFF || id == 0) break
+            val x = readUInt16At(pc + 2)
+            val y = readUInt16At(pc + 4)
+            val initParam = readUInt16At(pc + 6)
+            val properties = readUInt16At(pc + 8)
+            entries.add(EnemyEntry(id, x, y, initParam, properties))
+            pc += 16
+            safety++
+        }
+        return entries
+    }
+
     // ─── Door entry parsing ──────────────────────────────────────────
 
     /**
@@ -658,6 +687,59 @@ class RomParser(private val romData: ByteArray) {
             else -> null
         }
         
+        /** Common SM enemy names by ID — covers the most recognizable enemies. */
+        private val ENEMY_NAMES = mapOf(
+            0xD13F to "Chozo Ball",
+            0xD17F to "Chozo Statue",
+            0xD1BF to "Chozo Statue (Golden)",
+            0xD73F to "Zoomer",
+            0xD75F to "Zoomer (grey)",
+            0xD7BF to "Ripper",
+            0xD7DF to "Ripper II",
+            0xD83F to "Skree",
+            0xD89F to "Waver",
+            0xD8BF to "Reo",
+            0xD91F to "Geemer",
+            0xD93F to "Geemer (grey)",
+            0xD97F to "Sidehopper",
+            0xD99F to "Sidehopper (big)",
+            0xD9BF to "Dessgeega",
+            0xD9DF to "Dessgeega (big)",
+            0xDA3F to "Bull",
+            0xDA7F to "Alcoon",
+            0xDB4F to "Ship",
+            0xDBCF to "Kago",
+            0xDC3F to "Metaree",
+            0xDCBF to "Beetom",
+            0xDCFF to "Mochtroid",
+            0xDD3F to "Sova",
+            0xDE3F to "Fireflea",
+            0xDE7F to "Skultera",
+            0xDEBF to "Yapping Maw",
+            0xDFBF to "Kihunter",
+            0xE03F to "Kihunter (green)",
+            0xE0FF to "Evir",
+            0xE13F to "Namihe",
+            0xE17F to "Coven",
+            0xE1BF to "Puyo",
+            0xE27F to "Cacatac",
+            0xE2FF to "Owtch",
+            0xE4BF to "Gamet",
+            0xE57F to "Zeela",
+            0xE5BF to "Zeela (grey)",
+            0xE67F to "Holtz",
+            0xE6BF to "Viola",
+            0xE73F to "Multiviola",
+            0xE7BF to "Powamp",
+            0xE83F to "Yard",
+            0xE8BF to "Menu",
+            0xE8FF to "Mella",
+            0xE97F to "Zeb",
+            0xE9BF to "Zebbo",
+        )
+
+        fun enemyName(id: Int): String = ENEMY_NAMES[id] ?: "${id.toString(16).uppercase().padStart(4, '0')}"
+
         fun loadRom(filePath: String): RomParser {
             val file = java.io.File(filePath)
             if (!file.exists()) {

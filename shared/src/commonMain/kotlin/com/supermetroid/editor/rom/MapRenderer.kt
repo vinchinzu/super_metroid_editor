@@ -182,7 +182,10 @@ class MapRenderer(private val romParser: RomParser) {
             }
         }
 
-        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes, itemBlocks = itemBlockSet)
+        val enemies = romParser.parseEnemyPopulation(room.enemySetPtr)
+
+        return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes,
+            itemBlocks = itemBlockSet, plmEntries = plms, enemyEntries = enemies)
     }
     
     /** Pack two ints into a Long key for map lookup. */
@@ -276,4 +279,6 @@ data class RoomRenderData(
     val blockTypes: IntArray = IntArray(0),  // Block type per tile (0-15)
     val btsData: ByteArray = ByteArray(0),   // BTS byte per tile
     val itemBlocks: Set<Int> = emptySet(),   // Block indices that have items (from PLM; empty until we parse PLM set)
+    val plmEntries: List<RomParser.PlmEntry> = emptyList(),
+    val enemyEntries: List<RomParser.EnemyEntry> = emptyList(),
 )
