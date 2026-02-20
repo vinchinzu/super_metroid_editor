@@ -1,4 +1,4 @@
-# Super Metroid Editor
+# Super Metroid Editor (SMEDIT)
 
 A native macOS (and cross-platform) Super Metroid ROM editor built with Kotlin Multiplatform and Compose Multiplatform.
 
