@@ -198,6 +198,18 @@ class TileGraphics(private val romParser: RomParser) {
         return TilesetGridData(width, height, pixels, gridCols, gridRows)
     }
     
+    /** Get the 8 sub-palettes as ARGB color arrays (8 × 16 colors). Null if not loaded. */
+    fun getPalettes(): Array<IntArray>? = cachedPalette?.map { it.copyOf() }?.toTypedArray()
+
+    /** Get the palette index (0-7) used by a specific metatile's sub-tiles. Returns all unique palette indices. */
+    fun getMetatilePalettes(metatileIndex: Int): Set<Int> {
+        val metas = metatiles ?: return emptySet()
+        if (metatileIndex < 0 || metatileIndex >= metas.size) return emptySet()
+        return metas[metatileIndex].map { (it shr 10) and 7 }.toSet()
+    }
+
+    fun getCachedTilesetId(): Int = cachedTilesetId
+
     // ─── Internal helpers ──────────────────────────────────────────────
     
     /**

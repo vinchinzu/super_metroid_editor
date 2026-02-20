@@ -55,7 +55,7 @@ private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
 private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
 
 /** Named BTS options for block types that have well-known sub-types. */
-private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
+internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
     0xC -> listOf(
         0x00 to "Beam/Bomb (reform)",
         0x01 to "Beam/Bomb (no reform)",
@@ -75,13 +75,13 @@ private fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = wh
     else -> emptyList()
 }
 
-private val blockTypeNames = mapOf(
+internal val blockTypeNames = mapOf(
     0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
     0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid", 0x9 to "Door",
     0xA to "Spike", 0xB to "Crumble", 0xC to "Shot Block", 0xD to "V-Extend",
     0xE to "Grapple", 0xF to "Bomb Block"
 )
-private fun blockTypeName(type: Int): String = blockTypeNames[type] ?: "0x${type.toString(16).uppercase()}"
+internal fun blockTypeName(type: Int): String = blockTypeNames[type] ?: "0x${type.toString(16).uppercase()}"
 
 enum class TileOverlay(val label: String, val shortLabel: String, val color: Long) {
     // Block types (from level data bits 12-15)

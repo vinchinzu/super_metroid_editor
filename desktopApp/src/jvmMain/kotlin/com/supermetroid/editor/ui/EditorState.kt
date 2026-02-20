@@ -152,6 +152,8 @@ class EditorState {
         private set
     var currentRoomId: Int = 0
         private set
+    var currentTilesetId: Int = 0
+        private set
     var dirty by mutableStateOf(false)
         private set
 
@@ -184,15 +186,71 @@ class EditorState {
     var doorEntries: List<RomParser.DoorEntry> = emptyList()
         private set
 
+    // ─── Tileset editor ─────────────────────────────────────────
+
+    /** The currently-viewed tileset in the tileset editor (independent of loaded room). */
+    var editorTilesetId by mutableStateOf(0)
+        private set
+
+    /** TileGraphics for the tileset editor view (may differ from room's tileGraphics). */
+    var editorTileGraphics: TileGraphics? = null
+        private set
+
+    /** Currently selected metatile index in the tileset editor (-1 = none). */
+    var editorSelectedMetatile by mutableStateOf(-1)
+        private set
+
+    fun loadEditorTileset(tilesetId: Int, romParser: RomParser): Boolean {
+        editorTilesetId = tilesetId
+        editorSelectedMetatile = -1
+        val tg = TileGraphics(romParser)
+        return if (tg.loadTileset(tilesetId)) {
+            editorTileGraphics = tg
+            true
+        } else {
+            editorTileGraphics = null
+            false
+        }
+    }
+
+    fun selectEditorMetatile(index: Int) {
+        editorSelectedMetatile = index
+    }
+
+    /** Get the effective default for a metatile: project override > hardcoded > learned > solid. */
+    fun getEffectiveTileDefault(tilesetId: Int, metatileIndex: Int): TileDefault {
+        val projectOverride = project.getTileDefault(tilesetId, metatileIndex)
+        if (projectOverride != null) return TileDefault(projectOverride.blockType, projectOverride.bts)
+        val hardcoded = TilesetDefaults.get(metatileIndex)
+        if (hardcoded != null) return hardcoded
+        val learned = metatileBlockTypePresets[metatileIndex]
+        if (learned != null) return TileDefault(learned)
+        return TileDefault(0x0) // air by default (no assumption)
+    }
+
+    /** Set a project-level tile default override. */
+    fun setTileDefault(tilesetId: Int, metatileIndex: Int, blockType: Int, bts: Int) {
+        project.setTileDefault(tilesetId, metatileIndex, blockType, bts)
+        dirty = true
+    }
+
+    /** Remove a project-level tile default override (revert to hardcoded/learned). */
+    fun clearTileDefault(tilesetId: Int, metatileIndex: Int) {
+        project.removeTileDefault(tilesetId, metatileIndex)
+        dirty = true
+    }
+
+    /** Check if there's a project override for this metatile. */
+    fun hasProjectOverride(tilesetId: Int, metatileIndex: Int): Boolean =
+        project.getTileDefault(tilesetId, metatileIndex) != null
+
     // ─── Tile selection ─────────────────────────────────────────
 
     fun selectMetatile(index: Int, gridCols: Int = 32) {
         tilesetSelStart = Pair(index % gridCols, index / gridCols)
         tilesetSelEnd = tilesetSelStart
-        val td = TilesetDefaults.get(index)
-        val blockType = td?.blockType ?: metatileBlockTypePresets[index] ?: 0x8
-        val bts = td?.bts ?: 0
-        brush = TileBrush.single(index, blockType, bts)
+        val eff = getEffectiveTileDefault(currentTilesetId, index)
+        brush = TileBrush.single(index, eff.blockType, eff.bts)
     }
 
     fun beginTilesetDrag(col: Int, row: Int) {
@@ -216,28 +274,19 @@ class EditorState {
             (c0..c1).map { c -> r * gridCols + c }
         }
 
-        // Build per-tile overrides from TilesetDefaults and learned presets
         val btOverrides = mutableMapOf<Long, Int>()
         val btsOverrides = mutableMapOf<Long, Int>()
         for ((ri, row) in tiles.withIndex()) {
             for ((ci, meta) in row.withIndex()) {
                 val key = (ri.toLong() shl 32) or (ci.toLong() and 0xFFFFFFFFL)
-                val td = TilesetDefaults.get(meta)
-                if (td != null) {
-                    btOverrides[key] = td.blockType
-                    if (td.bts != 0) btsOverrides[key] = td.bts
-                } else {
-                    val learned = metatileBlockTypePresets[meta]
-                    if (learned != null) btOverrides[key] = learned
-                }
+                val eff = getEffectiveTileDefault(currentTilesetId, meta)
+                btOverrides[key] = eff.blockType
+                if (eff.bts != 0) btsOverrides[key] = eff.bts
             }
         }
-        // Use the primary tile's block type as the brush default
         val primaryIdx = tiles.first().first()
-        val primaryTd = TilesetDefaults.get(primaryIdx)
-        val fallbackBlockType = primaryTd?.blockType
-            ?: metatileBlockTypePresets[primaryIdx]
-            ?: 0x8
+        val primaryEff = getEffectiveTileDefault(currentTilesetId, primaryIdx)
+        val fallbackBlockType = primaryEff.blockType
 
         brush = TileBrush(
             tiles = tiles,
@@ -305,7 +354,7 @@ class EditorState {
 
     fun loadRoom(roomId: Int, romParser: RomParser, room: com.supermetroid.editor.data.Room) {
         currentRoomId = roomId
-        // Load tile graphics for brush preview rendering
+        currentTilesetId = room.tileset
         val tg = TileGraphics(romParser)
         if (tg.loadTileset(room.tileset)) tileGraphics = tg
         val levelData = romParser.decompressLZ2(room.levelDataPtr)
@@ -444,6 +493,7 @@ class EditorState {
                 changed = true
             }
         }
+        if (changed) editVersion++
         return changed
     }
 

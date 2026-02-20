@@ -20,6 +20,7 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.MapCanvas
 import com.supermetroid.editor.ui.TilesetPreview
+import com.supermetroid.editor.ui.TilesetEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -114,7 +115,8 @@ fun main() = application {
                 
                 // Main content: resizable left column + map
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
-                var tilesetHeightDp by remember { mutableStateOf(400f) }  // 2x default height
+                var tilesetHeightDp by remember { mutableStateOf(400f) }
+                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
                     Row(
@@ -127,26 +129,52 @@ fun main() = application {
                                 .fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(0.dp)
                         ) {
-                            RoomListView(
-                                rooms = rooms,
-                                selectedRoom = selectedRoom,
-                                romParser = romParser,
-                                onRoomSelected = { room -> selectedRoom = room },
-                                modifier = Modifier.weight(1f)
-                            )
-                            DraggableDividerHorizontal(
-                                onDelta = { dy ->
-                                    tilesetHeightDp = (tilesetHeightDp - dy).coerceIn(120f, 700f)
+                            // Tab bar
+                            TabRow(
+                                selectedTabIndex = leftTab,
+                                modifier = Modifier.fillMaxWidth().height(32.dp)
+                            ) {
+                                Tab(selected = leftTab == 0, onClick = { leftTab = 0 },
+                                    modifier = Modifier.height(32.dp)) {
+                                    Text("Rooms", fontSize = 11.sp)
                                 }
-                            )
-                            TilesetPreview(
-                                room = selectedRoom,
-                                romParser = romParser,
-                                editorState = editorState,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(tilesetHeightDp.dp)
-                            )
+                                Tab(selected = leftTab == 1, onClick = { leftTab = 1 },
+                                    modifier = Modifier.height(32.dp)) {
+                                    Text("Tilesets", fontSize = 11.sp)
+                                }
+                            }
+
+                            when (leftTab) {
+                                0 -> {
+                                    RoomListView(
+                                        rooms = rooms,
+                                        selectedRoom = selectedRoom,
+                                        romParser = romParser,
+                                        onRoomSelected = { room -> selectedRoom = room },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    DraggableDividerHorizontal(
+                                        onDelta = { dy ->
+                                            tilesetHeightDp = (tilesetHeightDp - dy).coerceIn(120f, 700f)
+                                        }
+                                    )
+                                    TilesetPreview(
+                                        room = selectedRoom,
+                                        romParser = romParser,
+                                        editorState = editorState,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(tilesetHeightDp.dp)
+                                    )
+                                }
+                                1 -> {
+                                    TilesetEditor(
+                                        romParser = romParser,
+                                        editorState = editorState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
                         }
                         DraggableDividerVertical(
                             onDelta = { dx ->

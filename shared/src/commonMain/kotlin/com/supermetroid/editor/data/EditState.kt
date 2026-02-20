@@ -50,18 +50,42 @@ data class RoomEdits(
 )
 
 /**
+ * Per-metatile default override: block type + BTS for a specific tileset.
+ * Key format in the project map: "tilesetId:metatileIndex" (e.g., "12:82").
+ */
+@Serializable
+data class TileDefaultOverride(
+    val blockType: Int,
+    val bts: Int = 0
+)
+
+/**
  * The .smedit project file. JSON-serializable.
  * Keys are hex room IDs (as strings), values are the list of edit operations.
  */
 @Serializable
 data class SmEditProject(
     val romPath: String,
-    val rooms: MutableMap<String, RoomEdits> = mutableMapOf()  // key = "91F8"
+    val rooms: MutableMap<String, RoomEdits> = mutableMapOf(),  // key = "91F8"
+    val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf() // key = "tilesetId:metatileIndex"
 ) {
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 
     fun getOrCreateRoom(roomId: Int): RoomEdits {
         val key = roomKey(roomId)
         return rooms.getOrPut(key) { RoomEdits(roomId) }
+    }
+
+    fun tileDefaultKey(tilesetId: Int, metatileIndex: Int): String = "$tilesetId:$metatileIndex"
+
+    fun getTileDefault(tilesetId: Int, metatileIndex: Int): TileDefaultOverride? =
+        tileDefaults[tileDefaultKey(tilesetId, metatileIndex)]
+
+    fun setTileDefault(tilesetId: Int, metatileIndex: Int, blockType: Int, bts: Int) {
+        tileDefaults[tileDefaultKey(tilesetId, metatileIndex)] = TileDefaultOverride(blockType, bts)
+    }
+
+    fun removeTileDefault(tilesetId: Int, metatileIndex: Int) {
+        tileDefaults.remove(tileDefaultKey(tilesetId, metatileIndex))
     }
 }
