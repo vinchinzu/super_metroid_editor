@@ -661,6 +661,52 @@ class RomParser(private val romData: ByteArray) {
         fun itemNameForPlm(plmId: Int): String? = plmToItemName[plmId]
         fun isItemPlm(plmId: Int): Boolean = plmId in plmToItemName
 
+        // ─── Station / special PLM catalog ──────────────────────────
+        data class StationPlmDef(val name: String, val shortLabel: String, val plmId: Int, val defaultParam: Int)
+
+        val STATION_PLMS = listOf(
+            StationPlmDef("Save Point",            "Sv", 0xB76F, 0x8000),
+            StationPlmDef("Energy Refill",          "ER", 0xB6DF, 0x8000),
+            StationPlmDef("Missile Refill",         "MR", 0xB6EB, 0x8000),
+            StationPlmDef("Mapping Station",        "Mp", 0xB6D3, 0x8000),
+            StationPlmDef("Elevator Base",          "El", 0xB70B, 0x8000),
+        )
+
+        // ─── Gate PLM catalog ───────────────────────────────────────
+        data class GatePlmDef(val name: String, val plmId: Int, val param: Int)
+
+        val GATE_PLMS = listOf(
+            GatePlmDef("Gate: Blue (left)",    0xC836, 0x00),
+            GatePlmDef("Gate: Blue (right)",   0xC836, 0x02),
+            GatePlmDef("Gate: Pink (left)",    0xC836, 0x04),
+            GatePlmDef("Gate: Pink (right)",   0xC836, 0x06),
+            GatePlmDef("Gate: Green (left)",   0xC836, 0x08),
+            GatePlmDef("Gate: Green (right)",  0xC836, 0x0A),
+            GatePlmDef("Gate: Yellow (left)",  0xC836, 0x0C),
+            GatePlmDef("Gate: Yellow (right)", 0xC836, 0x0E),
+            GatePlmDef("Gate Connector",       0xC82A, 0x8000),
+        )
+
+        fun stationNameForPlm(plmId: Int): String? =
+            STATION_PLMS.find { it.plmId == plmId }?.name
+
+        fun gateNameForPlm(plmId: Int, param: Int): String? {
+            if (plmId == 0xC836) return GATE_PLMS.find { it.param == (param and 0xFF) }?.name
+            if (plmId == 0xC82A) return "Gate Connector"
+            return null
+        }
+
+        fun isStationPlm(plmId: Int): Boolean = STATION_PLMS.any { it.plmId == plmId }
+        fun isGatePlm(plmId: Int): Boolean = plmId == 0xC836 || plmId == 0xC82A
+
+        fun plmDisplayName(plmId: Int, param: Int = 0): String {
+            itemNameForPlm(plmId)?.let { return it }
+            stationNameForPlm(plmId)?.let { return it }
+            gateNameForPlm(plmId, param)?.let { return it }
+            doorCapColor(plmId)?.let { return "Door Cap" }
+            return "PLM 0x${plmId.toString(16).uppercase().padStart(4, '0')}"
+        }
+
         // Door cap colors matching the in-game door shield appearance
         val DOOR_CAP_BLUE   = 0xFF3880D0.toInt()   // Blue: opens with any weapon
         val DOOR_CAP_RED    = 0xFFD05050.toInt()    // Red/Pink: 5 missiles or 1 super
@@ -687,55 +733,164 @@ class RomParser(private val romData: ByteArray) {
             else -> null
         }
         
-        /** Common SM enemy names by ID — covers the most recognizable enemies. */
+        /**
+         * Comprehensive enemy name map by species ID (bank $A0 pointer).
+         * Sourced from SMILE editor data + community English names.
+         */
         private val ENEMY_NAMES = mapOf(
+            // ── Projectiles / Effects ──
+            0xCEBF to "Boyon",
+            0xCEFF to "Stoke",
+            0xCF3F to "Kame",
+            0xCF7F to "Yapping Maw",
+            0xCFBF to "Puyo",
+            0xCFFF to "Cacatac",
+            0xD03F to "Owtch",
+            0xD07F to "Samus' Ship",
+            0xD0BF to "Samus' Ship (firing)",
+            // ── Chozo / Statues ──
             0xD13F to "Chozo Ball",
             0xD17F to "Chozo Statue",
             0xD1BF to "Chozo Statue (Golden)",
-            0xD73F to "Zoomer",
+            // ── Rinka / Boss parts ──
+            0xD23F to "Rinka",
+            0xD2BF to "Kraid",
+            0xD2FF to "Kraid (ceiling spike)",
+            0xD33F to "Kraid (claw)",
+            0xD37F to "Kraid (belly spike)",
+            0xD3BF to "Hiru",
+            // ── Rippers ──
+            0xD3FF to "Ripper II",
+            0xD43F to "Ripper II (variant)",
+            0xD47F to "Ripper",
+            // ── Dragons / Shutters ──
+            0xD4BF to "Magdollite",
+            0xD4FF to "Door Shutter",
+            0xD53F to "Door Shutter 2",
+            0xD57F to "Door Shutter 2 (variant)",
+            0xD5BF to "Door Shutter 2 (variant 2)",
+            0xD5FF to "Door Shutter 2 (variant 3)",
+            // ── Common enemies ──
+            0xD63F to "Waver",
+            0xD6BF to "Fireflea",
+            0xD6FF to "Skultera",
+            0xD73F to "Elevator",
             0xD75F to "Zoomer (grey)",
-            0xD7BF to "Ripper",
+            0xD77F to "Sciser",
+            0xD7BF to "Oum",
             0xD7DF to "Ripper II",
-            0xD83F to "Skree",
+            0xD7FF to "Skree",
+            0xD83F to "Skree (variant)",
+            0xD87F to "Reo",
             0xD89F to "Waver",
-            0xD8BF to "Reo",
+            0xD8BF to "Reo (variant)",
             0xD91F to "Geemer",
-            0xD93F to "Geemer (grey)",
-            0xD97F to "Sidehopper",
+            0xD93F to "Sidehopper",
+            0xD97F to "Sidehopper (large)",
             0xD99F to "Sidehopper (big)",
             0xD9BF to "Dessgeega",
             0xD9DF to "Dessgeega (big)",
+            0xD9FF to "Dessgeega (variant)",
+            // ── Flyers / Misc ──
             0xDA3F to "Bull",
             0xDA7F to "Alcoon",
+            0xDABF to "Dessgeega (large)",
+            0xDB3F to "Bang",
             0xDB4F to "Ship",
+            0xDBBF to "Yard",
             0xDBCF to "Kago",
-            0xDC3F to "Metaree",
+            0xDBFF to "Reflec",
+            // ── Wall-crawlers ──
+            0xDC3F to "Geemer (horizontal)",
+            0xDC7F to "Zeela",
             0xDCBF to "Beetom",
-            0xDCFF to "Mochtroid",
+            0xDCFF to "Zoomer",
             0xDD3F to "Sova",
-            0xDE3F to "Fireflea",
-            0xDE7F to "Skultera",
-            0xDEBF to "Yapping Maw",
+            0xDD7F to "Hopper (remains)",
+            // ── Bosses ──
+            0xDDBF to "Crocomire",
+            0xDE3F to "Draygon (body)",
+            0xDE7F to "Draygon (eye)",
+            0xDEBF to "Draygon (tail)",
+            0xDEFF to "Draygon (arms)",
+            0xDF3F to "Spore Spawn",
+            // ── Kihunters ──
             0xDFBF to "Kihunter",
+            0xDFFF to "Kzan",
             0xE03F to "Kihunter (green)",
+            0xE07F to "Hibashi",
+            0xE0BF to "Puromi",
             0xE0FF to "Evir",
-            0xE13F to "Namihe",
-            0xE17F to "Coven",
+            // ── More bosses ──
+            0xE13F to "Ceres Ridley",
+            0xE17F to "Ridley",
             0xE1BF to "Puyo",
-            0xE27F to "Cacatac",
+            0xE27F to "Zebetite",
             0xE2FF to "Owtch",
-            0xE4BF to "Gamet",
-            0xE57F to "Zeela",
-            0xE5BF to "Zeela (grey)",
+            // ── Phantoon ──
+            0xE4BF to "Phantoon",
+            0xE4FF to "Phantoon (piece)",
+            0xE53F to "Phantoon (piece 2)",
+            0xE57F to "Phantoon (piece 3)",
+            // ── Friendly / Misc ──
+            0xE5BF to "Etecoon",
+            0xE5FF to "Ebi",
+            0xE63F to "Ebi (variant)",
             0xE67F to "Holtz",
             0xE6BF to "Viola",
-            0xE73F to "Multiviola",
+            0xE6FF to "Fune",
+            0xE73F to "Namihe",
             0xE7BF to "Powamp",
-            0xE83F to "Yard",
+            0xE7FF to "Kago",
+            // ── Norfair / Maridia ──
+            0xE83F to "Lavaman",
+            0xE87F to "Yard",
             0xE8BF to "Menu",
             0xE8FF to "Mella",
-            0xE97F to "Zeb",
+            0xE93F to "Spa",
+            0xE97F to "Zeb Spawner (pipe)",
             0xE9BF to "Zebbo",
+            0xE9FF to "Atomic",
+            0xEA3F to "Spa (variant)",
+            0xEA7F to "Koma",
+            // ── Hachi (bees) ──
+            0xEABF to "Hachi 1",
+            0xEAFF to "Hachi 1 (wings)",
+            0xEB3F to "Hachi 2",
+            0xEB7F to "Hachi 2 (wings)",
+            0xEBBF to "Hachi 3",
+            0xEBFF to "Hachi 3 (wings)",
+            // ── Mother Brain ──
+            0xEC3F to "Mother Brain (phase 1)",
+            0xEC7F to "Mother Brain (phase 2)",
+            // ── Special / Remains ──
+            0xED7F to "Hopper (remains)",
+            0xEEBF to "Big Metroid",
+            0xEEFF to "Torizo",
+            0xEF3F to "Torizo (orbs)",
+            0xEF7F to "Torizo (gold)",
+            0xEFBF to "Torizo (gold orbs)",
+            // ── Spawners / Misc ──
+            0xF07F to "Dori",
+            0xF0BF to "Shattered Glass",
+            0xF193 to "Zeb",
+            0xF1D3 to "Zebbo",
+            0xF213 to "Gamet",
+            0xF253 to "Geega",
+            0xF293 to "Botwoon",
+            // ── Space Pirates (BATTA variants by area) ──
+            0xF353 to "Space Pirate",
+            0xF413 to "Space Pirate (Norfair)",
+            0xF453 to "Space Pirate (Maridia)",
+            0xF493 to "Space Pirate (Tourian)",
+            0xF593 to "Space Pirate Mk.II (Norfair)",
+            0xF613 to "Space Pirate Mk.II (Tourian)",
+            0xF653 to "Space Pirate Mk.III",
+            0xF693 to "Space Pirate Mk.III (Brinstar)",
+            0xF6D3 to "Space Pirate Mk.III (Norfair)",
+            0xF713 to "Space Pirate Mk.III (Norfair alt)",
+            0xF753 to "Space Pirate Mk.III (Maridia)",
+            0xF793 to "Space Pirate Mk.III (Tourian)",
         )
 
         fun enemyName(id: Int): String = ENEMY_NAMES[id] ?: "${id.toString(16).uppercase().padStart(4, '0')}"

@@ -32,6 +32,18 @@ import com.supermetroid.editor.rom.RoomRenderData
 import java.awt.image.BufferedImage
 import java.awt.RenderingHints
 import com.supermetroid.editor.ui.LocalSwingWindow
+import javax.imageio.ImageIO
+
+private object EnemySpriteCache {
+    private val cache = mutableMapOf<String, BufferedImage?>()
+
+    fun get(hexId: String): BufferedImage? {
+        return cache.getOrPut(hexId) {
+            val stream = EnemySpriteCache::class.java.getResourceAsStream("/enemies/$hexId.png")
+            stream?.use { ImageIO.read(it) }
+        }
+    }
+}
 
 /**
  * Shot block (type 0xC) BTS classification.
@@ -70,8 +82,34 @@ internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = w
         0x0A to "Super Missile (reform)",
         0x0B to "Super Missile (no reform)",
     )
-    0xF -> listOf(0x00 to "Normal")
-    0xB -> listOf(0x00 to "Normal")
+    0x3 -> listOf(
+        0x08 to "Speed (left)",
+        0x09 to "Speed (right)",
+        0x81 to "Speed (down, var 1)",
+        0x82 to "Speed (down, var 2)",
+        0x83 to "Speed (down, var 3)",
+        0x85 to "Speed (down, var 5)",
+    )
+    0xA -> listOf(
+        0x00 to "Spike (normal)",
+        0x0F to "Grinder",
+    )
+    0xB -> listOf(
+        0x00 to "Crumble (reform)",
+        0x04 to "Crumble (permanent)",
+        0x0E to "Speed Booster crumble (reform)",
+        0x0F to "Speed Booster crumble (permanent)",
+        0x0B to "Barrier",
+    )
+    0xE -> listOf(
+        0x00 to "Grapple (normal)",
+        0x01 to "Crumble grapple (reform)",
+        0x02 to "Crumble grapple (permanent)",
+    )
+    0xF -> listOf(
+        0x00 to "Bomb (reform)",
+        0x04 to "Bomb (permanent)",
+    )
     else -> emptyList()
 }
 
@@ -850,21 +888,198 @@ fun MapCanvas(
                                                     }
                                                 }
 
-                                                // Show destination details for current door
+                                                // Editable door properties
                                                 if (currentDoor != null) {
-                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    val fieldStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
+                                                    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+                                                    // Destination room dropdown
+                                                    var destDropExpanded by remember { mutableStateOf(false) }
                                                     val destName = roomIdToName[currentDoor.destRoomPtr]
                                                         ?: "0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
-                                                    Column(modifier = Modifier.padding(start = 4.dp)) {
-                                                        Text("Dest: $destName", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                        Text(
-                                                            "Dir: ${currentDoor.directionName}  Screen: (${currentDoor.screenX}, ${currentDoor.screenY})",
-                                                            fontSize = 9.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                        if (currentDoor.isElevator) {
-                                                            Text("Elevator transition", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("Dest:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        Box(modifier = Modifier.weight(1f)) {
+                                                            Surface(
+                                                                modifier = Modifier.fillMaxWidth().height(26.dp)
+                                                                    .clickable { destDropExpanded = true },
+                                                                shape = MaterialTheme.shapes.small,
+                                                                color = MaterialTheme.colorScheme.surfaceVariant
+                                                            ) {
+                                                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                                    Text(destName, fontSize = 9.sp, modifier = Modifier.weight(1f))
+                                                                    Text("▾", fontSize = 9.sp)
+                                                                }
+                                                            }
+                                                            DropdownMenu(
+                                                                expanded = destDropExpanded,
+                                                                onDismissRequest = { destDropExpanded = false }
+                                                            ) {
+                                                                for (r in rooms) {
+                                                                    val rid = r.getRoomIdAsInt()
+                                                                    DropdownMenuItem(
+                                                                        text = { Text(r.name, fontSize = 10.sp) },
+                                                                        onClick = {
+                                                                            destDropExpanded = false
+                                                                            if (rid != currentDoor.destRoomPtr) {
+                                                                                editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
+                                                                            }
+                                                                        },
+                                                                        modifier = Modifier.height(26.dp)
+                                                                    )
+                                                                }
+                                                            }
                                                         }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                                    // Direction dropdown
+                                                    var dirDropExpanded by remember { mutableStateOf(false) }
+                                                    val dirNames = listOf("Right", "Left", "Down", "Up")
+                                                    val currentDir = currentDoor.direction and 0x03
+                                                    val isBubble = (currentDoor.direction and 0x04) != 0
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("Dir:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        Box(modifier = Modifier.weight(1f)) {
+                                                            Surface(
+                                                                modifier = Modifier.fillMaxWidth().height(26.dp)
+                                                                    .clickable { dirDropExpanded = true },
+                                                                shape = MaterialTheme.shapes.small,
+                                                                color = MaterialTheme.colorScheme.surfaceVariant
+                                                            ) {
+                                                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                                    val bubbleTag = if (isBubble) " (closing)" else ""
+                                                                    Text("${dirNames.getOrElse(currentDir) { "?" }}$bubbleTag", fontSize = 9.sp, modifier = Modifier.weight(1f))
+                                                                    Text("▾", fontSize = 9.sp)
+                                                                }
+                                                            }
+                                                            DropdownMenu(
+                                                                expanded = dirDropExpanded,
+                                                                onDismissRequest = { dirDropExpanded = false }
+                                                            ) {
+                                                                for ((di, dn) in dirNames.withIndex()) {
+                                                                    DropdownMenuItem(
+                                                                        text = { Text(dn, fontSize = 10.sp) },
+                                                                        onClick = {
+                                                                            dirDropExpanded = false
+                                                                            val newDir = di + (if (isBubble) 4 else 0)
+                                                                            val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
+                                                                            editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
+                                                                        },
+                                                                        modifier = Modifier.height(26.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                                    // Screen X / Y
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("Screen:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        var sxText by remember(currentDoor) { mutableStateOf(currentDoor.screenX.toString(16).uppercase()) }
+                                                        var syText by remember(currentDoor) { mutableStateOf(currentDoor.screenY.toString(16).uppercase()) }
+                                                        Text("X:", fontSize = 9.sp, color = labelColor)
+                                                        OutlinedTextField(
+                                                            value = sxText,
+                                                            onValueChange = { v ->
+                                                                sxText = v
+                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(screenX = it)) }
+                                                            },
+                                                            modifier = Modifier.width(40.dp).height(30.dp),
+                                                            textStyle = fieldStyle, singleLine = true
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Y:", fontSize = 9.sp, color = labelColor)
+                                                        OutlinedTextField(
+                                                            value = syText,
+                                                            onValueChange = { v ->
+                                                                syText = v
+                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(screenY = it)) }
+                                                            },
+                                                            modifier = Modifier.width(40.dp).height(30.dp),
+                                                            textStyle = fieldStyle, singleLine = true
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                                    // Distance from door
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("Dist:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        var distText by remember(currentDoor) {
+                                                            mutableStateOf(currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0'))
+                                                        }
+                                                        OutlinedTextField(
+                                                            value = distText,
+                                                            onValueChange = { v ->
+                                                                distText = v
+                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it)) }
+                                                            },
+                                                            modifier = Modifier.width(80.dp).height(30.dp),
+                                                            textStyle = fieldStyle, singleLine = true
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                                    // Elevator + Bubble toggles
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Checkbox(
+                                                            checked = currentDoor.isElevator,
+                                                            onCheckedChange = { checked ->
+                                                                val newFlags = if (checked) currentDoor.bitflag or 0x80 else currentDoor.bitflag and 0x7F
+                                                                editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newFlags))
+                                                            },
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Text("Elevator", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+                                                        Spacer(modifier = Modifier.width(12.dp))
+                                                        Checkbox(
+                                                            checked = isBubble,
+                                                            onCheckedChange = { checked ->
+                                                                val dir = currentDoor.direction and 0x03
+                                                                val newDir = dir + (if (checked) 4 else 0)
+                                                                val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
+                                                                editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
+                                                            },
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Text("Closing door", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+                                                    }
+
+                                                    // Scroll/Entry ASM pointers (advanced)
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("Scroll:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        var scrollText by remember(currentDoor) {
+                                                            mutableStateOf(currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0'))
+                                                        }
+                                                        OutlinedTextField(
+                                                            value = scrollText,
+                                                            onValueChange = { v ->
+                                                                scrollText = v
+                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it)) }
+                                                            },
+                                                            modifier = Modifier.width(80.dp).height(30.dp),
+                                                            textStyle = fieldStyle, singleLine = true
+                                                        )
+                                                    }
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text("ASM:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
+                                                        var asmText by remember(currentDoor) {
+                                                            mutableStateOf(currentDoor.entryCode.toString(16).uppercase().padStart(4, '0'))
+                                                        }
+                                                        OutlinedTextField(
+                                                            value = asmText,
+                                                            onValueChange = { v ->
+                                                                asmText = v
+                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it)) }
+                                                            },
+                                                            modifier = Modifier.width(80.dp).height(30.dp),
+                                                            textStyle = fieldStyle, singleLine = true
+                                                        )
                                                     }
                                                 }
                                             }
@@ -909,9 +1124,24 @@ fun MapCanvas(
                                             }
                                         }
                                         for (plm in otherPlms) {
-                                            val pName = RomParser.doorCapColor(plm.id)?.let { "Door Cap" }
-                                                ?: "PLM 0x${plm.id.toString(16).uppercase()}"
-                                            Text(pName, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                            val pName = RomParser.plmDisplayName(plm.id, plm.param)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(pName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                if (RomParser.isStationPlm(plm.id) || RomParser.isGatePlm(plm.id)) {
+                                                    Text(
+                                                        "✕",
+                                                        modifier = Modifier
+                                                            .clickable { editorState.removePlm(plm.x, plm.y, plm.id) }
+                                                            .padding(horizontal = 4.dp),
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            }
                                         }
 
                                         // Add Item button + dropdown
@@ -968,6 +1198,66 @@ fun MapCanvas(
                                                         onClick = {
                                                             addItemExpanded = false
                                                             editorState.addPlm(plmId, propsBlockX, propsBlockY, 0)
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Add Station button + dropdown
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        var addStationExpanded by remember { mutableStateOf(false) }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                    .clickable { addStationExpanded = true },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = MaterialTheme.colorScheme.secondaryContainer
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("+ Add Station / Gate", fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = addStationExpanded,
+                                                onDismissRequest = { addStationExpanded = false }
+                                            ) {
+                                                Text("Stations", fontSize = 9.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                for (station in RomParser.STATION_PLMS) {
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                verticalAlignment = Alignment.CenterVertically) {
+                                                                Text(station.shortLabel, fontSize = 9.sp,
+                                                                    color = MaterialTheme.colorScheme.secondary,
+                                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                                Text(station.name, fontSize = 11.sp)
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            addStationExpanded = false
+                                                            editorState.addPlm(station.plmId, propsBlockX, propsBlockY, station.defaultParam)
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                                Divider()
+                                                Text("Gates", fontSize = 9.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                for (gate in RomParser.GATE_PLMS) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(gate.name, fontSize = 11.sp) },
+                                                        onClick = {
+                                                            addStationExpanded = false
+                                                            editorState.addPlm(gate.plmId, propsBlockX, propsBlockY, gate.param)
                                                         },
                                                         modifier = Modifier.height(28.dp)
                                                     )
@@ -1093,17 +1383,31 @@ private fun buildCompositeImage(
         }
     }
     
-    // Draw item labels (positioned at PLM block coordinates)
+    // Draw item / station / gate labels (positioned at PLM block coordinates)
     if (activeOverlays.contains(TileOverlay.ITEMS) && data.plmEntries.isNotEmpty()) {
         val g2 = g as java.awt.Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
         val labelFont = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
         g.font = labelFont
         val fm = g.fontMetrics
+        val itemColor = java.awt.Color(0xFF, 0xCC, 0x00)       // gold
+        val stationColor = java.awt.Color(0x44, 0xCC, 0xFF)    // cyan
+        val gateColor = java.awt.Color(0xCC, 0x66, 0xFF)       // purple
         for (plm in data.plmEntries) {
-            val itemDef = RomParser.ITEM_DEFS.find { it.chozoId == plm.id || it.visibleId == plm.id || it.hiddenId == plm.id }
-                ?: continue
-            val name = itemDef.name
+            val isItem = RomParser.isItemPlm(plm.id)
+            val isStation = RomParser.isStationPlm(plm.id)
+            val isGate = RomParser.isGatePlm(plm.id)
+            if (!isItem && !isStation && !isGate) continue
+            val name = when {
+                isItem -> RomParser.ITEM_DEFS.find { it.chozoId == plm.id || it.visibleId == plm.id || it.hiddenId == plm.id }?.name ?: continue
+                isStation -> RomParser.stationNameForPlm(plm.id) ?: continue
+                else -> RomParser.gateNameForPlm(plm.id, plm.param) ?: continue
+            }
+            val badgeBorder = when {
+                isStation -> stationColor
+                isGate -> gateColor
+                else -> itemColor
+            }
             val cx = plm.x * 16 + 8
             val cy = plm.y * 16 + 8
             val textWidth = fm.stringWidth(name)
@@ -1113,7 +1417,7 @@ private fun buildCompositeImage(
             val by = cy - badgeH / 2
             g2.color = java.awt.Color(0, 0, 0, 200)
             g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
-            g2.color = java.awt.Color(0xFF, 0xCC, 0x00)
+            g2.color = badgeBorder
             g2.drawRoundRect(bx, by, badgeW, badgeH, 4, 4)
             g2.color = java.awt.Color.WHITE
             g2.drawString(name, bx + 3, by + fm.ascent + 1)
@@ -1121,10 +1425,11 @@ private fun buildCompositeImage(
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF)
     }
 
-    // Draw enemy markers (positioned at enemy pixel coordinates)
+    // Draw enemy sprites / markers (positioned at enemy pixel coordinates)
     if (activeOverlays.contains(TileOverlay.ENEMIES) && data.enemyEntries.isNotEmpty()) {
         val g2 = g as java.awt.Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
         val labelFont = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
         g.font = labelFont
         val fm = g.fontMetrics
@@ -1134,21 +1439,31 @@ private fun buildCompositeImage(
             val ex = enemy.x
             val ey = enemy.y
             if (ex < 0 || ex >= data.width || ey < 0 || ey >= data.height) continue
-            val diamondSize = 6
-            val dx = intArrayOf(ex, ex + diamondSize, ex, ex - diamondSize)
-            val dy = intArrayOf(ey - diamondSize, ey, ey + diamondSize, ey)
-            g2.color = java.awt.Color(0xFF, 0x44, 0x22, 180)
-            g2.fillPolygon(dx, dy, 4)
-            g2.color = markerColor
-            g2.stroke = java.awt.BasicStroke(1.5f)
-            g2.drawPolygon(dx, dy, 4)
-            g2.stroke = java.awt.BasicStroke(1f)
+
+            val hexId = enemy.id.toString(16).uppercase().padStart(4, '0')
+            val sprite = EnemySpriteCache.get(hexId)
+            if (sprite != null) {
+                val sx = ex - sprite.width / 2
+                val sy = ey - sprite.height / 2
+                g2.drawImage(sprite, sx, sy, null)
+            } else {
+                val diamondSize = 6
+                val dx = intArrayOf(ex, ex + diamondSize, ex, ex - diamondSize)
+                val dy = intArrayOf(ey - diamondSize, ey, ey + diamondSize, ey)
+                g2.color = java.awt.Color(0xFF, 0x44, 0x22, 180)
+                g2.fillPolygon(dx, dy, 4)
+                g2.color = markerColor
+                g2.stroke = java.awt.BasicStroke(1.5f)
+                g2.drawPolygon(dx, dy, 4)
+                g2.stroke = java.awt.BasicStroke(1f)
+            }
 
             val textWidth = fm.stringWidth(name)
             val badgeW = textWidth + 6
             val badgeH = fm.height + 2
             val bx = ex - badgeW / 2
-            val by = ey - diamondSize - badgeH - 2
+            val spriteH = sprite?.height ?: 12
+            val by = ey - spriteH / 2 - badgeH - 2
             g2.color = java.awt.Color(0, 0, 0, 200)
             g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
             g2.color = markerColor

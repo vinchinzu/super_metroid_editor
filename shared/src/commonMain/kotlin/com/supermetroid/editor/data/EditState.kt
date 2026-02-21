@@ -40,13 +40,29 @@ data class PlmChange(
 )
 
 /**
+ * A door property change: modify one field of a door entry.
+ */
+@Serializable
+data class DoorChange(
+    val doorIndex: Int,
+    val destRoomPtr: Int,
+    val bitflag: Int,
+    val doorCapCode: Int,
+    val screenX: Int,
+    val screenY: Int,
+    val distFromDoor: Int,
+    val entryCode: Int
+)
+
+/**
  * Per-room edit state: all operations applied to a specific room.
  */
 @Serializable
 data class RoomEdits(
     val roomId: Int,             // e.g. 0x91F8
     val operations: MutableList<EditOperation> = mutableListOf(),
-    val plmChanges: MutableList<PlmChange> = mutableListOf()
+    val plmChanges: MutableList<PlmChange> = mutableListOf(),
+    val doorChanges: MutableList<DoorChange> = mutableListOf()
 )
 
 /**

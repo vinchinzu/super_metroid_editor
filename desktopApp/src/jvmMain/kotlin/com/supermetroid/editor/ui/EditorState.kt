@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.supermetroid.editor.data.DoorChange
 import com.supermetroid.editor.data.EditOperation
 import com.supermetroid.editor.data.PatchRepository
 import com.supermetroid.editor.data.PatchWrite
@@ -36,27 +37,49 @@ data class TileDefault(val blockType: Int, val bts: Int = 0)
  */
 object TilesetDefaults {
     val defaults: Map<Int, TileDefault> = mapOf(
-        // Item containers (shot blocks — player shoots to reveal PLM item)
+        // Item containers (shootable air — player shoots to reveal PLM item)
         74  to TileDefault(0x4),              // Energy Tank
+        75  to TileDefault(0x4),              // Energy Tank (alt)
         76  to TileDefault(0x4),              // Missile
+        77  to TileDefault(0x4),              // Missile (alt)
         78  to TileDefault(0x4),              // Super Missile
+        79  to TileDefault(0x4),              // Super Missile (alt)
         80  to TileDefault(0x4),              // Power Bomb
+        81  to TileDefault(0x4),              // Power Bomb (alt)
 
         // Standard interactive blocks
-        82  to TileDefault(0xC, 0x00),        // Shootable block (reforms, any weapon)
-        86  to TileDefault(0xA),              // Spike
-        87  to TileDefault(0xC, 0x08),        // Power bombable block (reforms)
-        88  to TileDefault(0xF),              // Bombable block (reforms)
-        114 to TileDefault(0x4, 0x00),        // Shootable item block (chozo, one-time)
-        155 to TileDefault(0xE),              // Grapple block
-        156 to TileDefault(0xA),              // Spike (alt tile)
-        159 to TileDefault(0xC, 0x0A),        // Super missile breakable (reforms)
-        182 to TileDefault(0x3),              // Speed booster breakable (type 0x3 — solid, shot-immune)
-        183 to TileDefault(0xE),              // Crumble grapple (grapple primary; user can set crumble via properties)
-        188 to TileDefault(0xB),              // Crumble block
+        82  to TileDefault(0xC, 0x00),        // Shootable block (beam/bomb, reforms)
+        83  to TileDefault(0xC, 0x01),        // Shootable block (beam/bomb, no reform)
+        84  to TileDefault(0xC, 0x04),        // Hidden shot block (reform)
+        85  to TileDefault(0xC, 0x05),        // Hidden shot block (no reform)
+        86  to TileDefault(0xA),              // Spike (up-facing)
+        87  to TileDefault(0xC, 0x08),        // Power bomb block (reform)
+        88  to TileDefault(0xF),              // Bomb block (reform)
+        89  to TileDefault(0xF, 0x04),        // Bomb block (permanent)
+        90  to TileDefault(0xA),              // Spike (down-facing)
+        91  to TileDefault(0xA),              // Spike (left-facing)
+        92  to TileDefault(0xA),              // Spike (right-facing)
 
-        // Multi-tile shot blocks: each tile is an independent shot block
-        // Player must shoot each tile separately; no linking mechanism
+        // Chozo / special item containers
+        114 to TileDefault(0x4, 0x00),        // Shootable item block (chozo)
+
+        // Grapple blocks
+        155 to TileDefault(0xE),              // Grapple block (normal)
+        156 to TileDefault(0xA),              // Spike (alt)
+        157 to TileDefault(0xE, 0x01),        // Crumble grapple (reform)
+        158 to TileDefault(0xE, 0x02),        // Crumble grapple (permanent)
+        159 to TileDefault(0xC, 0x0A),        // Super missile breakable (reform)
+        160 to TileDefault(0xC, 0x0B),        // Super missile breakable (no reform)
+
+        // Speed booster / crumble variants
+        182 to TileDefault(0x3, 0x08),        // Speed booster (left direction)
+        183 to TileDefault(0xE),              // Grapple block (alt)
+        188 to TileDefault(0xB, 0x00),        // Crumble block (reform)
+        189 to TileDefault(0xB, 0x04),        // Crumble block (permanent)
+        190 to TileDefault(0xB, 0x0E),        // Speed booster crumble (reform)
+        191 to TileDefault(0xB, 0x0F),        // Speed booster crumble (permanent)
+
+        // Multi-tile shot blocks
         150 to TileDefault(0xC, 0x00),        // 2×1 shot block (left, reform)
         151 to TileDefault(0xC, 0x00),        // 2×1 shot block (right, reform)
         152 to TileDefault(0xC, 0x00),        // 1×2 shot block (top, reform)
@@ -65,6 +88,9 @@ object TilesetDefaults {
         154 to TileDefault(0xC, 0x00),        // 2×2 shot block (top-right, reform)
         185 to TileDefault(0xC, 0x00),        // 2×2 shot block (bottom-left, reform)
         186 to TileDefault(0xC, 0x00),        // 2×2 shot block (bottom-right, reform)
+
+        // X-Ray air (type 0x2 — air block only visible with X-Ray Scope)
+        192 to TileDefault(0x2),              // X-Ray air block
     )
 
     fun get(metatileIndex: Int): TileDefault? = defaults[metatileIndex]
@@ -211,9 +237,11 @@ class EditorState {
     val workingPlms: List<RomParser.PlmEntry> get() = _workingPlms
     private var originalPlmCount = 0
 
-    /** Door entries for the current room (parsed from ROM, read-only). */
-    var doorEntries: List<RomParser.DoorEntry> = emptyList()
-        private set
+    /** Door entries for the current room (mutable for editing). */
+    private val _workingDoors = mutableListOf<RomParser.DoorEntry>()
+    var doorEntries: List<RomParser.DoorEntry>
+        get() = _workingDoors
+        private set(value) { _workingDoors.clear(); _workingDoors.addAll(value) }
 
     // ─── Tileset editor ─────────────────────────────────────────
 
@@ -706,6 +734,27 @@ class EditorState {
         _workingPlms.removeAll { it.x == x && it.y == y && it.id == plmId }
         project.getOrCreateRoom(currentRoomId).plmChanges.add(
             PlmChange("remove", plmId, x, y, 0)
+        )
+        dirty = true
+        editVersion++
+    }
+
+    // ─── Door editing ──────────────────────────────────────────
+
+    fun updateDoor(index: Int, entry: RomParser.DoorEntry) {
+        if (index < 0 || index >= _workingDoors.size) return
+        _workingDoors[index] = entry
+        project.getOrCreateRoom(currentRoomId).doorChanges.add(
+            DoorChange(
+                doorIndex = index,
+                destRoomPtr = entry.destRoomPtr,
+                bitflag = entry.bitflag,
+                doorCapCode = entry.doorCapCode,
+                screenX = entry.screenX,
+                screenY = entry.screenY,
+                distFromDoor = entry.distFromDoor,
+                entryCode = entry.entryCode
+            )
         )
         dirty = true
         editVersion++
