@@ -2,6 +2,13 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -315,41 +322,81 @@ fun MapCanvas(
                     if (editorState != null) {
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                         
-                        // Tool selection
+                        // Tool selection with icons
+                        FilterChip(
+                            selected = editorState.activeTool == EditorTool.SELECT,
+                            onClick = { editorState.activeTool = EditorTool.SELECT },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Default.SelectAll, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    // Text("Select", fontSize = 9.sp)
+                                }
+                            },
+                            modifier = Modifier.height(24.dp)
+                        )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.PAINT,
-                            onClick = { editorState.activeTool = EditorTool.PAINT },
-                            label = { Text("Paint", fontSize = 9.sp) },
+                            onClick = {
+                                if (editorState.mapSelStart != null && editorState.mapSelEnd != null) {
+                                    editorState.captureMapSelection()
+                                } else {
+                                    editorState.activeTool = EditorTool.PAINT
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    // Text("Paint", fontSize = 9.sp)
+                                }
+                            },
                             modifier = Modifier.height(24.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.FILL,
                             onClick = { editorState.activeTool = EditorTool.FILL },
-                            label = { Text("Fill", fontSize = 9.sp) },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Default.FormatColorFill, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    // Text("Fill", fontSize = 9.sp)
+                                }
+                            },
                             modifier = Modifier.height(24.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.SAMPLE,
                             onClick = { editorState.activeTool = EditorTool.SAMPLE },
-                            label = { Text("Sample", fontSize = 9.sp) },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Default.Colorize, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    // Text("Sample", fontSize = 9.sp)
+                                }
+                            },
                             modifier = Modifier.height(24.dp)
                         )
                         
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                         
-                        // Undo / Redo
-                        TextButton(
+                        // Undo / Redo with icons
+                        IconButton(
                             onClick = { editorState.undo() },
                             enabled = editorState.undoStack.isNotEmpty(),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.height(24.dp)
-                        ) { Text("Undo", fontSize = 9.sp) }
-                        TextButton(
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Undo, contentDescription = "Undo",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (editorState.undoStack.isNotEmpty()) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+                        IconButton(
                             onClick = { editorState.redo() },
                             enabled = editorState.redoStack.isNotEmpty(),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.height(24.dp)
-                        ) { Text("Redo", fontSize = 9.sp) }
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Redo, contentDescription = "Redo",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (editorState.redoStack.isNotEmpty()) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
                         
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                         
@@ -464,10 +511,20 @@ fun MapCanvas(
                                                         true
                                                     } else false
                                                 }
-                                Key.One -> { editorState.activeTool = EditorTool.PAINT; true }
-                                Key.Two -> { editorState.activeTool = EditorTool.FILL; true }
-                                Key.Three -> { editorState.activeTool = EditorTool.SAMPLE; true }
-                                Key.Escape -> { if (propsExpanded) { propsExpanded = false; true } else false }
+                                Key.One -> { editorState.activeTool = EditorTool.SELECT; true }
+                                Key.Two -> { editorState.activeTool = EditorTool.PAINT; true }
+                                Key.Three -> { editorState.activeTool = EditorTool.FILL; true }
+                                Key.Four -> { editorState.activeTool = EditorTool.SAMPLE; true }
+                                Key.Enter -> {
+                                    if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
+                                        editorState.captureMapSelection(); true
+                                    } else false
+                                }
+                                Key.Escape -> {
+                                    if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
+                                        editorState.mapSelStart = null; editorState.mapSelEnd = null; true
+                                    } else if (propsExpanded) { propsExpanded = false; true } else false
+                                }
                                 else -> false
                                             }
                                         } else false
@@ -501,6 +558,11 @@ fun MapCanvas(
                                         } else if (ne != null && ne.button == MouseEvent.BUTTON1 && editorState != null) {
                                             val (bx, by) = pointerToBlock(event.changes.first().position.x, event.changes.first().position.y)
                                             when (editorState.activeTool) {
+                                                EditorTool.SELECT -> {
+                                                    editorState.mapSelStart = Pair(bx, by)
+                                                    editorState.mapSelEnd = Pair(bx, by)
+                                                    isPainting = true
+                                                }
                                                 EditorTool.PAINT -> if (editorState.brush != null) {
                                                     isPainting = true; editorState.beginStroke(); editorState.paintAt(bx, by)
                                                 }
@@ -516,7 +578,11 @@ fun MapCanvas(
                                     .onPointerEvent(PointerEventType.Release) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
                                         if (ne == null || ne.button == MouseEvent.BUTTON2) isDragging = false
-                                        if (isPainting) { isPainting = false; editorState?.endStroke() }
+                                        if (isPainting && editorState?.activeTool == EditorTool.SELECT) {
+                                            isPainting = false
+                                        } else if (isPainting) {
+                                            isPainting = false; editorState?.endStroke()
+                                        }
                                     }
                                     .onPointerEvent(PointerEventType.Move) { event ->
                                         val pos = event.changes.first().position
@@ -531,9 +597,13 @@ fun MapCanvas(
                                                 vScrollState.scrollTo((vScrollState.value + dy.toInt()).coerceIn(0, vScrollState.maxValue))
                                             }
                                         }
-                                        if (isPainting && editorState != null && editorState.activeTool == EditorTool.PAINT) {
+                                        if (isPainting && editorState != null) {
                                             val (bx, by) = pointerToBlock(pos.x, pos.y)
-                                            editorState.paintAt(bx, by)
+                                            when (editorState.activeTool) {
+                                                EditorTool.SELECT -> editorState.mapSelEnd = Pair(bx, by)
+                                                EditorTool.PAINT -> editorState.paintAt(bx, by)
+                                                else -> {}
+                                            }
                                         }
                                     }
                                     .onPointerEvent(PointerEventType.Exit) {
@@ -571,9 +641,11 @@ fun MapCanvas(
                                                         val pixels = tg.renderMetatile(idx) ?: continue
                                                         val dc = if (b.hFlip) (b.cols - 1 - c) else c
                                                         val dr = if (b.vFlip) (b.rows - 1 - r) else r
+                                                        val effH = b.tileHFlip(r, c)
+                                                        val effV = b.tileVFlip(r, c)
                                                         for (ty in 0 until 16) for (tx in 0 until 16) {
-                                                            val sx = if (b.hFlip) 15 - tx else tx
-                                                            val sy = if (b.vFlip) 15 - ty else ty
+                                                            val sx = if (effH) 15 - tx else tx
+                                                            val sy = if (effV) 15 - ty else ty
                                                             val argb = pixels[sy * 16 + sx]
                                                             if (argb != 0) img.setRGB(dc * 16 + tx, dr * 16 + ty, argb)
                                                         }
@@ -599,6 +671,26 @@ fun MapCanvas(
                                                     .requiredWidth((b.cols * 16 * zoomLevel).dp)
                                                     .requiredHeight((b.rows * 16 * zoomLevel).dp),
                                                 contentScale = ContentScale.FillBounds
+                                            )
+                                        }
+                                    }
+                                    // Select mode cursor: crosshair outline
+                                    if (editorState != null && editorState.hoverBlockX >= 0 && editorState.activeTool == EditorTool.SELECT
+                                        && editorState.mapSelStart == null) {
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val tileSize = 16f * zoomLevel
+                                            drawRect(
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(editorState.hoverBlockX * tileSize, editorState.hoverBlockY * tileSize),
+                                                size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                                    width = 1.5f,
+                                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f, 3f))
+                                                )
                                             )
                                         }
                                     }
@@ -631,6 +723,40 @@ fun MapCanvas(
                                                 topLeft = androidx.compose.ui.geometry.Offset(propsBlockX * tileSize, propsBlockY * tileSize),
                                                 size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                                            )
+                                        }
+                                    }
+                                    // Map selection rectangle (dotted-style)
+                                    if (editorState != null && editorState.mapSelStart != null && editorState.mapSelEnd != null) {
+                                        val sel0 = editorState.mapSelStart!!
+                                        val sel1 = editorState.mapSelEnd!!
+                                        val minBx = minOf(sel0.first, sel1.first)
+                                        val minBy = minOf(sel0.second, sel1.second)
+                                        val maxBx = maxOf(sel0.first, sel1.first)
+                                        val maxBy = maxOf(sel0.second, sel1.second)
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val tileSize = 16f * zoomLevel
+                                            val rx = minBx * tileSize
+                                            val ry = minBy * tileSize
+                                            val rw = (maxBx - minBx + 1) * tileSize
+                                            val rh = (maxBy - minBy + 1) * tileSize
+                                            drawRect(
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(rx, ry),
+                                                size = androidx.compose.ui.geometry.Size(rw, rh)
+                                            )
+                                            drawRect(
+                                                color = Color.White.copy(alpha = 0.9f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(rx, ry),
+                                                size = androidx.compose.ui.geometry.Size(rw, rh),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                                    width = 2f,
+                                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 4f))
+                                                )
                                             )
                                         }
                                     }

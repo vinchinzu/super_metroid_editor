@@ -17,6 +17,7 @@ kotlin {
                 
                 // Material3 for Compose
                 implementation(compose.material3)
+                implementation(compose.materialIconsExtended)
                 
                 // JSON parsing
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")

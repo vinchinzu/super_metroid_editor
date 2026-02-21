@@ -137,7 +137,8 @@ data class TileBrush(
     val hFlip: Boolean = false,
     val vFlip: Boolean = false,
     val blockTypeOverrides: Map<Long, Int> = emptyMap(),
-    val btsOverrides: Map<Long, Int> = emptyMap()
+    val btsOverrides: Map<Long, Int> = emptyMap(),
+    val flipOverrides: Map<Long, Int> = emptyMap()  // per-tile: bit0=hflip, bit1=vflip
 ) {
     val cols get() = tiles.firstOrNull()?.size ?: 0
     val rows get() = tiles.size
@@ -147,12 +148,22 @@ data class TileBrush(
     fun blockTypeAt(r: Int, c: Int): Int = blockTypeOverrides[key(r, c)] ?: blockType
     fun btsAt(r: Int, c: Int): Int = btsOverrides[key(r, c)] ?: 0
 
+    /** Per-tile flip state: original flips XOR'd with brush-level flips. */
+    fun tileHFlip(r: Int, c: Int): Boolean {
+        val perTile = (flipOverrides[key(r, c)] ?: 0) and 1 != 0
+        return perTile xor hFlip
+    }
+    fun tileVFlip(r: Int, c: Int): Boolean {
+        val perTile = (flipOverrides[key(r, c)] ?: 0) and 2 != 0
+        return perTile xor vFlip
+    }
+
     /** Encode one tile at (r, c) as a 16-bit block word. */
     fun blockWordAt(r: Int, c: Int): Int {
         val idx = tiles.getOrNull(r)?.getOrNull(c) ?: return 0
         var word = idx and 0x3FF
-        if (hFlip) word = word or (1 shl 10)
-        if (vFlip) word = word or (1 shl 11)
+        if (tileHFlip(r, c)) word = word or (1 shl 10)
+        if (tileVFlip(r, c)) word = word or (1 shl 11)
         word = word or ((blockTypeAt(r, c) and 0xF) shl 12)
         return word
     }
@@ -172,7 +183,7 @@ data class TileBrush(
     }
 }
 
-enum class EditorTool { PAINT, FILL, SAMPLE }
+enum class EditorTool { PAINT, FILL, SAMPLE, SELECT }
 
 // ─── Editor State ───────────────────────────────────────────────
 
@@ -181,6 +192,10 @@ class EditorState {
         private set
 
     var activeTool by mutableStateOf(EditorTool.PAINT)
+
+    /** Map selection rectangle in block coordinates (inclusive). */
+    var mapSelStart by mutableStateOf<Pair<Int, Int>?>(null)
+    var mapSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
 
     /** Selection rectangle in tileset: (startCol, startRow, endCol, endRow). */
     var tilesetSelStart by mutableStateOf<Pair<Int, Int>?>(null)
@@ -443,10 +458,44 @@ class EditorState {
 
     fun rotateClockwise() {
         val b = brush ?: return
-        // Transpose + reverse rows = 90° CW for the tile grid
         val oldTiles = b.tiles
-        val newRows = oldTiles[0].indices.map { c -> oldTiles.indices.reversed().map { r -> oldTiles[r][c] } }
-        brush = b.copy(tiles = newRows, hFlip = !b.vFlip, vFlip = b.hFlip)
+        val oldRowCount = oldTiles.size
+        if (oldRowCount == 0) return
+        val newTiles = oldTiles[0].indices.map { c ->
+            oldTiles.indices.reversed().map { r -> oldTiles[r][c] }
+        }
+
+        fun remapKeys(old: Map<Long, Int>): Map<Long, Int> = buildMap {
+            for ((key, value) in old) {
+                val oldR = (key shr 32).toInt()
+                val oldC = (key and 0xFFFFFFFFL).toInt()
+                val newR = oldC
+                val newC = oldRowCount - 1 - oldR
+                put((newR.toLong() shl 32) or (newC.toLong() and 0xFFFFFFFFL), value)
+            }
+        }
+
+        val newFlipOverrides = buildMap {
+            for ((key, value) in b.flipOverrides) {
+                val oldR = (key shr 32).toInt()
+                val oldC = (key and 0xFFFFFFFFL).toInt()
+                val newR = oldC
+                val newC = oldRowCount - 1 - oldR
+                val newKey = (newR.toLong() shl 32) or (newC.toLong() and 0xFFFFFFFFL)
+                val h = value and 1
+                val v = (value shr 1) and 1
+                put(newKey, v or (h shl 1))
+            }
+        }
+
+        brush = b.copy(
+            tiles = newTiles,
+            hFlip = !b.vFlip,
+            vFlip = b.hFlip,
+            blockTypeOverrides = remapKeys(b.blockTypeOverrides),
+            btsOverrides = remapKeys(b.btsOverrides),
+            flipOverrides = newFlipOverrides
+        )
     }
 
     fun setBlockType(type: Int) { brush = brush?.copy(blockType = type) }
@@ -470,6 +519,55 @@ class EditorState {
         brush = TileBrush(tiles = listOf(listOf(metatileIdx)), blockType = bt, hFlip = hf, vFlip = vf, btsOverrides = btsMap)
         tilesetSelStart = Pair(metatileIdx % gridCols, metatileIdx / gridCols)
         tilesetSelEnd = tilesetSelStart
+        activeTool = EditorTool.PAINT
+    }
+
+    /** Convert the current map selection rectangle into a multi-tile brush. */
+    fun captureMapSelection() {
+        val s = mapSelStart ?: return
+        val e = mapSelEnd ?: return
+        val minX = minOf(s.first, e.first).coerceIn(0, workingBlocksWide - 1)
+        val maxX = maxOf(s.first, e.first).coerceIn(0, workingBlocksWide - 1)
+        val minY = minOf(s.second, e.second).coerceIn(0, workingBlocksTall - 1)
+        val maxY = maxOf(s.second, e.second).coerceIn(0, workingBlocksTall - 1)
+        if (minX == maxX && minY == maxY) {
+            sampleTile(minX, minY)
+            return
+        }
+        val rows = mutableListOf<List<Int>>()
+        val btsMap = mutableMapOf<Long, Int>()
+        val btMap = mutableMapOf<Long, Int>()
+        val flipMap = mutableMapOf<Long, Int>()
+        for (by in minY..maxY) {
+            val row = mutableListOf<Int>()
+            for (bx in minX..maxX) {
+                val word = readBlockWord(bx, by)
+                row.add(word and 0x3FF)
+                val r = by - minY
+                val c = bx - minX
+                val key = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+                val tileH = (word shr 10) and 1
+                val tileV = (word shr 11) and 1
+                if (tileH != 0 || tileV != 0) {
+                    flipMap[key] = tileH or (tileV shl 1)
+                }
+                val bt = (word shr 12) and 0xF
+                if (r != 0 || c != 0) btMap[key] = bt
+                val bts = readBts(bx, by)
+                if (bts != 0) btsMap[key] = bts
+            }
+            rows.add(row)
+        }
+        val primaryBt = (readBlockWord(minX, minY) shr 12) and 0xF
+        brush = TileBrush(
+            tiles = rows,
+            blockType = primaryBt,
+            blockTypeOverrides = btMap,
+            btsOverrides = btsMap,
+            flipOverrides = flipMap
+        )
+        mapSelStart = null
+        mapSelEnd = null
         activeTool = EditorTool.PAINT
     }
 
@@ -800,6 +898,7 @@ class EditorState {
             EditorTool.PAINT -> "Paint ${pendingEdits.size} tile(s)"
             EditorTool.FILL -> "Fill ${pendingEdits.size} tile(s)"
             EditorTool.SAMPLE -> "Sample"
+            EditorTool.SELECT -> "Select"
         }
         val op = EditOperation(desc, pendingEdits.toList())
         undoStack.add(op)
