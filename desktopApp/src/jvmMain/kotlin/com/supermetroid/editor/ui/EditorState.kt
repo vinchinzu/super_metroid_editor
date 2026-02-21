@@ -5,8 +5,11 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.data.EditOperation
+import com.supermetroid.editor.data.PatchRepository
+import com.supermetroid.editor.data.PatchWrite
 import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SmEditProject
+import com.supermetroid.editor.data.SmPatch
 import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.RomParser
@@ -66,6 +69,32 @@ object TilesetDefaults {
 
     fun get(metatileIndex: Int): TileDefault? = defaults[metatileIndex]
 }
+
+// ─── Patch helpers ──────────────────────────────────────────────
+
+/** UI-facing write entry (same shape as PatchWrite but not serializable). */
+data class SmPatchWrite(val offset: Long, val bytes: List<Int>)
+
+/**
+ * Simple hex-tweak demo — single-byte value change.
+ * All other patches load from bundled IPS in resources/patches/.
+ */
+val HARDCODED_PATCHES: List<SmPatch> = listOf(
+    SmPatch(
+        id = "hex_faster_charged_shots",
+        name = "Faster Charged Shots (hex demo)",
+        description = "Reduces delay between charged shots (0x3C → 0x1C). Single-byte demo at 0x83860. Source: MC hex tweaks.",
+        enabled = false,
+        writes = mutableListOf(PatchWrite(0x83860, listOf(0x1C)))
+    ),
+)
+
+/** Legacy/superseded patch IDs — removed on seed to avoid duplicates from old configs. */
+private val LEGACY_PATCH_IDS = setOf(
+    "respin", "fast_doors", "no_fanfare", "blue_speed_air", "no_walljump_kick", "instant_stop",
+    "no_beeping", "energy_free_shinesparks", "fast_saves", "enable_moonwalk", "skip_ceres", "fast_mb_cutscene",
+    "hex_no_spin_speed_loss", "hex_keep_blue_speed", "hex_no_walljump_kick", "hex_no_skid",
+)
 
 // ─── Brush: single or multi-tile selection ──────────────────────
 
@@ -243,6 +272,91 @@ class EditorState {
     /** Check if there's a project override for this metatile. */
     fun hasProjectOverride(tilesetId: Int, metatileIndex: Int): Boolean =
         project.getTileDefault(tilesetId, metatileIndex) != null
+
+    // ─── Patch management ───────────────────────────────────────
+
+    /** Currently selected patch in the patch editor. */
+    var selectedPatchId by mutableStateOf<String?>(null)
+        private set
+
+    /** Compose-observable version counter for patch list changes. */
+    var patchVersion by mutableStateOf(0)
+        private set
+
+    fun selectPatch(id: String?) { selectedPatchId = id }
+
+    fun addPatch(name: String, description: String = ""): SmPatch {
+        val id = java.util.UUID.randomUUID().toString().take(8)
+        val patch = SmPatch(id = id, name = name, description = description)
+        project.patches.add(patch)
+        dirty = true; patchVersion++
+        selectedPatchId = id
+        return patch
+    }
+
+    fun removePatch(id: String) {
+        project.patches.removeAll { it.id == id }
+        if (selectedPatchId == id) selectedPatchId = null
+        dirty = true; patchVersion++
+    }
+
+    fun togglePatch(id: String) {
+        project.patches.find { it.id == id }?.let { it.enabled = !it.enabled }
+        dirty = true; patchVersion++
+    }
+
+    fun updatePatch(id: String, name: String? = null, description: String? = null, enabled: Boolean? = null) {
+        val patch = project.patches.find { it.id == id } ?: return
+        if (name != null) patch.name = name
+        if (description != null) patch.description = description
+        if (enabled != null) patch.enabled = enabled
+        dirty = true; patchVersion++
+    }
+
+    fun setPatchWrites(id: String, writes: List<SmPatchWrite>) {
+        val patch = project.patches.find { it.id == id } ?: return
+        patch.writes.clear()
+        patch.writes.addAll(writes.map { PatchWrite(it.offset, it.bytes) })
+        dirty = true; patchVersion++
+    }
+
+    fun getSelectedPatch(): SmPatch? = project.patches.find { it.id == selectedPatchId }
+
+    /** Ensure all default patches exist; loads bundled IPS + hardcoded hex demos. */
+    fun seedDefaultPatches() {
+        // Remove legacy/duplicate patches from old configs
+        val removed = project.patches.removeAll { it.id in LEGACY_PATCH_IDS }
+        if (removed) {
+            if (selectedPatchId in LEGACY_PATCH_IDS) selectedPatchId = null
+            dirty = true
+            patchVersion++
+        }
+
+        val existingIds = project.patches.map { it.id }.toSet()
+        var added = 0
+
+        // Load bundled IPS patches from resources/patches/
+        try {
+            for (patch in PatchRepository.loadBundledPatches()) {
+                if (patch.id !in existingIds) {
+                    project.patches.add(patch)
+                    added++
+                }
+            }
+        } catch (e: Exception) {
+            println("Failed to load bundled patches: ${e.message}")
+        }
+
+        // Add hardcoded hex-tweak demos
+        for (def in HARDCODED_PATCHES) {
+            if (def.id !in existingIds) {
+                project.patches.add(def.copy(writes = def.writes.toMutableList()))
+                added++
+            }
+        }
+
+        if (added > 0) { dirty = true; patchVersion++ }
+    }
 
     // ─── Tile selection ─────────────────────────────────────────
 
@@ -816,11 +930,24 @@ class EditorState {
                 patchedRooms++
             }
         }
-        if (patchedRooms == 0) return null
+        // Apply enabled patches (hex write operations)
+        var patchesApplied = 0
+        for (patch in project.patches) {
+            if (!patch.enabled) continue
+            for (write in patch.writes) {
+                val off = write.offset.toInt()
+                for ((i, b) in write.bytes.withIndex()) {
+                    if (off + i < romData.size) romData[off + i] = b.toByte()
+                }
+            }
+            patchesApplied++
+        }
+
+        if (patchedRooms == 0 && patchesApplied == 0) return null
         val orig = File(romPath)
         val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
         out.writeBytes(romData)
-        println("Exported: ${out.absolutePath} ($patchedRooms rooms)")
+        println("Exported: ${out.absolutePath} ($patchedRooms rooms, $patchesApplied patches)")
         return out.absolutePath
     }
 

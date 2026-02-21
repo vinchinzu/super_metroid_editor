@@ -60,6 +60,28 @@ data class TileDefaultOverride(
 )
 
 /**
+ * A single patch write operation: write bytes at a PC offset.
+ * Equivalent to one IPS record.
+ */
+@Serializable
+data class PatchWrite(
+    val offset: Long,         // PC file offset (not SNES address)
+    val bytes: List<Int>      // byte values 0x00-0xFF
+)
+
+/**
+ * A named, toggleable patch: a collection of write operations.
+ */
+@Serializable
+data class SmPatch(
+    val id: String,
+    var name: String,
+    var description: String = "",
+    var enabled: Boolean = true,
+    val writes: MutableList<PatchWrite> = mutableListOf()
+)
+
+/**
  * The .smedit project file. JSON-serializable.
  * Keys are hex room IDs (as strings), values are the list of edit operations.
  */
@@ -67,7 +89,8 @@ data class TileDefaultOverride(
 data class SmEditProject(
     val romPath: String,
     val rooms: MutableMap<String, RoomEdits> = mutableMapOf(),  // key = "91F8"
-    val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf() // key = "tilesetId:metatileIndex"
+    val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf(), // key = "tilesetId:metatileIndex"
+    val patches: MutableList<SmPatch> = mutableListOf()
 ) {
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

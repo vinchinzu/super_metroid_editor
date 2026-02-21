@@ -1,0 +1,162 @@
+[
+  {
+    "file": "skip_intro.ips",
+    "name": "Skip Ceres + Intro",
+    "description": "New game starts directly at Landing Site ship, skipping Ceres station and intro sequence."
+  },
+  {
+    "file": "respin.ips",
+    "name": "Respin",
+    "description": "Press jump while airborne to re-enter spin jump. Full ASM respin from MapRandomizer."
+  },
+  {
+    "file": "fast_doors.ips",
+    "name": "Fast Doors",
+    "description": "Door transitions run twice per frame, cutting transition time in half."
+  },
+  {
+    "file": "momentum_conservation.ips",
+    "name": "Momentum Conservation",
+    "description": "Preserve horizontal momentum when landing while running (speedkeep)."
+  },
+  {
+    "file": "energy_free_shinesparks.ips",
+    "name": "Energy-Free Shinesparks",
+    "description": "Shinesparks no longer cost energy or require 30+ HP to activate."
+  },
+  {
+    "file": "no_beeping.ips",
+    "name": "No Low Energy Beeping",
+    "description": "Silences the low-energy warning beep sound."
+  },
+  {
+    "file": "fast_saves.ips",
+    "name": "Fast Saves",
+    "description": "Skip save confirmation dialog and speed up save/energy/missile station animations."
+  },
+  {
+    "file": "fast_pause_menu.ips",
+    "name": "Fast Pause Menu",
+    "description": "Speed up pause menu transitions and enable diagonal map scrolling."
+  },
+  {
+    "file": "enable_moonwalk.ips",
+    "name": "Enable Moonwalk",
+    "description": "Moonwalk is enabled by default on new game."
+  },
+  {
+    "file": "fast_mother_brain_cutscene.ips",
+    "name": "Fast Mother Brain Cutscene",
+    "description": "Speed up the Mother Brain fight cutscenes dramatically."
+  },
+  {
+    "file": "fast_big_boy_cutscene.ips",
+    "name": "Fast Big Boy Cutscene",
+    "description": "Speed up the baby metroid 'big boy' growth cutscene."
+  },
+  {
+    "file": "elevators_speed.ips",
+    "name": "Fast Elevators",
+    "description": "Elevators move 3x faster in all directions."
+  },
+  {
+    "file": "vanilla_bugfixes.ips",
+    "name": "Vanilla Bugfixes",
+    "description": "Fixes multiple vanilla game bugs and crashes (eye door, speed echoes, GT code, morph ball PLM, etc.)."
+  },
+  {
+    "file": "disable_walljump.ips",
+    "name": "Disable Walljump",
+    "description": "Walljumping is completely disabled."
+  },
+  {
+    "file": "missile_refill_all.ips",
+    "name": "Missile Refill All",
+    "description": "Save/energy stations refill all ammo types to max (missiles, supers, power bombs) in one touch."
+  },
+  {
+    "file": "skip_intro_ceres.ips",
+    "name": "Skip Intro (Start at Ceres)",
+    "description": "Skips the intro cinematic but starts at Ceres station. Play through Ceres and escape to Zebes. Use with Ceres Enable for full Ceres access."
+  },
+  {
+    "file": "ceres_enable.ips",
+    "name": "Ceres Enable",
+    "description": "Enables Ceres station as a playable area. Use with Skip Intro (Start at Ceres) to start at Ceres instead of Zebes."
+  },
+  {
+    "file": "fix_choot.ips",
+    "name": "Fix Choot Null Jump",
+    "description": "Fixes a bug in Thread the Needle room where jump calculation during door transition can be interrupted by IRQ."
+  },
+  {
+    "file": "fix_dust_torizo.ips",
+    "name": "Fix Dust Torizo",
+    "description": "Fixes bugs in the Dust Torizo (Golden Torizo) fight."
+  },
+  {
+    "file": "fix_water_fx_bug.ips",
+    "name": "Fix Water FX Bug",
+    "description": "Fixes water/lava visual effects bugs."
+  },
+  {
+    "file": "fix_horiz_doors.ips",
+    "name": "Fix Horizontal Doors",
+    "description": "Fixes horizontal door transition issues."
+  },
+  {
+    "file": "fix_hyper_slowlock.ips",
+    "name": "Fix Hyper Beam Slowlock",
+    "description": "Fixes hyper beam slowdown/lock-up bugs."
+  },
+  {
+    "file": "fast_reload.ips",
+    "name": "Fast Reload",
+    "description": "Speeds up the load game / reload time."
+  },
+  {
+    "file": "etank_refill_full.ips",
+    "name": "E-Tank Refill Full",
+    "description": "Energy stations refill energy to 100% in one touch."
+  },
+  {
+    "file": "energy_station_reserves.ips",
+    "name": "Energy Station Reserves",
+    "description": "Energy stations also refill reserve tanks."
+  },
+  {
+    "file": "aim_anything.ips",
+    "name": "Aim Anything",
+    "description": "Allows aiming in directions not normally possible (e.g. while in morph ball)."
+  },
+  {
+    "file": "complementary_suits.ips",
+    "name": "Complementary Suits",
+    "description": "Alternate suit color schemes (Varia, Gravity) with complementary colors."
+  },
+  {
+    "file": "boss_kraid_defeated.ips",
+    "name": "Boss: Kraid Defeated",
+    "description": "New game starts with Kraid already defeated. Allows Tourian access when combined with other boss patches."
+  },
+  {
+    "file": "boss_phantoon_defeated.ips",
+    "name": "Boss: Phantoon Defeated",
+    "description": "New game starts with Phantoon already defeated. Allows Tourian access when combined with other boss patches."
+  },
+  {
+    "file": "boss_draygon_defeated.ips",
+    "name": "Boss: Draygon Defeated",
+    "description": "New game starts with Draygon already defeated. Allows Tourian access when combined with other boss patches."
+  },
+  {
+    "file": "boss_ridley_defeated.ips",
+    "name": "Boss: Ridley Defeated",
+    "description": "New game starts with Ridley already defeated. Allows Tourian access when combined with other boss patches."
+  },
+  {
+    "file": "boss_all_defeated.ips",
+    "name": "All Bosses Defeated (Tourian Unlocked)",
+    "description": "New game starts with all four bosses (Kraid, Phantoon, Draygon, Ridley) defeated. Tourian gate opens immediately. Combine with Skip Intro for quick Tourian access."
+  }
+]
