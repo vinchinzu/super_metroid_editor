@@ -57,6 +57,8 @@ data class DoorChange(
 /**
  * An enemy population change: add, remove, or update an enemy entry.
  * Coordinates are in pixels (same units as the ROM's enemy population data).
+ * extra1/extra2/extra3 are the 3 trailing 16-bit fields per entry that must
+ * be preserved to avoid crashes (graphics hint, speed, speed2).
  */
 @Serializable
 data class EnemyChange(
@@ -66,6 +68,9 @@ data class EnemyChange(
     val y: Int,
     val initParam: Int = 0,
     val properties: Int = 0,
+    val extra1: Int = 0,
+    val extra2: Int = 0,
+    val extra3: Int = 0,
     val origX: Int = 0,       // for "remove"/"update": match the original position
     val origY: Int = 0
 )

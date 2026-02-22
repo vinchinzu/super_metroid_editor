@@ -515,12 +515,22 @@ class RomParser(private val romData: ByteArray) {
     
     // ─── Enemy population parsing ─────────────────────────────────────
 
-    data class EnemyEntry(val id: Int, val x: Int, val y: Int, val initParam: Int, val properties: Int)
+    /**
+     * Full 16-byte enemy population entry matching SMILE's "Type Enemy".
+     * Fields: Species(2), X(2), Y(2), Orientation(2), Special/PropX(2),
+     *         GfxExtra(2), Speed(2), Speed2(2).
+     * The last 3 words (extra1/extra2/extra3) are enemy-specific and MUST be
+     * preserved during round-tripping — zeroing them can crash the game.
+     */
+    data class EnemyEntry(
+        val id: Int, val x: Int, val y: Int,
+        val initParam: Int, val properties: Int,
+        val extra1: Int = 0, val extra2: Int = 0, val extra3: Int = 0
+    )
 
     /**
      * Parse enemy population data. enemySetPtr is a 16-bit pointer in bank $A1.
-     * Each entry is 16 bytes: 2-byte ID, 2-byte X (pixels), 2-byte Y (pixels),
-     * 2-byte init param, 2-byte properties, 6 bytes extra. Terminated by ID=0xFFFF.
+     * Each entry is 16 bytes. Terminated by ID=0xFFFF.
      */
     fun parseEnemyPopulation(enemySetPtr: Int): List<EnemyEntry> {
         if (enemySetPtr == 0 || enemySetPtr == 0xFFFF) return emptyList()
@@ -531,11 +541,16 @@ class RomParser(private val romData: ByteArray) {
         while (pc + 15 < romData.size && safety < 64) {
             val id = readUInt16At(pc)
             if (id == 0xFFFF || id == 0) break
-            val x = readUInt16At(pc + 2)
-            val y = readUInt16At(pc + 4)
-            val initParam = readUInt16At(pc + 6)
-            val properties = readUInt16At(pc + 8)
-            entries.add(EnemyEntry(id, x, y, initParam, properties))
+            entries.add(EnemyEntry(
+                id = id,
+                x = readUInt16At(pc + 2),
+                y = readUInt16At(pc + 4),
+                initParam = readUInt16At(pc + 6),
+                properties = readUInt16At(pc + 8),
+                extra1 = readUInt16At(pc + 10),
+                extra2 = readUInt16At(pc + 12),
+                extra3 = readUInt16At(pc + 14)
+            ))
             pc += 16
             safety++
         }

@@ -2,6 +2,11 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.GetApp
+import androidx.compose.material.icons.filled.Publish
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -12,6 +17,8 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.rom.RomParser
@@ -24,6 +31,7 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 private val EDITABLE_BLOCK_TYPES = listOf(
     0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
@@ -138,7 +146,7 @@ fun TilesetListPanel(
 
 // ─── Right side: full tileset canvas with toolbar ──────────────────────
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TilesetCanvas(
     romParser: RomParser?,
@@ -153,28 +161,43 @@ fun TilesetCanvas(
     val selectedMeta = editorState.editorSelectedMetatile
     val gridData = tilesetEditorState.gridData
     val coroutineScope = rememberCoroutineScope()
+    var showPixelEditor by remember { mutableStateOf(false) }
+
+    // If pixel editor is open, show it instead of the grid
+    if (showPixelEditor && editorState.editorTileGraphics != null && selectedMeta >= 0) {
+        TilePixelEditor(
+            tileGraphics = editorState.editorTileGraphics!!,
+            editorState = editorState,
+            tilesetEditorState = tilesetEditorState,
+            onClose = { showPixelEditor = false },
+            modifier = modifier
+        )
+        return
+    }
 
     Card(
         modifier = modifier,
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // ── Top toolbar ──
+            // ── Top toolbar (match Rooms: MaterialTheme, FilterChip, icons) ──
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 2.dp
+                color = MaterialTheme.colorScheme.surface
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .defaultMinSize(minHeight = 36.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         "Tileset $tilesetId",
                         style = MaterialTheme.typography.titleSmall,
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
@@ -198,20 +221,40 @@ fun TilesetCanvas(
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-                    // Export/Import buttons
+                    // Pixel Editor button (FilterChip like Rooms tools)
+                    if (selectedMeta >= 0 && editorState.editorTileGraphics != null) {
+                        FilterChip(
+                            selected = false,
+                            onClick = { showPixelEditor = true },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Text("Edit Pixels", fontSize = 11.sp)
+                                }
+                            },
+                            modifier = Modifier.height(28.dp)
+                        )
+                    }
+
+                    Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Export/Import buttons (Surface like Rooms Tile Meta dropdown)
                     var exportMenuExpanded by remember { mutableStateOf(false) }
                     Box {
                         Surface(
-                            modifier = Modifier.height(24.dp)
-                                .clickable { exportMenuExpanded = true },
+                            modifier = Modifier.height(28.dp).clickable { exportMenuExpanded = true },
                             shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.secondaryContainer
+                            color = MaterialTheme.colorScheme.surfaceVariant
                         ) {
-                            Text(
-                                "Export ▾", fontSize = 9.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.GetApp, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text("Export", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("▾", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+                            }
                         }
                         DropdownMenu(
                             expanded = exportMenuExpanded,
@@ -266,23 +309,21 @@ fun TilesetCanvas(
                     var importMenuExpanded by remember { mutableStateOf(false) }
                     Box {
                         Surface(
-                            modifier = Modifier.height(24.dp)
-                                .clickable { importMenuExpanded = true },
+                            modifier = Modifier.height(28.dp).clickable { importMenuExpanded = true },
                             shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.tertiaryContainer
+                            color = MaterialTheme.colorScheme.surfaceVariant
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    "Import ▾", fontSize = 9.sp,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
+                                Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text("Import", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (editorState.hasCustomVarGfx() || editorState.hasCustomCreGfx()) {
                                     Text("●", fontSize = 8.sp, color = Color(0xFF66BB6A))
                                 }
+                                Text("▾", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
                             }
                         }
                         DropdownMenu(
@@ -349,8 +390,8 @@ fun TilesetCanvas(
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         "${(zoomLevel * 100).toInt()}%",
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -378,6 +419,7 @@ fun TilesetCanvas(
                         }
                         val hScroll = rememberScrollState()
                         val vScroll = rememberScrollState()
+                        val density = LocalDensity.current.density
 
                         Box(
                             modifier = Modifier.fillMaxSize()
@@ -402,8 +444,10 @@ fun TilesetCanvas(
                                     val ne = event.nativeEvent as? MouseEvent ?: return@onPointerEvent
                                     if (ne.button == MouseEvent.BUTTON1) {
                                         val pos = event.changes.first().position
-                                        val tx = ((pos.x + hScroll.value) / zoomLevel / 16).toInt()
-                                        val ty = ((pos.y + vScroll.value) / zoomLevel / 16).toInt()
+                                        // Pointer coords are physical pixels; divide by density
+                                        val tilePx = 16f * zoomLevel * density
+                                        val tx = ((pos.x + hScroll.value) / tilePx).toInt()
+                                        val ty = ((pos.y + vScroll.value) / tilePx).toInt()
                                         val idx = ty * data.gridCols + tx
                                         if (idx in 0 until 1024) editorState.selectEditorMetatile(idx)
                                     }
@@ -463,7 +507,7 @@ private fun TileToolbarInfo(
     val sourceColor = when {
         hasOverride -> Color(0xFF66BB6A)
         hardcoded != null -> Color(0xFF42A5F5)
-        else -> Color.Gray
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Row(
@@ -488,7 +532,7 @@ private fun TileToolbarInfo(
                 fontSize = 10.sp
             )
             if (palIndices.isNotEmpty()) {
-                Text("pal ${palIndices.sorted().joinToString(",")}", fontSize = 8.sp, color = Color.Gray)
+                Text("pal ${palIndices.sorted().joinToString(",")}", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 

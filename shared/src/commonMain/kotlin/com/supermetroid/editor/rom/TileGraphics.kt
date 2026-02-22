@@ -319,6 +319,160 @@ class TileGraphics(private val romParser: RomParser) {
     /** Force tileset to re-load from ROM on next call. */
     fun invalidateCache() { cachedTilesetId = -1; rawTileData = null; metatiles = null; cachedPalette = null }
 
+    // ─── Pixel-level read / write for inline editor ────────────────────
+
+    /**
+     * Read a single pixel's palette colour index (0-15) from an 8x8 tile.
+     * Returns -1 if the tile or data is out of range.
+     */
+    fun readPixelIndex(tileNum: Int, px: Int, py: Int): Int {
+        val data = rawTileData ?: return -1
+        if (tileNum < 0 || tileNum >= TOTAL_TILES) return -1
+        val offset = tileNum * BYTES_PER_TILE
+        if (offset + 32 > data.size) return -1
+        val bit = 7 - px
+        val bp0 = (data[offset + py * 2].toInt() shr bit) and 1
+        val bp1 = (data[offset + py * 2 + 1].toInt() shr bit) and 1
+        val bp2 = (data[offset + py * 2 + 16].toInt() shr bit) and 1
+        val bp3 = (data[offset + py * 2 + 17].toInt() shr bit) and 1
+        return bp0 or (bp1 shl 1) or (bp2 shl 2) or (bp3 shl 3)
+    }
+
+    /**
+     * Write a single pixel's palette colour index (0-15) into an 8x8 tile.
+     */
+    fun writePixelIndex(tileNum: Int, px: Int, py: Int, colorIdx: Int) {
+        val data = rawTileData ?: return
+        if (tileNum < 0 || tileNum >= TOTAL_TILES) return
+        val offset = tileNum * BYTES_PER_TILE
+        if (offset + 32 > data.size) return
+        val bit = 7 - px
+        val mask = (1 shl bit).inv()
+        fun setBit(byteOff: Int, bitVal: Int) {
+            data[byteOff] = ((data[byteOff].toInt() and 0xFF and mask) or ((bitVal and 1) shl bit)).toByte()
+        }
+        setBit(offset + py * 2, colorIdx)
+        setBit(offset + py * 2 + 1, colorIdx shr 1)
+        setBit(offset + py * 2 + 16, colorIdx shr 2)
+        setBit(offset + py * 2 + 17, colorIdx shr 3)
+    }
+
+    /**
+     * Read the raw 4bpp index grid (8×8) for a tile.  Returns null on error.
+     */
+    fun readTileIndices(tileNum: Int): IntArray? {
+        if (rawTileData == null || tileNum < 0 || tileNum >= TOTAL_TILES) return null
+        val out = IntArray(64)
+        for (y in 0..7) for (x in 0..7) out[y * 8 + x] = readPixelIndex(tileNum, x, y)
+        return out
+    }
+
+    /**
+     * Get the SNES BGR555 value for a palette entry.
+     * Returns -1 if palette is not loaded.
+     */
+    fun getSnesBgr555(palRow: Int, colIdx: Int): Int {
+        val pal = cachedPalette ?: return -1
+        if (palRow !in pal.indices || colIdx !in 0..15) return -1
+        val argb = pal[palRow][colIdx]
+        val r = ((argb shr 16) and 0xFF) / 8
+        val g = ((argb shr 8) and 0xFF) / 8
+        val b = (argb and 0xFF) / 8
+        return (b shl 10) or (g shl 5) or r
+    }
+
+    /**
+     * Set a palette entry from an SNES BGR555 value.
+     */
+    fun setPaletteEntry(palRow: Int, colIdx: Int, bgr555: Int) {
+        val pal = cachedPalette ?: return
+        if (palRow !in pal.indices || colIdx !in 0..15) return
+        pal[palRow][colIdx] = bgr555ToArgb(bgr555)
+    }
+
+    /** Get the raw palette data as BGR555 values. */
+    fun getRawPaletteData(): ByteArray? {
+        cachedPalette ?: return null
+        val data = ByteArray(8 * 16 * 2)
+        for (row in 0..7) for (col in 0..15) {
+            val bgr555 = getSnesBgr555(row, col)
+            val offset = (row * 16 + col) * 2
+            data[offset] = (bgr555 and 0xFF).toByte()
+            data[offset + 1] = ((bgr555 shr 8) and 0xFF).toByte()
+        }
+        return data
+    }
+
+    /** Get a metatile's sub-tile definitions (4 words: TL, TR, BL, BR). */
+    fun getMetatileWords(metatileIndex: Int): IntArray? {
+        val metas = metatiles ?: return null
+        if (metatileIndex !in metas.indices) return null
+        return metas[metatileIndex].copyOf()
+    }
+
+    /**
+     * Read palette index (0-15) at a pixel in the 16x16 metatile.
+     * screenPx, screenPy in 0..15. Maps to correct 8x8 sub-tile and accounts for flips.
+     */
+    fun readMetatilePixel(metatileIndex: Int, screenPx: Int, screenPy: Int): Int {
+        val metas = metatiles ?: return 0
+        if (metatileIndex !in metas.indices || screenPx !in 0..15 || screenPy !in 0..15) return 0
+        val quadrant = (screenPx / 8) + 2 * (screenPy / 8)
+        val word = metas[metatileIndex][quadrant]
+        val tileNum = word and 0x03FF
+        val hFlip = (word shr 14) and 1
+        val vFlip = (word shr 15) and 1
+        val lx = screenPx % 8
+        val ly = screenPy % 8
+        val tx = if (hFlip != 0) 7 - lx else lx
+        val ty = if (vFlip != 0) 7 - ly else ly
+        return readPixelIndex(tileNum, tx, ty)
+    }
+
+    /**
+     * Write palette index at a pixel in the 16x16 metatile.
+     * Maps to correct 8x8 sub-tile and accounts for flips.
+     */
+    fun writeMetatilePixel(metatileIndex: Int, screenPx: Int, screenPy: Int, colorIdx: Int) {
+        val metas = metatiles ?: return
+        if (metatileIndex !in metas.indices || screenPx !in 0..15 || screenPy !in 0..15) return
+        val quadrant = (screenPx / 8) + 2 * (screenPy / 8)
+        val word = metas[metatileIndex][quadrant]
+        val tileNum = word and 0x03FF
+        val hFlip = (word shr 14) and 1
+        val vFlip = (word shr 15) and 1
+        val lx = screenPx % 8
+        val ly = screenPy % 8
+        val tx = if (hFlip != 0) 7 - lx else lx
+        val ty = if (vFlip != 0) 7 - ly else ly
+        writePixelIndex(tileNum, tx, ty, colorIdx)
+    }
+
+    /** Get palette row for a pixel in the metatile (for color display). */
+    fun getMetatilePixelPaletteRow(metatileIndex: Int, screenPx: Int, screenPy: Int): Int {
+        val metas = metatiles ?: return 0
+        if (metatileIndex !in metas.indices || screenPx !in 0..15 || screenPy !in 0..15) return 0
+        val quadrant = (screenPx / 8) + 2 * (screenPy / 8)
+        val word = metas[metatileIndex][quadrant]
+        return (word shr 10) and 7
+    }
+
+    /** Map metatile screen coords to (tileNum, localX, localY) for undo/redo. */
+    fun metatilePixelToTileCoords(metatileIndex: Int, screenPx: Int, screenPy: Int): Triple<Int, Int, Int>? {
+        val metas = metatiles ?: return null
+        if (metatileIndex !in metas.indices || screenPx !in 0..15 || screenPy !in 0..15) return null
+        val quadrant = (screenPx / 8) + 2 * (screenPy / 8)
+        val word = metas[metatileIndex][quadrant]
+        val tileNum = word and 0x03FF
+        val hFlip = (word shr 14) and 1
+        val vFlip = (word shr 15) and 1
+        val lx = screenPx % 8
+        val ly = screenPy % 8
+        val tx = if (hFlip != 0) 7 - lx else lx
+        val ty = if (vFlip != 0) 7 - ly else ly
+        return Triple(tileNum, tx, ty)
+    }
+
     /** Render palette as ARGB pixels: 8 rows × 16 cols, each swatch cellSize×cellSize. */
     fun renderPaletteImage(cellSize: Int = 12): Triple<IntArray, Int, Int>? {
         val pal = cachedPalette ?: return null

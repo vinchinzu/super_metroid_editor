@@ -1524,7 +1524,8 @@ fun MapCanvas(
                                                                     .toIntOrNull(16) ?: enemy.properties
                                                                 editorState.updateEnemy(
                                                                     enemy,
-                                                                    RomParser.EnemyEntry(enemy.id, nx, ny, enemy.initParam, np)
+                                                                    RomParser.EnemyEntry(enemy.id, nx, ny, enemy.initParam, np,
+                                                                        enemy.extra1, enemy.extra2, enemy.extra3)
                                                                 )
                                                                 editing = false
                                                             },

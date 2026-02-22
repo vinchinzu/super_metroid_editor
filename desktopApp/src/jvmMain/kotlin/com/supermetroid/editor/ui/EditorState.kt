@@ -230,6 +230,8 @@ class EditorState {
     var dirty by mutableStateOf(false)
         private set
 
+    fun markDirty() { dirty = true }
+
     /** Incremented on every edit to trigger map re-render. */
     var editVersion by mutableStateOf(0)
         private set
@@ -798,11 +800,12 @@ class EditorState {
                     )
                 }
             }
-            // Replay saved enemy changes
+            // Replay saved enemy changes (including extra fields)
             for (ec in savedRoom.enemyChanges) {
                 when (ec.action) {
                     "add" -> _workingEnemies.add(
-                        RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties)
+                        RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                            ec.extra1, ec.extra2, ec.extra3)
                     )
                     "remove" -> _workingEnemies.removeAll {
                         it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
@@ -813,7 +816,8 @@ class EditorState {
                         }
                         if (idx >= 0) {
                             _workingEnemies[idx] = RomParser.EnemyEntry(
-                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties
+                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                                ec.extra1, ec.extra2, ec.extra3
                             )
                         }
                     }
@@ -1011,7 +1015,7 @@ class EditorState {
         _workingEnemies.removeAll { it.id == enemy.id && it.x == enemy.x && it.y == enemy.y }
         project.getOrCreateRoom(currentRoomId).enemyChanges.add(
             EnemyChange("remove", enemy.id, enemy.x, enemy.y, enemy.initParam, enemy.properties,
-                origX = enemy.x, origY = enemy.y)
+                enemy.extra1, enemy.extra2, enemy.extra3, origX = enemy.x, origY = enemy.y)
         )
         dirty = true
         editVersion++
@@ -1023,7 +1027,7 @@ class EditorState {
         _workingEnemies[idx] = new
         project.getOrCreateRoom(currentRoomId).enemyChanges.add(
             EnemyChange("update", new.id, new.x, new.y, new.initParam, new.properties,
-                origX = old.x, origY = old.y)
+                new.extra1, new.extra2, new.extra3, origX = old.x, origY = old.y)
         )
         dirty = true
         editVersion++
@@ -1313,7 +1317,8 @@ class EditorState {
                 for (ec in roomEdits.enemyChanges) {
                     when (ec.action) {
                         "add" -> modified.add(
-                            RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties)
+                            RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                                ec.extra1, ec.extra2, ec.extra3)
                         )
                         "remove" -> modified.removeAll {
                             it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
@@ -1323,13 +1328,15 @@ class EditorState {
                                 it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
                             }
                             if (idx >= 0) modified[idx] = RomParser.EnemyEntry(
-                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties
+                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                                ec.extra1, ec.extra2, ec.extra3
                             )
                         }
                     }
                 }
-                val originalSize = originalEnemies.size * 16 + 4 // +4 for FFFF terminator pair
-                val newSize = modified.size * 16 + 4
+                // +2 for the FFFF terminator word
+                val originalSize = originalEnemies.size * 16 + 2
+                val newSize = modified.size * 16 + 2
                 val enemyPc = romParser.snesToPc(0xA10000 or room.enemySetPtr)
 
                 val writePc: Int
@@ -1355,26 +1362,29 @@ class EditorState {
                     continue
                 }
 
+                fun writeU16(offset: Int, value: Int) {
+                    romData[offset] = (value and 0xFF).toByte()
+                    romData[offset + 1] = ((value shr 8) and 0xFF).toByte()
+                }
+
                 var off = writePc
                 for (e in modified) {
-                    romData[off] = (e.id and 0xFF).toByte()
-                    romData[off + 1] = ((e.id shr 8) and 0xFF).toByte()
-                    romData[off + 2] = (e.x and 0xFF).toByte()
-                    romData[off + 3] = ((e.x shr 8) and 0xFF).toByte()
-                    romData[off + 4] = (e.y and 0xFF).toByte()
-                    romData[off + 5] = ((e.y shr 8) and 0xFF).toByte()
-                    romData[off + 6] = (e.initParam and 0xFF).toByte()
-                    romData[off + 7] = ((e.initParam shr 8) and 0xFF).toByte()
-                    romData[off + 8] = (e.properties and 0xFF).toByte()
-                    romData[off + 9] = ((e.properties shr 8) and 0xFF).toByte()
-                    for (i in 10..15) romData[off + i] = 0 // reserved bytes
+                    writeU16(off, e.id)
+                    writeU16(off + 2, e.x)
+                    writeU16(off + 4, e.y)
+                    writeU16(off + 6, e.initParam)
+                    writeU16(off + 8, e.properties)
+                    writeU16(off + 10, e.extra1)
+                    writeU16(off + 12, e.extra2)
+                    writeU16(off + 14, e.extra3)
                     off += 16
                 }
-                // Terminator: 0xFFFF 0x0000
-                romData[off] = 0xFF.toByte(); romData[off + 1] = 0xFF.toByte()
-                romData[off + 2] = 0; romData[off + 3] = 0
+                // Terminator: 0xFFFF at Species position
+                writeU16(off, 0xFFFF)
+                off += 2
+                // Zero any leftover space if writing in-place
                 if (writePc == enemyPc) {
-                    for (i in off + 4 until enemyPc + originalSize) romData[i] = 0
+                    while (off < enemyPc + originalSize) { romData[off] = 0; off++ }
                 }
                 patchedRooms++
             }
