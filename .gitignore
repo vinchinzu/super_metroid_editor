@@ -4,6 +4,7 @@ build/
 gradle-app.setting
 !gradle-wrapper.jar
 !gradle-wrapper.properties
+docs/Super Metroid Mod 3.0.80/*
 
 # IDE
 .idea/

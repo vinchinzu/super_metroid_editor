@@ -42,6 +42,11 @@ class TileGraphics(private val romParser: RomParser) {
         
         // SNES 4bpp tile: 32 bytes per 8x8 tile
         const val BYTES_PER_TILE = 32
+
+        // Kraid's room uses tileset/graphics set 27 with extended variable area
+        const val KRAID_TILESET = 27
+
+        const val CERES_AREA = 6
     }
     
     // Cached data per tileset
@@ -54,56 +59,49 @@ class TileGraphics(private val romParser: RomParser) {
      * Load a complete tileset (graphics + tile table + palette).
      * Returns true if successful.
      *
-     * Note: Ceres (area 6) rooms may show odd tiles because the game can use
-     * Ceres-specific graphics or a different loading path; the main tileset
-     * table is shared but in-game behaviour may differ for Ceres.
+     * @param noCre  When true, CRE tiles/table are not mixed in (room header
+     *               byte 8 value 0x05 — "wipe out CRE", used by Ceres shaft,
+     *               Ceres Ridley, and Kraid's room).
+     *
+     * Special cases derived from SMILE source (UGraphics.bas, SamusForm2.frm):
+     *   - Tileset 27 (Kraid): variable GFX region is 0x8000 bytes long, CRE
+     *     is placed at offset 0x8000 instead of the normal 0x5000.
+     *   - Rooms with noCre=true: only variable tile table/graphics are used;
+     *     metatile indices > CRE_TILE_START will appear blank.
      */
     fun loadTileset(tilesetId: Int): Boolean {
         if (tilesetId == cachedTilesetId && rawTileData != null) return true
-        
+
         val romData = romParser.getRomData()
-        
-        // Read tileset pointer table entry
+
         val tablePC = romParser.snesToPc(TILESET_TABLE_SNES)
         val entryOffset = tablePC + tilesetId * 9
-        
         if (entryOffset + 9 > romData.size) return false
-        
+
         val tileTablePtr = readUInt24(romData, entryOffset)
         val gfxPtr = readUInt24(romData, entryOffset + 3)
         val palettePtr = readUInt24(romData, entryOffset + 6)
-        
-        println("Tileset $tilesetId: tileTable=0x${tileTablePtr.toString(16)}, gfx=0x${gfxPtr.toString(16)}, palette=0x${palettePtr.toString(16)}")
-        
-        // Decompress variable tile table and CRE tile table
+
         val varTileTable = romParser.decompressLZ2(tileTablePtr)
-        val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
-        
-        // Decompress variable tile graphics and CRE graphics
         val varGfx = romParser.decompressLZ2(gfxPtr)
-        val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
-        
-        println("  varTileTable: ${varTileTable.size} bytes, creTileTable: ${creTileTable.size} bytes")
-        println("  varGfx: ${varGfx.size} bytes, creGfx: ${creGfx.size} bytes")
-        
-        // Decompress palette (it's LZ5 compressed too!)
-        // From SMILE Palette.vb: Decompress GraphicsSetPointers(ArrayIndex) + ROM_HEADER, OutputArray
         val paletteDecompressed = romParser.decompressLZ2(palettePtr)
         cachedPalette = parsePalette(paletteDecompressed)
-        println("  palette: ${paletteDecompressed.size} bytes decompressed")
-        
-        // Combine tile tables: CRE first, then variable (from SMILE source)
+
+        val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
+        val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
+
+        // Tile tables: CRE first, then variable (per SMILE DecompressTtable)
         metatiles = parseTileTable(varTileTable, creTileTable)
-        
-        // Combine tile graphics: variable at offset 0, CRE at offset 0x5000
-        // From SMILE DecompressTiles.vb:
-        //   CombineArrays VarTiles, CRETiles, SizeOfVarTiles, SizeOfCRETiles, &H0, &H5000, OutputArray
-        val combinedGfxSize = 0x5000 + creGfx.size
+
+        // Tile graphics: variable at 0, CRE at offset.
+        // Kraid (set 27) uses 0x8000 offset; everything else uses 0x5000.
+        val creOffset = if (tilesetId == KRAID_TILESET) 0x8000 else 0x5000
+        val combinedGfxSize = creOffset + creGfx.size
         val combinedGfx = ByteArray(maxOf(combinedGfxSize, TOTAL_TILES * BYTES_PER_TILE))
-        System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, 0x5000))
-        System.arraycopy(creGfx, 0, combinedGfx, 0x5000, minOf(creGfx.size, combinedGfx.size - 0x5000))
+        System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, creOffset))
+        System.arraycopy(creGfx, 0, combinedGfx, creOffset, minOf(creGfx.size, combinedGfx.size - creOffset))
         rawTileData = combinedGfx
-        
+
         cachedTilesetId = tilesetId
         return true
     }
@@ -210,7 +208,191 @@ class TileGraphics(private val romParser: RomParser) {
 
     fun getCachedTilesetId(): Int = cachedTilesetId
 
+    // ─── Tile sheet export/import ──────────────────────────────────────
+
+    /**
+     * For each 8x8 tile number (0-1023), find the palette row (0-7)
+     * most commonly assigned to it by metatile definitions.
+     */
+    fun buildTilePaletteMap(): IntArray {
+        val metas = metatiles ?: return IntArray(TOTAL_TILES)
+        val counts = Array(TOTAL_TILES) { IntArray(8) }
+        for (meta in metas) {
+            for (word in meta) {
+                val tileNum = word and 0x03FF
+                val palIdx = (word shr 10) and 7
+                if (tileNum < TOTAL_TILES) counts[tileNum][palIdx]++
+            }
+        }
+        return IntArray(TOTAL_TILES) { i ->
+            counts[i].indices.maxByOrNull { counts[i][it] } ?: 0
+        }
+    }
+
+    /**
+     * Render a range of 8x8 tiles as an ARGB pixel grid.
+     * Returns (pixels, width, height) or null.
+     */
+    fun renderTileSheet(startTile: Int, numTiles: Int, cols: Int = 16, tilePalMap: IntArray? = null): Triple<IntArray, Int, Int>? {
+        val pal = cachedPalette ?: return null
+        if (rawTileData == null) return null
+        val palMap = tilePalMap ?: buildTilePaletteMap()
+        val rows = (numTiles + cols - 1) / cols
+        val w = cols * 8
+        val h = rows * 8
+        val pixels = IntArray(w * h)
+        pixels.fill(0xFF0C0C18.toInt())
+        for (i in 0 until numTiles) {
+            val tileNum = startTile + i
+            if (tileNum >= TOTAL_TILES) break
+            val palIdx = if (tileNum < palMap.size) palMap[tileNum] else 0
+            val tp = decode4bppTileWithPalette(tileNum, pal, palIdx)
+            val cx = (i % cols) * 8; val cy = (i / cols) * 8
+            for (py in 0..7) for (px in 0..7) {
+                pixels[(cy + py) * w + (cx + px)] = tp[py * 8 + px]
+            }
+        }
+        return Triple(pixels, w, h)
+    }
+
+    /**
+     * Convert an ARGB pixel grid back to raw 4bpp tile data.
+     * For each 8x8 tile, finds the best matching palette row and encodes indices.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun importTileSheet(pixels: IntArray, imgWidth: Int, startTile: Int, numTiles: Int, cols: Int = 16): ByteArray {
+        val pal = cachedPalette ?: return ByteArray(0)
+        val result = ByteArray(numTiles * BYTES_PER_TILE)
+        for (i in 0 until numTiles) {
+            val cx = (i % cols) * 8; val cy = (i / cols) * 8
+            val tilePixels = IntArray(64)
+            for (py in 0..7) for (px in 0..7) {
+                val si = (cy + py) * imgWidth + (cx + px)
+                tilePixels[py * 8 + px] = if (si in pixels.indices) pixels[si] else 0
+            }
+            val bestPal = findBestPaletteForTile(tilePixels, pal)
+            encode4bppTile(tilePixels, pal[bestPal], result, i * BYTES_PER_TILE)
+        }
+        return result
+    }
+
+    /** Extract the variable (URE) graphics portion as raw 4bpp bytes. */
+    fun getRawVarGfx(): ByteArray? {
+        val data = rawTileData ?: return null
+        val size = getCreOffset() * BYTES_PER_TILE
+        return data.copyOfRange(0, minOf(size, data.size))
+    }
+
+    /** Extract the CRE graphics portion as raw 4bpp bytes. */
+    fun getRawCreGfx(): ByteArray? {
+        val data = rawTileData ?: return null
+        val offset = getCreOffset() * BYTES_PER_TILE
+        if (offset >= data.size) return null
+        return data.copyOfRange(offset, data.size)
+    }
+
+    /** Replace variable graphics in the combined tile data. */
+    fun applyCustomVarGfx(gfxData: ByteArray) {
+        val data = rawTileData ?: return
+        val maxLen = minOf(gfxData.size, getCreOffset() * BYTES_PER_TILE, data.size)
+        System.arraycopy(gfxData, 0, data, 0, maxLen)
+    }
+
+    /** Replace CRE graphics in the combined tile data. */
+    fun applyCustomCreGfx(gfxData: ByteArray) {
+        val data = rawTileData ?: return
+        val offset = getCreOffset() * BYTES_PER_TILE
+        if (offset >= data.size) return
+        val maxLen = minOf(gfxData.size, data.size - offset)
+        System.arraycopy(gfxData, 0, data, offset, maxLen)
+    }
+
+    /** CRE tile start index (640 for normal, 1024 for Kraid). */
+    fun getCreOffset(): Int = if (cachedTilesetId == KRAID_TILESET) 1024 else CRE_TILE_START
+
+    /** Number of variable tiles. */
+    fun getVarTileCount(): Int = getCreOffset()
+
+    /** Number of CRE tiles. */
+    fun getCreTileCount(): Int = TOTAL_TILES - getCreOffset()
+
+    /** Force tileset to re-load from ROM on next call. */
+    fun invalidateCache() { cachedTilesetId = -1; rawTileData = null; metatiles = null; cachedPalette = null }
+
+    /** Render palette as ARGB pixels: 8 rows × 16 cols, each swatch cellSize×cellSize. */
+    fun renderPaletteImage(cellSize: Int = 12): Triple<IntArray, Int, Int>? {
+        val pal = cachedPalette ?: return null
+        val w = 16 * cellSize; val h = 8 * cellSize
+        val pixels = IntArray(w * h)
+        for (row in 0..7) for (col in 0..15) {
+            val color = pal[row][col]
+            val bx = col * cellSize; val by = row * cellSize
+            for (py in 0 until cellSize) for (px in 0 until cellSize) {
+                pixels[(by + py) * w + (bx + px)] = color
+            }
+        }
+        return Triple(pixels, w, h)
+    }
+
     // ─── Internal helpers ──────────────────────────────────────────────
+
+    private fun findBestPaletteForTile(tilePixels: IntArray, palettes: Array<IntArray>): Int {
+        var bestPal = 0; var bestScore = Int.MAX_VALUE
+        for (p in palettes.indices) {
+            var score = 0
+            for (argb in tilePixels) {
+                if ((argb ushr 24) < 128) continue // transparent
+                score += closestColorDist(argb, palettes[p])
+            }
+            if (score < bestScore) { bestScore = score; bestPal = p }
+        }
+        return bestPal
+    }
+
+    private fun closestColorDist(argb: Int, palette: IntArray): Int {
+        val r = (argb shr 16) and 0xFF; val g = (argb shr 8) and 0xFF; val b = argb and 0xFF
+        var best = Int.MAX_VALUE
+        for (i in 1 until palette.size) { // skip index 0 (transparent)
+            val pr = (palette[i] shr 16) and 0xFF
+            val pg = (palette[i] shr 8) and 0xFF
+            val pb = palette[i] and 0xFF
+            val d = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb)
+            if (d < best) best = d
+        }
+        return best
+    }
+
+    private fun encode4bppTile(tilePixels: IntArray, palette: IntArray, out: ByteArray, outOffset: Int) {
+        for (y in 0..7) {
+            var bp0 = 0; var bp1 = 0; var bp2 = 0; var bp3 = 0
+            for (x in 0..7) {
+                val argb = tilePixels[y * 8 + x]
+                val ci = if ((argb ushr 24) < 128) 0 else findClosestPaletteIndex(argb, palette)
+                val bit = 7 - x
+                if (ci and 1 != 0) bp0 = bp0 or (1 shl bit)
+                if (ci and 2 != 0) bp1 = bp1 or (1 shl bit)
+                if (ci and 4 != 0) bp2 = bp2 or (1 shl bit)
+                if (ci and 8 != 0) bp3 = bp3 or (1 shl bit)
+            }
+            out[outOffset + y * 2] = bp0.toByte()
+            out[outOffset + y * 2 + 1] = bp1.toByte()
+            out[outOffset + y * 2 + 16] = bp2.toByte()
+            out[outOffset + y * 2 + 17] = bp3.toByte()
+        }
+    }
+
+    private fun findClosestPaletteIndex(argb: Int, palette: IntArray): Int {
+        val r = (argb shr 16) and 0xFF; val g = (argb shr 8) and 0xFF; val b = argb and 0xFF
+        var bestIdx = 0; var bestDist = Int.MAX_VALUE
+        for (i in palette.indices) {
+            val pr = (palette[i] shr 16) and 0xFF
+            val pg = (palette[i] shr 8) and 0xFF
+            val pb = palette[i] and 0xFF
+            val d = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb)
+            if (d < bestDist) { bestDist = d; bestIdx = i }
+        }
+        return bestIdx
+    }
     
     /**
      * Parse metatile table from decompressed tile table data.
@@ -222,24 +404,25 @@ class TileGraphics(private val romParser: RomParser) {
      * Each entry = 8 bytes = 4 × 16-bit LE words (TL, TR, BL, BR).
      */
     private fun parseTileTable(varTable: ByteArray, creTable: ByteArray): Array<IntArray> {
-        // Combine: CRE first, then Variable
         val creSize = creTable.size
         val combined = ByteArray(creSize + varTable.size)
         System.arraycopy(creTable, 0, combined, 0, creSize)
         System.arraycopy(varTable, 0, combined, creSize, varTable.size)
-        
+        return parseTileTableRaw(combined)
+    }
+
+
+    private fun parseTileTableRaw(data: ByteArray): Array<IntArray> {
         val result = Array(METATILE_COUNT) { IntArray(4) }
-        val entryCount = minOf(combined.size / 8, METATILE_COUNT)
-        
+        val entryCount = minOf(data.size / 8, METATILE_COUNT)
         for (i in 0 until entryCount) {
             val offset = i * 8
             for (q in 0..3) {
-                val lo = combined[offset + q * 2].toInt() and 0xFF
-                val hi = combined[offset + q * 2 + 1].toInt() and 0xFF
+                val lo = data[offset + q * 2].toInt() and 0xFF
+                val hi = data[offset + q * 2 + 1].toInt() and 0xFF
                 result[i][q] = (hi shl 8) or lo
             }
         }
-        
         return result
     }
     

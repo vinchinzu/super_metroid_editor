@@ -20,11 +20,13 @@ import com.supermetroid.editor.rom.TilesetGridData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.awt.FileDialog
+import java.awt.Frame
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 
 private val EDITABLE_BLOCK_TYPES = listOf(
-    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
+    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
     0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
     0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
     0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
@@ -150,6 +152,7 @@ fun TilesetCanvas(
     val tilesetId = editorState.editorTilesetId
     val selectedMeta = editorState.editorSelectedMetatile
     val gridData = tilesetEditorState.gridData
+    val coroutineScope = rememberCoroutineScope()
 
     Card(
         modifier = modifier,
@@ -194,6 +197,156 @@ fun TilesetCanvas(
                     }
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Export/Import buttons
+                    var exportMenuExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        Surface(
+                            modifier = Modifier.height(24.dp)
+                                .clickable { exportMenuExpanded = true },
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                "Export ▾", fontSize = 9.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = exportMenuExpanded,
+                            onDismissRequest = { exportMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Export Area Tiles (URE)", fontSize = 10.sp) },
+                                onClick = {
+                                    exportMenuExpanded = false
+                                    val fd = FileDialog(null as Frame?, "Export Area Tiles", FileDialog.SAVE)
+                                    fd.file = "tileset_${tilesetId}_ure.png"
+                                    fd.isVisible = true
+                                    if (fd.file != null) {
+                                        val path = java.io.File(fd.directory, fd.file).absolutePath
+                                        editorState.exportTileSheet(path, isCre = false)
+                                    }
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export Common Tiles (CRE)", fontSize = 10.sp) },
+                                onClick = {
+                                    exportMenuExpanded = false
+                                    val fd = FileDialog(null as Frame?, "Export Common Tiles", FileDialog.SAVE)
+                                    fd.file = "cre_tiles.png"
+                                    fd.isVisible = true
+                                    if (fd.file != null) {
+                                        val path = java.io.File(fd.directory, fd.file).absolutePath
+                                        editorState.exportTileSheet(path, isCre = true)
+                                    }
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            Divider()
+                            DropdownMenuItem(
+                                text = { Text("Export Palette Reference", fontSize = 10.sp) },
+                                onClick = {
+                                    exportMenuExpanded = false
+                                    val fd = FileDialog(null as Frame?, "Export Palette", FileDialog.SAVE)
+                                    fd.file = "tileset_${tilesetId}_palette.png"
+                                    fd.isVisible = true
+                                    if (fd.file != null) {
+                                        val path = java.io.File(fd.directory, fd.file).absolutePath
+                                        editorState.exportPalette(path)
+                                    }
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
+                    }
+
+                    var importMenuExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        Surface(
+                            modifier = Modifier.height(24.dp)
+                                .clickable { importMenuExpanded = true },
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.tertiaryContainer
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    "Import ▾", fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                if (editorState.hasCustomVarGfx() || editorState.hasCustomCreGfx()) {
+                                    Text("●", fontSize = 8.sp, color = Color(0xFF66BB6A))
+                                }
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = importMenuExpanded,
+                            onDismissRequest = { importMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Import Area Tiles (URE)", fontSize = 10.sp)
+                                        if (editorState.hasCustomVarGfx()) {
+                                            Text("●", fontSize = 8.sp, color = Color(0xFF66BB6A))
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    importMenuExpanded = false
+                                    val fd = FileDialog(null as Frame?, "Import Area Tiles", FileDialog.LOAD)
+                                    fd.setFilenameFilter { _, name -> name.endsWith(".png", true) || name.endsWith(".bmp", true) }
+                                    fd.isVisible = true
+                                    if (fd.file != null && romParser != null) {
+                                        val path = java.io.File(fd.directory, fd.file).absolutePath
+                                        if (editorState.importTileSheet(path, isCre = false)) {
+                                            coroutineScope.launch {
+                                                val tg = editorState.editorTileGraphics!!
+                                                tilesetEditorState.gridData = withContext(Dispatchers.Default) { tg.renderTilesetGrid() }
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Import Common Tiles (CRE)", fontSize = 10.sp)
+                                        if (editorState.hasCustomCreGfx()) {
+                                            Text("●", fontSize = 8.sp, color = Color(0xFF66BB6A))
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    importMenuExpanded = false
+                                    val fd = FileDialog(null as Frame?, "Import Common Tiles", FileDialog.LOAD)
+                                    fd.setFilenameFilter { _, name -> name.endsWith(".png", true) || name.endsWith(".bmp", true) }
+                                    fd.isVisible = true
+                                    if (fd.file != null && romParser != null) {
+                                        val path = java.io.File(fd.directory, fd.file).absolutePath
+                                        if (editorState.importTileSheet(path, isCre = true)) {
+                                            coroutineScope.launch {
+                                                val tg = editorState.editorTileGraphics!!
+                                                tilesetEditorState.gridData = withContext(Dispatchers.Default) { tg.renderTilesetGrid() }
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
+                    }
+
+                    Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                     Text(
                         "${(zoomLevel * 100).toInt()}%",
                         fontSize = 9.sp,
@@ -225,7 +378,6 @@ fun TilesetCanvas(
                         }
                         val hScroll = rememberScrollState()
                         val vScroll = rememberScrollState()
-                        val coroutineScope = rememberCoroutineScope()
 
                         Box(
                             modifier = Modifier.fillMaxSize()

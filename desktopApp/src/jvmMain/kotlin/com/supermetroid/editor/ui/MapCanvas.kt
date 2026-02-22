@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.*
@@ -16,7 +18,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -26,6 +30,8 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -38,7 +44,6 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.RoomRenderData
 import java.awt.image.BufferedImage
 import java.awt.RenderingHints
-import com.supermetroid.editor.ui.LocalSwingWindow
 import javax.imageio.ImageIO
 
 private object EnemySpriteCache {
@@ -90,12 +95,12 @@ internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = w
         0x0B to "Super Missile (no reform)",
     )
     0x3 -> listOf(
-        0x08 to "Speed (left)",
-        0x09 to "Speed (right)",
-        0x81 to "Speed (down, var 1)",
-        0x82 to "Speed (down, var 2)",
-        0x83 to "Speed (down, var 3)",
-        0x85 to "Speed (down, var 5)",
+        0x08 to "Treadmill (left)",
+        0x09 to "Treadmill (right)",
+        0x81 to "Treadmill (down, var 1)",
+        0x82 to "Treadmill (down, var 2)",
+        0x83 to "Treadmill (down, var 3)",
+        0x85 to "Treadmill (down, var 5)",
     )
     0xA -> listOf(
         0x00 to "Spike (normal)",
@@ -104,8 +109,8 @@ internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = w
     0xB -> listOf(
         0x00 to "Crumble (reform)",
         0x04 to "Crumble (permanent)",
-        0x0E to "Speed Booster crumble (reform)",
-        0x0F to "Speed Booster crumble (permanent)",
+        0x0E to "Speed Booster (reform)",
+        0x0F to "Speed Booster (permanent)",
         0x0B to "Barrier",
     )
     0xE -> listOf(
@@ -121,7 +126,7 @@ internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = w
 }
 
 internal val blockTypeNames = mapOf(
-    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
+    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
     0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid", 0x9 to "Door",
     0xA to "Spike", 0xB to "Crumble", 0xC to "Shot Block", 0xD to "V-Extend",
     0xE to "Grapple", 0xF to "Bomb Block"
@@ -137,7 +142,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     BOMB("Bomb", "B", 0xCCAA44DD),         // purple
     CRUMBLE("Crumble", "C", 0xCCBB5522),   // brown/rust
     GRAPPLE("Grapple", "G", 0xCC00AA88),   // teal
-    SPEED("Speed", "~", 0xCC66AAFF),       // light blue
+    SPEED("Speed Booster", "~", 0xCC66AAFF),   // light blue (type 0xB + BTS 0x0E/0x0F)
+    TREADMILL("Treadmill", "T", 0xCC44CCCC),   // cyan (type 0x3)
     // Shot blocks by break method (block type 0xC + BTS)
     SHOT_BEAM("Shot (Beam)", "Xb", 0xCCFFDD00),    // yellow: beam/missile/bomb
     SHOT_SUPER("Shot (Super)", "Xs", 0xCC00CC44),   // green: super missile required
@@ -184,7 +190,6 @@ fun MapCanvas(
 ) {
     val zoomState = remember { mutableStateOf(1f) }
     val zoomLevel = zoomState.value
-    AttachMacPinchZoom(LocalSwingWindow.current, zoomState, minZoom = 0.25f, maxZoom = 4f)
     var showGrid by remember { mutableStateOf(true) }
     var tileMetaExpanded by remember { mutableStateOf(false) }
     val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>(
@@ -193,11 +198,51 @@ fun MapCanvas(
     ) }
     val overlayCount = overlayToggles.values.count { it }
     
+    val mapFocusReq = remember { FocusRequester() }
     Card(
         modifier = modifier,
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()
+            .focusRequester(mapFocusReq)
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown && editorState != null) {
+                    when (keyEvent.key) {
+                        Key.H -> { editorState.flipOrCaptureH(); true }
+                        Key.V -> { if (!keyEvent.isCtrlPressed && !keyEvent.isMetaPressed) { editorState.flipOrCaptureV(); true } else false }
+                        Key.R -> { editorState.rotateOrCapture(); true }
+                        Key.Z -> {
+                            if (keyEvent.isCtrlPressed || keyEvent.isMetaPressed) {
+                                if (keyEvent.isShiftPressed) editorState.redo() else editorState.undo()
+                                true
+                            } else false
+                        }
+                        Key.S -> { editorState.activeTool = EditorTool.SELECT; true }
+                        Key.P -> {
+                            if (editorState.mapSelStart != null && editorState.mapSelEnd != null) {
+                                editorState.captureMapSelection()
+                            } else {
+                                editorState.activeTool = EditorTool.PAINT
+                            }; true
+                        }
+                        Key.F -> { editorState.activeTool = EditorTool.FILL; true }
+                        Key.I -> { editorState.activeTool = EditorTool.SAMPLE; true }
+                        Key.Enter -> {
+                            if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
+                                editorState.captureMapSelection(); true
+                            } else false
+                        }
+                        Key.Escape -> {
+                            if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
+                                editorState.mapSelStart = null; editorState.mapSelEnd = null; true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+        ) {
             if (room != null && romParser != null) {
                 var isLoading by remember(room.id) { mutableStateOf(true) }
                 var errorMessage by remember(room.id) { mutableStateOf<String?>(null) }
@@ -325,11 +370,10 @@ fun MapCanvas(
                         // Tool selection with icons
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.SELECT,
-                            onClick = { editorState.activeTool = EditorTool.SELECT },
+                            onClick = { editorState.activeTool = EditorTool.SELECT; mapFocusReq.requestFocus() },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(Icons.Default.SelectAll, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    // Text("Select", fontSize = 9.sp)
                                 }
                             },
                             modifier = Modifier.height(24.dp)
@@ -342,33 +386,31 @@ fun MapCanvas(
                                 } else {
                                     editorState.activeTool = EditorTool.PAINT
                                 }
+                                mapFocusReq.requestFocus()
                             },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    // Text("Paint", fontSize = 9.sp)
                                 }
                             },
                             modifier = Modifier.height(24.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.FILL,
-                            onClick = { editorState.activeTool = EditorTool.FILL },
+                            onClick = { editorState.activeTool = EditorTool.FILL; mapFocusReq.requestFocus() },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(Icons.Default.FormatColorFill, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    // Text("Fill", fontSize = 9.sp)
                                 }
                             },
                             modifier = Modifier.height(24.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.SAMPLE,
-                            onClick = { editorState.activeTool = EditorTool.SAMPLE },
+                            onClick = { editorState.activeTool = EditorTool.SAMPLE; mapFocusReq.requestFocus() },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(Icons.Default.Colorize, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    // Text("Sample", fontSize = 9.sp)
                                 }
                             },
                             modifier = Modifier.height(24.dp)
@@ -378,7 +420,7 @@ fun MapCanvas(
                         
                         // Undo / Redo with icons
                         IconButton(
-                            onClick = { editorState.undo() },
+                            onClick = { editorState.undo(); mapFocusReq.requestFocus() },
                             enabled = editorState.undoStack.isNotEmpty(),
                             modifier = Modifier.size(28.dp)
                         ) {
@@ -388,7 +430,7 @@ fun MapCanvas(
                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                         }
                         IconButton(
-                            onClick = { editorState.redo() },
+                            onClick = { editorState.redo(); mapFocusReq.requestFocus() },
                             enabled = editorState.redoStack.isNotEmpty(),
                             modifier = Modifier.size(28.dp)
                         ) {
@@ -399,7 +441,43 @@ fun MapCanvas(
                         }
                         
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
-                        
+
+                        // Flip / Rotate buttons
+                        IconButton(
+                            onClick = { editorState.flipOrCaptureH(); mapFocusReq.requestFocus() },
+                            enabled = editorState.brush != null,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Flip, contentDescription = "H-Flip (H)",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (editorState.brush?.hFlip == true) MaterialTheme.colorScheme.primary
+                                       else if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+                        IconButton(
+                            onClick = { editorState.flipOrCaptureV(); mapFocusReq.requestFocus() },
+                            enabled = editorState.brush != null,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Flip, contentDescription = "V-Flip (V)",
+                                modifier = Modifier.size(16.dp).graphicsLayer(rotationZ = 90f),
+                                tint = if (editorState.brush?.vFlip == true) MaterialTheme.colorScheme.primary
+                                       else if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+                        IconButton(
+                            onClick = { editorState.rotateOrCapture(); mapFocusReq.requestFocus() },
+                            enabled = editorState.brush != null,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.RotateRight, contentDescription = "Rotate (R)",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+
+                        Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
                         // Brush info + hover tile info
                         val brush = editorState.brush
                         if (brush != null) {
@@ -470,11 +548,16 @@ fun MapCanvas(
                             var propsBlockType by remember { mutableStateOf(0) }
                             var propsBts by remember { mutableStateOf(0) }
                             var propsMetatile by remember { mutableStateOf(0) }
+                            val density = LocalDensity.current.density
                             
                             fun pointerToBlock(posX: Float, posY: Float): Pair<Int, Int> {
-                                val imgX = (posX + hScrollState.value) / zoomLevel
-                                val imgY = (posY + vScrollState.value) / zoomLevel
-                                return Pair((imgX / 16).toInt(), (imgY / 16).toInt())
+                                // Pointer & scroll are in physical pixels; layout uses dp.
+                                // Tile display size in pointer units = 16 * zoom * density.
+                                val tilePx = 16f * zoomLevel * density
+                                return Pair(
+                                    ((posX + hScrollState.value) / tilePx).toInt(),
+                                    ((posY + vScrollState.value) / tilePx).toInt()
+                                )
                             }
                             
                             // Re-render from working data (reacts to editVersion from EditorState)
@@ -483,7 +566,7 @@ fun MapCanvas(
                                 if (es != null && es.workingLevelData != null) {
                                     val roomHeader = romParser.readRoomHeader(room.getRoomIdAsInt())
                                     if (roomHeader != null) {
-                                        val r = MapRenderer(romParser).renderRoomFromLevelData(roomHeader, es.workingLevelData!!, es.workingPlms)
+                                        val r = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(roomHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                                         if (r != null) return@remember buildCompositeImage(r, activeOverlays, showGrid)
                                     }
                                 }
@@ -491,44 +574,10 @@ fun MapCanvas(
                             }
                             val editBitmap = remember(compositeForEdit) { compositeForEdit.toComposeImageBitmap() }
                             
-                            // Keyboard shortcuts
-                            val focusReq = remember { FocusRequester() }
-                            LaunchedEffect(Unit) { focusReq.requestFocus() }
+                            LaunchedEffect(Unit) { mapFocusReq.requestFocus() }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .focusRequester(focusReq)
-                                    .focusable()
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown && editorState != null) {
-                                            when (keyEvent.key) {
-                                                Key.H -> { editorState.toggleHFlip(); true }
-                                                Key.V -> { if (!keyEvent.isCtrlPressed && !keyEvent.isMetaPressed) { editorState.toggleVFlip(); true } else false }
-                                                Key.R -> { editorState.rotateClockwise(); true }
-                                                Key.Z -> {
-                                                    if (keyEvent.isCtrlPressed || keyEvent.isMetaPressed) {
-                                                        if (keyEvent.isShiftPressed) editorState.redo() else editorState.undo()
-                                                        true
-                                                    } else false
-                                                }
-                                Key.One -> { editorState.activeTool = EditorTool.SELECT; true }
-                                Key.Two -> { editorState.activeTool = EditorTool.PAINT; true }
-                                Key.Three -> { editorState.activeTool = EditorTool.FILL; true }
-                                Key.Four -> { editorState.activeTool = EditorTool.SAMPLE; true }
-                                Key.Enter -> {
-                                    if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
-                                        editorState.captureMapSelection(); true
-                                    } else false
-                                }
-                                Key.Escape -> {
-                                    if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
-                                        editorState.mapSelStart = null; editorState.mapSelEnd = null; true
-                                    } else if (propsExpanded) { propsExpanded = false; true } else false
-                                }
-                                else -> false
-                                            }
-                                        } else false
-                                    }
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
                                         val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
@@ -540,7 +589,7 @@ fun MapCanvas(
                                         }
                                     }
                                     .onPointerEvent(PointerEventType.Press) { event ->
-                                        focusReq.requestFocus()
+                                        mapFocusReq.requestFocus()
                                         val ne = event.nativeEvent as? MouseEvent
                                         if (ne != null && ne.button == MouseEvent.BUTTON2) {
                                             isDragging = true; val p = event.changes.first().position; lastDragX = p.x; lastDragY = p.y
@@ -682,11 +731,12 @@ fun MapCanvas(
                                                 .requiredWidth((data.width * zoomLevel).dp)
                                                 .requiredHeight((data.height * zoomLevel).dp)
                                         ) {
-                                            val tileSize = 16f * zoomLevel
+                                            val tileW = size.width / data.blocksWide
+                                            val tileH = size.height / data.blocksTall
                                             drawRect(
                                                 color = Color.White.copy(alpha = 0.5f),
-                                                topLeft = androidx.compose.ui.geometry.Offset(editorState.hoverBlockX * tileSize, editorState.hoverBlockY * tileSize),
-                                                size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
+                                                topLeft = androidx.compose.ui.geometry.Offset(editorState.hoverBlockX * tileW, editorState.hoverBlockY * tileH),
+                                                size = androidx.compose.ui.geometry.Size(tileW, tileH),
                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(
                                                     width = 1.5f,
                                                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f, 3f))
@@ -701,11 +751,12 @@ fun MapCanvas(
                                                 .requiredWidth((data.width * zoomLevel).dp)
                                                 .requiredHeight((data.height * zoomLevel).dp)
                                         ) {
-                                            val tileSize = 16f * zoomLevel
+                                            val tileW = size.width / data.blocksWide
+                                            val tileH = size.height / data.blocksTall
                                             drawRect(
                                                 color = Color.Cyan.copy(alpha = 0.4f),
-                                                topLeft = androidx.compose.ui.geometry.Offset(editorState.hoverBlockX * tileSize, editorState.hoverBlockY * tileSize),
-                                                size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
+                                                topLeft = androidx.compose.ui.geometry.Offset(editorState.hoverBlockX * tileW, editorState.hoverBlockY * tileH),
+                                                size = androidx.compose.ui.geometry.Size(tileW, tileH),
                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
                                             )
                                         }
@@ -717,11 +768,12 @@ fun MapCanvas(
                                                 .requiredWidth((data.width * zoomLevel).dp)
                                                 .requiredHeight((data.height * zoomLevel).dp)
                                         ) {
-                                            val tileSize = 16f * zoomLevel
+                                            val tileW = size.width / data.blocksWide
+                                            val tileH = size.height / data.blocksTall
                                             drawRect(
                                                 color = Color.Yellow.copy(alpha = 0.7f),
-                                                topLeft = androidx.compose.ui.geometry.Offset(propsBlockX * tileSize, propsBlockY * tileSize),
-                                                size = androidx.compose.ui.geometry.Size(tileSize, tileSize),
+                                                topLeft = androidx.compose.ui.geometry.Offset(propsBlockX * tileW, propsBlockY * tileH),
+                                                size = androidx.compose.ui.geometry.Size(tileW, tileH),
                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
                                             )
                                         }
@@ -739,11 +791,12 @@ fun MapCanvas(
                                                 .requiredWidth((data.width * zoomLevel).dp)
                                                 .requiredHeight((data.height * zoomLevel).dp)
                                         ) {
-                                            val tileSize = 16f * zoomLevel
-                                            val rx = minBx * tileSize
-                                            val ry = minBy * tileSize
-                                            val rw = (maxBx - minBx + 1) * tileSize
-                                            val rh = (maxBy - minBy + 1) * tileSize
+                                            val tileW = size.width / data.blocksWide
+                                            val tileH = size.height / data.blocksTall
+                                            val rx = minBx * tileW
+                                            val ry = minBy * tileH
+                                            val rw = (maxBx - minBx + 1) * tileW
+                                            val rh = (maxBy - minBy + 1) * tileH
                                             drawRect(
                                                 color = Color.White.copy(alpha = 0.15f),
                                                 topLeft = androidx.compose.ui.geometry.Offset(rx, ry),
@@ -766,7 +819,7 @@ fun MapCanvas(
                             // ─── Right-click tile properties panel (floating, non-modal) ──────
                             if (propsExpanded && editorState != null) {
                                 val editableBlockTypes = listOf(
-                                    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Speed Booster",
+                                    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
                                     0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
                                     0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
                                     0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
@@ -954,259 +1007,241 @@ fun MapCanvas(
                                                     it.getRoomIdAsInt() to it.name
                                                 }
                                             }
+                                            val currentDoor = allDoors.getOrNull(propsBts)
 
                                             if (allDoors.isEmpty()) {
                                                 Text("No door entries found", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            } else if (currentDoor == null) {
+                                                Text("Door index #$propsBts not found (${allDoors.size} doors available)",
+                                                    fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
                                             } else {
-                                                // Door index dropdown (BTS selects which door)
-                                                var doorDropExpanded by remember { mutableStateOf(false) }
-                                                val currentDoor = allDoors.getOrNull(propsBts)
-                                                val doorLabel = if (currentDoor != null) {
-                                                    val destName = roomIdToName[currentDoor.destRoomPtr]
-                                                        ?: "Room 0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
-                                                    "#$propsBts → $destName"
-                                                } else {
-                                                    "#$propsBts (invalid index)"
+                                                val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                val fieldStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
+
+                                                // Helper: 0x00–0xFF dropdown
+                                                @Composable
+                                                fun ByteDropdown(label: String, value: Int, onValueChange: (Int) -> Unit) {
+                                                    var expanded by remember { mutableStateOf(false) }
+                                                    val hexStr = "0x${value.toString(16).uppercase().padStart(2, '0')} ($value)"
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                        Text(label, fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                        Box(modifier = Modifier.weight(1f)) {
+                                                            Surface(
+                                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                                    .clickable { expanded = true },
+                                                                shape = MaterialTheme.shapes.small,
+                                                                color = MaterialTheme.colorScheme.surfaceVariant
+                                                            ) {
+                                                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                                    Text(hexStr, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                                                    Text("▾", fontSize = 9.sp)
+                                                                }
+                                                            }
+                                                            DropdownMenu(
+                                                                expanded = expanded,
+                                                                onDismissRequest = { expanded = false },
+                                                                modifier = Modifier.requiredSizeIn(maxHeight = 300.dp)
+                                                            ) {
+                                                                for (v in 0..0xFF) {
+                                                                    DropdownMenuItem(
+                                                                        text = {
+                                                                            Text(
+                                                                                "0x${v.toString(16).uppercase().padStart(2, '0')} ($v)",
+                                                                                fontSize = 10.sp,
+                                                                                fontWeight = if (v == value) FontWeight.Bold else FontWeight.Normal
+                                                                            )
+                                                                        },
+                                                                        onClick = {
+                                                                            expanded = false
+                                                                            if (v != value) onValueChange(v)
+                                                                        },
+                                                                        modifier = Modifier.height(24.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
-                                                Box {
-                                                    Surface(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .height(32.dp)
-                                                            .clickable { doorDropExpanded = true },
-                                                        shape = MaterialTheme.shapes.small,
-                                                        color = MaterialTheme.colorScheme.surfaceVariant
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.SpaceBetween
+
+                                                // Destination room dropdown
+                                                var destDropExpanded by remember { mutableStateOf(false) }
+                                                val destName = roomIdToName[currentDoor.destRoomPtr]
+                                                    ?: "0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                    Text("Destination:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    Box(modifier = Modifier.weight(1f)) {
+                                                        Surface(
+                                                            modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                                .clickable { destDropExpanded = true },
+                                                            shape = MaterialTheme.shapes.small,
+                                                            color = MaterialTheme.colorScheme.surfaceVariant
                                                         ) {
-                                                            Text(doorLabel, fontSize = 10.sp, modifier = Modifier.weight(1f))
-                                                            Text("▾", fontSize = 10.sp)
+                                                            Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                                                verticalAlignment = Alignment.CenterVertically) {
+                                                                Text(destName, fontSize = 9.sp, modifier = Modifier.weight(1f))
+                                                                Text("▾", fontSize = 9.sp)
+                                                            }
                                                         }
-                                                    }
-                                                    DropdownMenu(
-                                                        expanded = doorDropExpanded,
-                                                        onDismissRequest = { doorDropExpanded = false }
-                                                    ) {
-                                                        for ((idx, door) in allDoors.withIndex()) {
-                                                            val dName = roomIdToName[door.destRoomPtr]
-                                                                ?: "Room 0x${door.destRoomPtr.toString(16).uppercase()}"
-                                                            val elevTag = if (door.isElevator) " ⇕" else ""
-                                                            DropdownMenuItem(
-                                                                text = {
-                                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                                        RadioButton(selected = propsBts == idx, onClick = null, modifier = Modifier.size(16.dp))
-                                                                        Text("#$idx → $dName (${door.directionName}$elevTag)", fontSize = 10.sp)
-                                                                    }
-                                                                },
-                                                                onClick = {
-                                                                    doorDropExpanded = false
-                                                                    if (idx != propsBts) {
-                                                                        propsBts = idx
-                                                                        editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, idx)
-                                                                    }
-                                                                },
-                                                                modifier = Modifier.height(28.dp)
-                                                            )
+                                                        DropdownMenu(
+                                                            expanded = destDropExpanded,
+                                                            onDismissRequest = { destDropExpanded = false },
+                                                            modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
+                                                        ) {
+                                                            for (r in rooms) {
+                                                                val rid = r.getRoomIdAsInt()
+                                                                DropdownMenuItem(
+                                                                    text = { Text(r.name, fontSize = 10.sp,
+                                                                        fontWeight = if (rid == currentDoor.destRoomPtr) FontWeight.Bold else FontWeight.Normal) },
+                                                                    onClick = {
+                                                                        destDropExpanded = false
+                                                                        if (rid != currentDoor.destRoomPtr) {
+                                                                            editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
+                                                                        }
+                                                                    },
+                                                                    modifier = Modifier.height(26.dp)
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }
+                                                Spacer(modifier = Modifier.height(4.dp))
 
-                                                // Editable door properties
-                                                if (currentDoor != null) {
-                                                    Spacer(modifier = Modifier.height(6.dp))
-                                                    val fieldStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
-                                                    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-
-                                                    // Destination room dropdown
-                                                    var destDropExpanded by remember { mutableStateOf(false) }
-                                                    val destName = roomIdToName[currentDoor.destRoomPtr]
-                                                        ?: "0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("Dest:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        Box(modifier = Modifier.weight(1f)) {
-                                                            Surface(
-                                                                modifier = Modifier.fillMaxWidth().height(26.dp)
-                                                                    .clickable { destDropExpanded = true },
-                                                                shape = MaterialTheme.shapes.small,
-                                                                color = MaterialTheme.colorScheme.surfaceVariant
-                                                            ) {
-                                                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
-                                                                    verticalAlignment = Alignment.CenterVertically) {
-                                                                    Text(destName, fontSize = 9.sp, modifier = Modifier.weight(1f))
-                                                                    Text("▾", fontSize = 9.sp)
-                                                                }
+                                                // Direction dropdown
+                                                var dirDropExpanded by remember { mutableStateOf(false) }
+                                                val dirNames = listOf("Right", "Left", "Down", "Up")
+                                                val currentDir = currentDoor.direction and 0x03
+                                                val isBubble = (currentDoor.direction and 0x04) != 0
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                    Text("Direction:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    Box(modifier = Modifier.weight(1f)) {
+                                                        Surface(
+                                                            modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                                .clickable { dirDropExpanded = true },
+                                                            shape = MaterialTheme.shapes.small,
+                                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                                        ) {
+                                                            Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
+                                                                verticalAlignment = Alignment.CenterVertically) {
+                                                                val bubbleTag = if (isBubble) " (closing)" else ""
+                                                                Text("${dirNames.getOrElse(currentDir) { "?" }}$bubbleTag", fontSize = 9.sp, modifier = Modifier.weight(1f))
+                                                                Text("▾", fontSize = 9.sp)
                                                             }
-                                                            DropdownMenu(
-                                                                expanded = destDropExpanded,
-                                                                onDismissRequest = { destDropExpanded = false }
-                                                            ) {
-                                                                for (r in rooms) {
-                                                                    val rid = r.getRoomIdAsInt()
-                                                                    DropdownMenuItem(
-                                                                        text = { Text(r.name, fontSize = 10.sp) },
-                                                                        onClick = {
-                                                                            destDropExpanded = false
-                                                                            if (rid != currentDoor.destRoomPtr) {
-                                                                                editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
-                                                                            }
-                                                                        },
-                                                                        modifier = Modifier.height(26.dp)
-                                                                    )
-                                                                }
+                                                        }
+                                                        DropdownMenu(
+                                                            expanded = dirDropExpanded,
+                                                            onDismissRequest = { dirDropExpanded = false }
+                                                        ) {
+                                                            for ((di, dn) in dirNames.withIndex()) {
+                                                                DropdownMenuItem(
+                                                                    text = { Text(dn, fontSize = 10.sp) },
+                                                                    onClick = {
+                                                                        dirDropExpanded = false
+                                                                        val newDir = di + (if (isBubble) 4 else 0)
+                                                                        val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
+                                                                        editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
+                                                                    },
+                                                                    modifier = Modifier.height(26.dp)
+                                                                )
                                                             }
                                                         }
                                                     }
-                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
 
-                                                    // Direction dropdown
-                                                    var dirDropExpanded by remember { mutableStateOf(false) }
-                                                    val dirNames = listOf("Right", "Left", "Down", "Up")
-                                                    val currentDir = currentDoor.direction and 0x03
-                                                    val isBubble = (currentDoor.direction and 0x04) != 0
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("Dir:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        Box(modifier = Modifier.weight(1f)) {
-                                                            Surface(
-                                                                modifier = Modifier.fillMaxWidth().height(26.dp)
-                                                                    .clickable { dirDropExpanded = true },
-                                                                shape = MaterialTheme.shapes.small,
-                                                                color = MaterialTheme.colorScheme.surfaceVariant
-                                                            ) {
-                                                                Row(modifier = Modifier.padding(horizontal = 6.dp).fillMaxHeight(),
-                                                                    verticalAlignment = Alignment.CenterVertically) {
-                                                                    val bubbleTag = if (isBubble) " (closing)" else ""
-                                                                    Text("${dirNames.getOrElse(currentDir) { "?" }}$bubbleTag", fontSize = 9.sp, modifier = Modifier.weight(1f))
-                                                                    Text("▾", fontSize = 9.sp)
-                                                                }
+                                                // Screen X (0x00–0xFF)
+                                                ByteDropdown("Screen X:", currentDoor.screenX) { v ->
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenX = v))
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Screen Y (0x00–0xFF)
+                                                ByteDropdown("Screen Y:", currentDoor.screenY) { v ->
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenY = v))
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Distance from door (16-bit, keep as text)
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                    Text("Distance:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    var distText by remember(currentDoor) {
+                                                        mutableStateOf("0x${currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0')}")
+                                                    }
+                                                    OutlinedTextField(
+                                                        value = distText,
+                                                        onValueChange = { v ->
+                                                            distText = v
+                                                            v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                                                editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it))
                                                             }
-                                                            DropdownMenu(
-                                                                expanded = dirDropExpanded,
-                                                                onDismissRequest = { dirDropExpanded = false }
-                                                            ) {
-                                                                for ((di, dn) in dirNames.withIndex()) {
-                                                                    DropdownMenuItem(
-                                                                        text = { Text(dn, fontSize = 10.sp) },
-                                                                        onClick = {
-                                                                            dirDropExpanded = false
-                                                                            val newDir = di + (if (isBubble) 4 else 0)
-                                                                            val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
-                                                                            editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
-                                                                        },
-                                                                        modifier = Modifier.height(26.dp)
-                                                                    )
-                                                                }
+                                                        },
+                                                        modifier = Modifier.weight(1f).height(36.dp),
+                                                        textStyle = fieldStyle, singleLine = true
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Elevator + Closing door toggles
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Checkbox(
+                                                        checked = currentDoor.isElevator,
+                                                        onCheckedChange = { checked ->
+                                                            val newFlags = if (checked) currentDoor.bitflag or 0x80 else currentDoor.bitflag and 0x7F
+                                                            editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newFlags))
+                                                        },
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Text("Elevator", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Checkbox(
+                                                        checked = isBubble,
+                                                        onCheckedChange = { checked ->
+                                                            val dir = currentDoor.direction and 0x03
+                                                            val newDir = dir + (if (checked) 4 else 0)
+                                                            val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
+                                                            editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
+                                                        },
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Text("Closing door", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                // Scroll/Entry ASM pointers (advanced)
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                    Text("Scroll:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    var scrollText by remember(currentDoor) {
+                                                        mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
+                                                    }
+                                                    OutlinedTextField(
+                                                        value = scrollText,
+                                                        onValueChange = { v ->
+                                                            scrollText = v
+                                                            v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                                                editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
                                                             }
-                                                        }
+                                                        },
+                                                        modifier = Modifier.weight(1f).height(36.dp),
+                                                        textStyle = fieldStyle, singleLine = true
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                    Text("Entry ASM:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    var asmText by remember(currentDoor) {
+                                                        mutableStateOf("0x${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                                    // Screen X / Y
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("Screen:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        var sxText by remember(currentDoor) { mutableStateOf(currentDoor.screenX.toString(16).uppercase()) }
-                                                        var syText by remember(currentDoor) { mutableStateOf(currentDoor.screenY.toString(16).uppercase()) }
-                                                        Text("X:", fontSize = 9.sp, color = labelColor)
-                                                        OutlinedTextField(
-                                                            value = sxText,
-                                                            onValueChange = { v ->
-                                                                sxText = v
-                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(screenX = it)) }
-                                                            },
-                                                            modifier = Modifier.width(40.dp).height(30.dp),
-                                                            textStyle = fieldStyle, singleLine = true
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text("Y:", fontSize = 9.sp, color = labelColor)
-                                                        OutlinedTextField(
-                                                            value = syText,
-                                                            onValueChange = { v ->
-                                                                syText = v
-                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(screenY = it)) }
-                                                            },
-                                                            modifier = Modifier.width(40.dp).height(30.dp),
-                                                            textStyle = fieldStyle, singleLine = true
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                                    // Distance from door
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("Dist:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        var distText by remember(currentDoor) {
-                                                            mutableStateOf(currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0'))
-                                                        }
-                                                        OutlinedTextField(
-                                                            value = distText,
-                                                            onValueChange = { v ->
-                                                                distText = v
-                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it)) }
-                                                            },
-                                                            modifier = Modifier.width(80.dp).height(30.dp),
-                                                            textStyle = fieldStyle, singleLine = true
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                                    // Elevator + Bubble toggles
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Checkbox(
-                                                            checked = currentDoor.isElevator,
-                                                            onCheckedChange = { checked ->
-                                                                val newFlags = if (checked) currentDoor.bitflag or 0x80 else currentDoor.bitflag and 0x7F
-                                                                editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newFlags))
-                                                            },
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                        Text("Elevator", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
-                                                        Spacer(modifier = Modifier.width(12.dp))
-                                                        Checkbox(
-                                                            checked = isBubble,
-                                                            onCheckedChange = { checked ->
-                                                                val dir = currentDoor.direction and 0x03
-                                                                val newDir = dir + (if (checked) 4 else 0)
-                                                                val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
-                                                                editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
-                                                            },
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                        Text("Closing door", fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
-                                                    }
-
-                                                    // Scroll/Entry ASM pointers (advanced)
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("Scroll:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        var scrollText by remember(currentDoor) {
-                                                            mutableStateOf(currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0'))
-                                                        }
-                                                        OutlinedTextField(
-                                                            value = scrollText,
-                                                            onValueChange = { v ->
-                                                                scrollText = v
-                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it)) }
-                                                            },
-                                                            modifier = Modifier.width(80.dp).height(30.dp),
-                                                            textStyle = fieldStyle, singleLine = true
-                                                        )
-                                                    }
-                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                        Text("ASM:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(48.dp))
-                                                        var asmText by remember(currentDoor) {
-                                                            mutableStateOf(currentDoor.entryCode.toString(16).uppercase().padStart(4, '0'))
-                                                        }
-                                                        OutlinedTextField(
-                                                            value = asmText,
-                                                            onValueChange = { v ->
-                                                                asmText = v
-                                                                v.toIntOrNull(16)?.let { editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it)) }
-                                                            },
-                                                            modifier = Modifier.width(80.dp).height(30.dp),
-                                                            textStyle = fieldStyle, singleLine = true
-                                                        )
-                                                    }
+                                                    OutlinedTextField(
+                                                        value = asmText,
+                                                        onValueChange = { v ->
+                                                            asmText = v
+                                                            v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
+                                                                editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it))
+                                                            }
+                                                        },
+                                                        modifier = Modifier.weight(1f).height(36.dp),
+                                                        textStyle = fieldStyle, singleLine = true
+                                                    )
                                                 }
                                             }
                                         }
@@ -1390,6 +1425,199 @@ fun MapCanvas(
                                                 }
                                             }
                                         }
+
+                                        // ─── Enemies at/near this tile ───
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Divider()
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("Enemies", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                                        val tileCenterX = propsBlockX * 16 + 8
+                                        val tileCenterY = propsBlockY * 16 + 8
+                                        val enemiesHere = editorState.getEnemiesNear(tileCenterX, tileCenterY, radius = 16)
+
+                                        if (enemiesHere.isEmpty()) {
+                                            Text("None", fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                        for (enemy in enemiesHere) {
+                                            val eName = RomParser.enemyName(enemy.id)
+                                            var editing by remember { mutableStateOf(false) }
+                                            if (!editing) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(eName, fontSize = 10.sp)
+                                                        Text(
+                                                            "pos: (${enemy.x}, ${enemy.y})  prop: 0x${enemy.properties.toString(16).uppercase().padStart(4, '0')}",
+                                                            fontSize = 8.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    Text(
+                                                        "✎",
+                                                        modifier = Modifier
+                                                            .clickable { editing = true }
+                                                            .padding(horizontal = 4.dp),
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Text(
+                                                        "✕",
+                                                        modifier = Modifier
+                                                            .clickable { editorState.removeEnemy(enemy) }
+                                                            .padding(horizontal = 4.dp),
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            } else {
+                                                // Inline edit form
+                                                var editX by remember { mutableStateOf(enemy.x.toString()) }
+                                                var editY by remember { mutableStateOf(enemy.y.toString()) }
+                                                var editProps by remember { mutableStateOf("0x${enemy.properties.toString(16).uppercase().padStart(4, '0')}") }
+                                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                                    Text(eName, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text("X:", fontSize = 9.sp)
+                                                        OutlinedTextField(
+                                                            value = editX,
+                                                            onValueChange = { editX = it },
+                                                            modifier = Modifier.width(60.dp).height(32.dp),
+                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                            singleLine = true
+                                                        )
+                                                        Text("Y:", fontSize = 9.sp)
+                                                        OutlinedTextField(
+                                                            value = editY,
+                                                            onValueChange = { editY = it },
+                                                            modifier = Modifier.width(60.dp).height(32.dp),
+                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                            singleLine = true
+                                                        )
+                                                    }
+                                                    Row(
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text("Props:", fontSize = 9.sp)
+                                                        OutlinedTextField(
+                                                            value = editProps,
+                                                            onValueChange = { editProps = it },
+                                                            modifier = Modifier.width(80.dp).height(32.dp),
+                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                            singleLine = true
+                                                        )
+                                                    }
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                        modifier = Modifier.padding(top = 2.dp)) {
+                                                        Surface(
+                                                            modifier = Modifier.height(24.dp).clickable {
+                                                                val nx = editX.toIntOrNull() ?: enemy.x
+                                                                val ny = editY.toIntOrNull() ?: enemy.y
+                                                                val np = editProps.removePrefix("0x").removePrefix("0X")
+                                                                    .toIntOrNull(16) ?: enemy.properties
+                                                                editorState.updateEnemy(
+                                                                    enemy,
+                                                                    RomParser.EnemyEntry(enemy.id, nx, ny, enemy.initParam, np)
+                                                                )
+                                                                editing = false
+                                                            },
+                                                            shape = MaterialTheme.shapes.small,
+                                                            color = MaterialTheme.colorScheme.primaryContainer
+                                                        ) {
+                                                            Text("Save", fontSize = 9.sp,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                                color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                        }
+                                                        Surface(
+                                                            modifier = Modifier.height(24.dp).clickable { editing = false },
+                                                            shape = MaterialTheme.shapes.small,
+                                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                                        ) {
+                                                            Text("Cancel", fontSize = 9.sp,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Add Enemy button + searchable dropdown
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        var addEnemyExpanded by remember { mutableStateOf(false) }
+                                        var enemySearch by remember { mutableStateOf("") }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                    .clickable { addEnemyExpanded = true; enemySearch = "" },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = MaterialTheme.colorScheme.tertiaryContainer
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("+ Add Enemy", fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = addEnemyExpanded,
+                                                onDismissRequest = { addEnemyExpanded = false },
+                                                modifier = Modifier.requiredSizeIn(maxHeight = 400.dp, maxWidth = 250.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = enemySearch,
+                                                    onValueChange = { enemySearch = it },
+                                                    placeholder = { Text("Search enemies…", fontSize = 10.sp) },
+                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).height(36.dp),
+                                                    textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                    singleLine = true
+                                                )
+                                                val filtered = remember(enemySearch) {
+                                                    val q = enemySearch.trim().lowercase()
+                                                    if (q.isEmpty()) RomParser.ENEMY_CATALOG
+                                                    else RomParser.ENEMY_CATALOG.filter { (id, name) ->
+                                                        name.lowercase().contains(q) ||
+                                                            id.toString(16).contains(q, ignoreCase = true)
+                                                    }
+                                                }
+                                                for ((enemyId, enemyName) in filtered) {
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                verticalAlignment = Alignment.CenterVertically) {
+                                                                Text(
+                                                                    enemyId.toString(16).uppercase().padStart(4, '0'),
+                                                                    fontSize = 8.sp,
+                                                                    color = MaterialTheme.colorScheme.tertiary,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                                Text(enemyName, fontSize = 11.sp)
+                                                            }
+                                                        },
+                                                        onClick = {
+                                                            addEnemyExpanded = false
+                                                            val pixelX = propsBlockX * 16
+                                                            val pixelY = propsBlockY * 16
+                                                            editorState.addEnemy(enemyId, pixelX, pixelY)
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                                if (filtered.isEmpty()) {
+                                                    Text("No matches", fontSize = 10.sp,
+                                                        modifier = Modifier.padding(8.dp),
+                                                        color = MaterialTheme.colorScheme.outline)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1476,9 +1704,13 @@ private fun buildCompositeImage(
                     ShotCategory.DOOR -> {}
                 }
             }
-            if (activeOverlays.contains(TileOverlay.CRUMBLE) && blockType == 0xB) matchingOverlays.add(TileOverlay.CRUMBLE)
+            if (blockType == 0xB) {
+                val isSpeedBts = bts == 0x0E || bts == 0x0F
+                if (isSpeedBts && activeOverlays.contains(TileOverlay.SPEED)) matchingOverlays.add(TileOverlay.SPEED)
+                else if (!isSpeedBts && activeOverlays.contains(TileOverlay.CRUMBLE)) matchingOverlays.add(TileOverlay.CRUMBLE)
+            }
             if (activeOverlays.contains(TileOverlay.GRAPPLE) && blockType == 0xE) matchingOverlays.add(TileOverlay.GRAPPLE)
-            if (activeOverlays.contains(TileOverlay.SPEED) && blockType == 0x3) matchingOverlays.add(TileOverlay.SPEED)
+            if (activeOverlays.contains(TileOverlay.TREADMILL) && blockType == 0x3) matchingOverlays.add(TileOverlay.TREADMILL)
             if (activeOverlays.contains(TileOverlay.ITEMS) && itemBlocks.contains(idx)) matchingOverlays.add(TileOverlay.ITEMS)
             
             var iconX = px + 16 - 8

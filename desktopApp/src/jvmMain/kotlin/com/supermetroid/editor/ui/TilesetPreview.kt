@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.RoomInfo
@@ -89,10 +90,14 @@ fun TilesetPreview(
                         var isPanning by remember { mutableStateOf(false) }
                         var lastPanX by remember { mutableStateOf(0f) }
                         var lastPanY by remember { mutableStateOf(0f) }
+                        val density = LocalDensity.current.density
 
                         fun pointerToTile(px: Float, py: Float): Pair<Int, Int> {
-                            val tx = ((px + hScroll.value) / zoomLevel / 16).toInt()
-                            val ty = ((py + vScroll.value) / zoomLevel / 16).toInt()
+                            // Pointer & scroll are in physical pixels; layout uses dp.
+                            // Tile display size in pointer units = 16 * zoom * density.
+                            val tilePx = 16f * zoomLevel * density
+                            val tx = ((px + hScroll.value) / tilePx).toInt()
+                            val ty = ((py + vScroll.value) / tilePx).toInt()
                             return Pair(
                                 tx.coerceIn(0, data.gridCols - 1),
                                 ty.coerceIn(0, data.gridRows - 1)

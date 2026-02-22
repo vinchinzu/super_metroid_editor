@@ -613,6 +613,22 @@ class RomParser(private val romData: ByteArray) {
     }
 
     /**
+     * Return the PC offset of a door entry in bank $83, for use when patching.
+     * Returns null if the door index is invalid.
+     */
+    fun doorEntryPcOffset(doorOutPtr: Int, doorIndex: Int): Int? {
+        if (doorOutPtr == 0 || doorOutPtr == 0xFFFF) return null
+        val listPc = snesToPc(0x8F0000 or doorOutPtr)
+        val ptrOff = listPc + doorIndex * 2
+        if (ptrOff + 1 >= romData.size) return null
+        val entryPtr = readUInt16At(ptrOff)
+        if (entryPtr < 0x8000) return null
+        val entryPc = snesToPc(0x830000 or entryPtr)
+        if (entryPc + 11 >= romData.size) return null
+        return entryPc
+    }
+
+    /**
      * Door cap colors from PLM type IDs.
      * Door caps in SM are PLMs placed at door positions. The PLM ID determines color:
      *   $C842/$C848 = Blue (beam)
@@ -891,9 +907,23 @@ class RomParser(private val romData: ByteArray) {
             0xF713 to "Space Pirate Mk.III (Norfair alt)",
             0xF753 to "Space Pirate Mk.III (Maridia)",
             0xF793 to "Space Pirate Mk.III (Tourian)",
+
+            // Ceres enemies
+            0xE0BF to "Ceres Falling Debris",
+            0xE0FF to "Ceres Small Debris",
+            0xE13F to "Ceres Ridley",
+            0xE17F to "Ridley (Boss)",
+            0xE1BF to "Puyo",
+            0xE1FF to "Ceres Smoke/Steam",
+            0xE23F to "Ceres Door FX",
+            0xE27F to "Ceres Elevator Platform",
         )
 
         fun enemyName(id: Int): String = ENEMY_NAMES[id] ?: "${id.toString(16).uppercase().padStart(4, '0')}"
+
+        val ENEMY_CATALOG: List<Pair<Int, String>> by lazy {
+            ENEMY_NAMES.entries.sortedBy { it.value }.map { it.key to it.value }
+        }
 
         fun loadRom(filePath: String): RomParser {
             val file = java.io.File(filePath)

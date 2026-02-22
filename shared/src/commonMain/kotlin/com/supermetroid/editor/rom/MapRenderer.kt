@@ -14,14 +14,14 @@ import com.supermetroid.editor.data.Room
  * Block types: 0=Air, 1=Slope, 8=Solid, 9=Door, A=Spike, 
  *              B=Crumble, C=Shot, E=Grapple, F=Bomb
  */
-class MapRenderer(private val romParser: RomParser) {
+class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGraphics? = null) {
     
     companion object {
         const val BLOCK_SIZE = 16
         const val BLOCKS_PER_SCREEN = 16
     }
     
-    private val tileGraphics = TileGraphics(romParser)
+    private val tileGraphics = customTileGraphics ?: TileGraphics(romParser)
     
     /**
      * Classify block types into visual categories for rendering.
@@ -64,7 +64,7 @@ class MapRenderer(private val romParser: RomParser) {
     }
     
     /** Render from already-decompressed (possibly edited) level data. */
-    fun renderRoomFromLevelData(room: Room, levelData: ByteArray, plmOverrides: List<RomParser.PlmEntry>? = null): RoomRenderData? {
+    fun renderRoomFromLevelData(room: Room, levelData: ByteArray, plmOverrides: List<RomParser.PlmEntry>? = null, enemyOverrides: List<RomParser.EnemyEntry>? = null): RoomRenderData? {
         if (levelData.size < 2) return renderGrid(room)
         
         val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
@@ -73,7 +73,10 @@ class MapRenderer(private val romParser: RomParser) {
         val blocksTall = room.height * BLOCKS_PER_SCREEN
         val totalBlocks = blocksWide * blocksTall
         
-        // Try to load tile graphics for this room's tileset
+        // ALL Ceres area rooms (area=6, creBitflag != 0x06): level data indices are
+        // offset by 256 from the combined (CRE+URE) tile table.  SMILE compensates
+        // with a -128px graphics-sheet shift; we offset the index instead.
+        val metatileOffset = if (room.area == TileGraphics.CERES_AREA && room.creBitflag != 0x06) 256 else 0
         val hasTileGraphics = try {
             tileGraphics.loadTileset(room.tileset)
         } catch (e: Exception) {
@@ -111,7 +114,8 @@ class MapRenderer(private val romParser: RomParser) {
             val blockWord = (hi shl 8) or lo
             
             val blockType = (blockWord shr 12) and 0x0F
-            val metatileIndex = blockWord and 0x03FF
+            val rawMetatileIndex = blockWord and 0x03FF
+            val metatileIndex = minOf(rawMetatileIndex + metatileOffset, 1023)
             val hFlip = (blockWord shr 10) and 1
             val vFlip = (blockWord shr 11) and 1
             
@@ -182,7 +186,7 @@ class MapRenderer(private val romParser: RomParser) {
             }
         }
 
-        val enemies = romParser.parseEnemyPopulation(room.enemySetPtr)
+        val enemies = enemyOverrides ?: romParser.parseEnemyPopulation(room.enemySetPtr)
 
         return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes,
             itemBlocks = itemBlockSet, plmEntries = plms, enemyEntries = enemies)

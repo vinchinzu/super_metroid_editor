@@ -55,6 +55,22 @@ data class DoorChange(
 )
 
 /**
+ * An enemy population change: add, remove, or update an enemy entry.
+ * Coordinates are in pixels (same units as the ROM's enemy population data).
+ */
+@Serializable
+data class EnemyChange(
+    val action: String,       // "add", "remove", or "update"
+    val enemyId: Int,
+    val x: Int,
+    val y: Int,
+    val initParam: Int = 0,
+    val properties: Int = 0,
+    val origX: Int = 0,       // for "remove"/"update": match the original position
+    val origY: Int = 0
+)
+
+/**
  * Per-room edit state: all operations applied to a specific room.
  */
 @Serializable
@@ -62,7 +78,8 @@ data class RoomEdits(
     val roomId: Int,             // e.g. 0x91F8
     val operations: MutableList<EditOperation> = mutableListOf(),
     val plmChanges: MutableList<PlmChange> = mutableListOf(),
-    val doorChanges: MutableList<DoorChange> = mutableListOf()
+    val doorChanges: MutableList<DoorChange> = mutableListOf(),
+    val enemyChanges: MutableList<EnemyChange> = mutableListOf()
 )
 
 /**
@@ -98,6 +115,16 @@ data class SmPatch(
 )
 
 /**
+ * Custom tileset graphics data (base64-encoded raw 4bpp bytes).
+ * URE (area-specific) keyed by tileset ID; CRE (common) is shared.
+ */
+@Serializable
+data class TilesetGfxData(
+    val varGfx: MutableMap<String, String> = mutableMapOf(),  // key = tilesetId, value = base64
+    var creGfx: String? = null                                 // base64, shared across all tilesets
+)
+
+/**
  * The .smedit project file. JSON-serializable.
  * Keys are hex room IDs (as strings), values are the list of edit operations.
  */
@@ -106,7 +133,8 @@ data class SmEditProject(
     val romPath: String,
     val rooms: MutableMap<String, RoomEdits> = mutableMapOf(),  // key = "91F8"
     val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf(), // key = "tilesetId:metatileIndex"
-    val patches: MutableList<SmPatch> = mutableListOf()
+    val patches: MutableList<SmPatch> = mutableListOf(),
+    val customGfx: TilesetGfxData = TilesetGfxData()
 ) {
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

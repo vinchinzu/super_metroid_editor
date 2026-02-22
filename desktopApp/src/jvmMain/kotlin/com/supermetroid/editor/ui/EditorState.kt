@@ -8,6 +8,7 @@ import com.supermetroid.editor.data.DoorChange
 import com.supermetroid.editor.data.EditOperation
 import com.supermetroid.editor.data.PatchRepository
 import com.supermetroid.editor.data.PatchWrite
+import com.supermetroid.editor.data.EnemyChange
 import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.SmPatch
@@ -71,13 +72,15 @@ object TilesetDefaults {
         159 to TileDefault(0xC, 0x0A),        // Super missile breakable (reform)
         160 to TileDefault(0xC, 0x0B),        // Super missile breakable (no reform)
 
-        // Speed booster / crumble variants
-        182 to TileDefault(0x3, 0x08),        // Speed booster (left direction)
+        // Treadmill (type 0x3 — conveyor blocks that push Samus directionally)
+        182 to TileDefault(0x3, 0x08),        // Treadmill (left)
+
+        // Crumble / speed booster variants (type 0xB)
         183 to TileDefault(0xE),              // Grapple block (alt)
         188 to TileDefault(0xB, 0x00),        // Crumble block (reform)
         189 to TileDefault(0xB, 0x04),        // Crumble block (permanent)
-        190 to TileDefault(0xB, 0x0E),        // Speed booster crumble (reform)
-        191 to TileDefault(0xB, 0x0F),        // Speed booster crumble (permanent)
+        190 to TileDefault(0xB, 0x0E),        // Speed Booster block (reform)
+        191 to TileDefault(0xB, 0x0F),        // Speed Booster block (permanent)
 
         // Multi-tile shot blocks
         150 to TileDefault(0xC, 0x00),        // 2×1 shot block (left, reform)
@@ -258,6 +261,10 @@ class EditorState {
         get() = _workingDoors
         private set(value) { _workingDoors.clear(); _workingDoors.addAll(value) }
 
+    /** Working enemy population for the current room (includes edits). */
+    private val _workingEnemies = mutableListOf<RomParser.EnemyEntry>()
+    val workingEnemies: List<RomParser.EnemyEntry> get() = _workingEnemies
+
     // ─── Tileset editor ─────────────────────────────────────────
 
     /** The currently-viewed tileset in the tileset editor (independent of loaded room). */
@@ -276,13 +283,87 @@ class EditorState {
         editorTilesetId = tilesetId
         editorSelectedMetatile = -1
         val tg = TileGraphics(romParser)
-        return if (tg.loadTileset(tilesetId)) {
-            editorTileGraphics = tg
-            true
-        } else {
-            editorTileGraphics = null
-            false
+        if (!tg.loadTileset(tilesetId)) { editorTileGraphics = null; return false }
+        applyCustomGfxToTileGraphics(tg, tilesetId)
+        editorTileGraphics = tg
+        return true
+    }
+
+    /** Apply any project-stored custom graphics to a TileGraphics instance. */
+    private fun applyCustomGfxToTileGraphics(tg: TileGraphics, tilesetId: Int) {
+        val gfxData = project.customGfx
+        val varB64 = gfxData.varGfx[tilesetId.toString()]
+        if (varB64 != null) {
+            try { tg.applyCustomVarGfx(java.util.Base64.getDecoder().decode(varB64)) }
+            catch (_: Exception) {}
         }
+        val creB64 = gfxData.creGfx
+        if (creB64 != null) {
+            try { tg.applyCustomCreGfx(java.util.Base64.getDecoder().decode(creB64)) }
+            catch (_: Exception) {}
+        }
+    }
+
+    // ─── Tileset graphics export / import ────────────────────────────
+
+    /**
+     * Export an 8x8 tile sheet as a PNG file.
+     * @param isCre true = CRE (common), false = URE (area-specific)
+     */
+    fun exportTileSheet(filePath: String, isCre: Boolean): Boolean {
+        val tg = editorTileGraphics ?: return false
+        val startTile = if (isCre) tg.getCreOffset() else 0
+        val numTiles = if (isCre) tg.getCreTileCount() else tg.getVarTileCount()
+        val result = tg.renderTileSheet(startTile, numTiles) ?: return false
+        val (pixels, w, h) = result
+        return writePng(filePath, pixels, w, h)
+    }
+
+    /** Export the palette as a PNG reference image. */
+    fun exportPalette(filePath: String): Boolean {
+        val tg = editorTileGraphics ?: return false
+        val result = tg.renderPaletteImage(16) ?: return false
+        val (pixels, w, h) = result
+        return writePng(filePath, pixels, w, h)
+    }
+
+    /**
+     * Import an edited tile sheet PNG and store in the project.
+     * @param isCre true = CRE (common), false = URE (area-specific)
+     */
+    fun importTileSheet(filePath: String, isCre: Boolean): Boolean {
+        val tg = editorTileGraphics ?: return false
+        val img = try { javax.imageio.ImageIO.read(java.io.File(filePath)) } catch (_: Exception) { return false }
+            ?: return false
+        val w = img.width; val h = img.height
+        val pixels = img.getRGB(0, 0, w, h, null, 0, w)
+
+        val startTile = if (isCre) tg.getCreOffset() else 0
+        val numTiles = if (isCre) tg.getCreTileCount() else tg.getVarTileCount()
+        val raw4bpp = tg.importTileSheet(pixels, w, startTile, numTiles)
+
+        val b64 = java.util.Base64.getEncoder().encodeToString(raw4bpp)
+        if (isCre) {
+            project.customGfx.creGfx = b64
+            tg.applyCustomCreGfx(raw4bpp)
+        } else {
+            project.customGfx.varGfx[editorTilesetId.toString()] = b64
+            tg.applyCustomVarGfx(raw4bpp)
+        }
+        dirty = true
+        return true
+    }
+
+    /** Check whether custom graphics exist for the current tileset. */
+    fun hasCustomVarGfx(): Boolean = project.customGfx.varGfx.containsKey(editorTilesetId.toString())
+    fun hasCustomCreGfx(): Boolean = project.customGfx.creGfx != null
+
+    private fun writePng(filePath: String, pixels: IntArray, w: Int, h: Int): Boolean {
+        return try {
+            val img = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            img.setRGB(0, 0, w, h, pixels, 0, w)
+            javax.imageio.ImageIO.write(img, "png", java.io.File(filePath))
+        } catch (_: Exception) { false }
     }
 
     fun selectEditorMetatile(index: Int) {
@@ -406,6 +487,8 @@ class EditorState {
     fun selectMetatile(index: Int, gridCols: Int = 32) {
         tilesetSelStart = Pair(index % gridCols, index / gridCols)
         tilesetSelEnd = tilesetSelStart
+        mapSelStart = null
+        mapSelEnd = null
         val eff = getEffectiveTileDefault(currentTilesetId, index)
         brush = TileBrush.single(index, eff.blockType, eff.bts)
     }
@@ -423,6 +506,8 @@ class EditorState {
     fun endTilesetDrag(gridCols: Int) {
         val s = tilesetSelStart ?: return
         val e = tilesetSelEnd ?: return
+        mapSelStart = null
+        mapSelEnd = null
         val c0 = minOf(s.first, e.first)
         val c1 = maxOf(s.first, e.first)
         val r0 = minOf(s.second, e.second)
@@ -455,6 +540,19 @@ class EditorState {
 
     fun toggleHFlip() { brush = brush?.copy(hFlip = !brush!!.hFlip) }
     fun toggleVFlip() { brush = brush?.copy(vFlip = !brush!!.vFlip) }
+
+    fun flipOrCaptureH() {
+        if (activeTool == EditorTool.SELECT && mapSelStart != null && mapSelEnd != null) captureMapSelection()
+        toggleHFlip()
+    }
+    fun flipOrCaptureV() {
+        if (activeTool == EditorTool.SELECT && mapSelStart != null && mapSelEnd != null) captureMapSelection()
+        toggleVFlip()
+    }
+    fun rotateOrCapture() {
+        if (activeTool == EditorTool.SELECT && mapSelStart != null && mapSelEnd != null) captureMapSelection()
+        rotateClockwise()
+    }
 
     fun rotateClockwise() {
         val b = brush ?: return
@@ -590,13 +688,31 @@ class EditorState {
         dirty = false
     }
 
+    internal fun initTestLevel(blocksWide: Int, blocksTall: Int) {
+        val totalTiles = blocksWide * blocksTall
+        val layer1Bytes = totalTiles * 2
+        workingLevelData = ByteArray(2 + layer1Bytes + totalTiles).also {
+            it[0] = (layer1Bytes and 0xFF).toByte()
+            it[1] = ((layer1Bytes shr 8) and 0xFF).toByte()
+        }
+        workingBlocksWide = blocksWide
+        workingBlocksTall = blocksTall
+        undoStack.clear()
+        redoStack.clear()
+    }
+
+    internal fun setBrushForTest(b: TileBrush?) { brush = b }
+
     // ─── Working level data ─────────────────────────────────────
 
     fun loadRoom(roomId: Int, romParser: RomParser, room: com.supermetroid.editor.data.Room) {
         currentRoomId = roomId
         currentTilesetId = room.tileset
         val tg = TileGraphics(romParser)
-        if (tg.loadTileset(room.tileset)) tileGraphics = tg
+        if (tg.loadTileset(room.tileset)) {
+            applyCustomGfxToTileGraphics(tg, room.tileset)
+            tileGraphics = tg
+        }
         val levelData = romParser.decompressLZ2(room.levelDataPtr)
         workingLevelData = levelData.copyOf()
         workingBlocksWide = room.width * 16
@@ -641,6 +757,10 @@ class EditorState {
         // Parse door entries for this room
         doorEntries = romParser.parseDoorList(room.doorOut)
 
+        // Load enemies for this room
+        _workingEnemies.clear()
+        _workingEnemies.addAll(romParser.parseEnemyPopulation(room.enemySetPtr))
+
         val roomKey = project.roomKey(roomId)
         val savedRoom = project.rooms[roomKey]
         if (savedRoom != null) {
@@ -662,6 +782,41 @@ class EditorState {
                 when (change.action) {
                     "add" -> _workingPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
                     "remove" -> _workingPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
+                }
+            }
+            // Replay saved door changes (last change per index wins)
+            for (dc in savedRoom.doorChanges) {
+                if (dc.doorIndex in 0 until _workingDoors.size) {
+                    _workingDoors[dc.doorIndex] = RomParser.DoorEntry(
+                        destRoomPtr = dc.destRoomPtr,
+                        bitflag = dc.bitflag,
+                        doorCapCode = dc.doorCapCode,
+                        screenX = dc.screenX,
+                        screenY = dc.screenY,
+                        distFromDoor = dc.distFromDoor,
+                        entryCode = dc.entryCode
+                    )
+                }
+            }
+            // Replay saved enemy changes
+            for (ec in savedRoom.enemyChanges) {
+                when (ec.action) {
+                    "add" -> _workingEnemies.add(
+                        RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties)
+                    )
+                    "remove" -> _workingEnemies.removeAll {
+                        it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
+                    }
+                    "update" -> {
+                        val idx = _workingEnemies.indexOfFirst {
+                            it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
+                        }
+                        if (idx >= 0) {
+                            _workingEnemies[idx] = RomParser.EnemyEntry(
+                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -837,23 +992,61 @@ class EditorState {
         editVersion++
     }
 
+    // ─── Enemy editing ────────────────────────────────────────
+
+    fun getEnemiesNear(pixelX: Int, pixelY: Int, radius: Int = 16): List<RomParser.EnemyEntry> =
+        _workingEnemies.filter { kotlin.math.abs(it.x - pixelX) < radius && kotlin.math.abs(it.y - pixelY) < radius }
+
+    fun addEnemy(enemyId: Int, pixelX: Int, pixelY: Int, initParam: Int = 0, properties: Int = 0x0800) {
+        val entry = RomParser.EnemyEntry(enemyId, pixelX, pixelY, initParam, properties)
+        _workingEnemies.add(entry)
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
+            EnemyChange("add", enemyId, pixelX, pixelY, initParam, properties)
+        )
+        dirty = true
+        editVersion++
+    }
+
+    fun removeEnemy(enemy: RomParser.EnemyEntry) {
+        _workingEnemies.removeAll { it.id == enemy.id && it.x == enemy.x && it.y == enemy.y }
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
+            EnemyChange("remove", enemy.id, enemy.x, enemy.y, enemy.initParam, enemy.properties,
+                origX = enemy.x, origY = enemy.y)
+        )
+        dirty = true
+        editVersion++
+    }
+
+    fun updateEnemy(old: RomParser.EnemyEntry, new: RomParser.EnemyEntry) {
+        val idx = _workingEnemies.indexOfFirst { it.id == old.id && it.x == old.x && it.y == old.y }
+        if (idx < 0) return
+        _workingEnemies[idx] = new
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
+            EnemyChange("update", new.id, new.x, new.y, new.initParam, new.properties,
+                origX = old.x, origY = old.y)
+        )
+        dirty = true
+        editVersion++
+    }
+
     // ─── Door editing ──────────────────────────────────────────
 
     fun updateDoor(index: Int, entry: RomParser.DoorEntry) {
         if (index < 0 || index >= _workingDoors.size) return
         _workingDoors[index] = entry
-        project.getOrCreateRoom(currentRoomId).doorChanges.add(
-            DoorChange(
-                doorIndex = index,
-                destRoomPtr = entry.destRoomPtr,
-                bitflag = entry.bitflag,
-                doorCapCode = entry.doorCapCode,
-                screenX = entry.screenX,
-                screenY = entry.screenY,
-                distFromDoor = entry.distFromDoor,
-                entryCode = entry.entryCode
-            )
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+        val dc = DoorChange(
+            doorIndex = index,
+            destRoomPtr = entry.destRoomPtr,
+            bitflag = entry.bitflag,
+            doorCapCode = entry.doorCapCode,
+            screenX = entry.screenX,
+            screenY = entry.screenY,
+            distFromDoor = entry.distFromDoor,
+            entryCode = entry.entryCode
         )
+        roomEdits.doorChanges.removeAll { it.doorIndex == index }
+        roomEdits.doorChanges.add(dc)
         dirty = true
         editVersion++
     }
@@ -965,7 +1158,6 @@ class EditorState {
         var patchedRooms = 0
 
         // Free space allocator for bank $8F (PLM sets live here).
-        // Only treat 0xFF as free (0x00 is valid data: PLM terminators, etc.)
         val bank8FEnd = romParser.snesToPc(0x8FFFFF) + 1
         val bank8FStart = romParser.snesToPc(0x8F8000)
         var freePtr = bank8FEnd
@@ -974,12 +1166,25 @@ class EditorState {
             if (b != 0xFF) break
             freePtr--
         }
-        freePtr++ // first free byte after last used data
+        freePtr++
+
+        // Free space allocator for bank $A1 (enemy population sets).
+        val bankA1End = romParser.snesToPc(0xA1FFFF) + 1
+        val bankA1Start = romParser.snesToPc(0xA18000)
+        var enemyFreePtr = bankA1End
+        while (enemyFreePtr > bankA1Start) {
+            val b = romData[enemyFreePtr - 1].toInt() and 0xFF
+            if (b != 0xFF) break
+            enemyFreePtr--
+        }
+        enemyFreePtr++
 
         for ((roomKey, roomEdits) in project.rooms) {
             val hasTileEdits = roomEdits.operations.isNotEmpty()
             val hasPlmEdits = roomEdits.plmChanges.isNotEmpty()
-            if (!hasTileEdits && !hasPlmEdits) continue
+            val hasDoorEdits = roomEdits.doorChanges.isNotEmpty()
+            val hasEnemyEdits = roomEdits.enemyChanges.isNotEmpty()
+            if (!hasTileEdits && !hasPlmEdits && !hasDoorEdits && !hasEnemyEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
 
@@ -1077,6 +1282,102 @@ class EditorState {
                 }
                 patchedRooms++
             }
+
+            // Patch door entries (last change per index wins)
+            if (hasDoorEdits && room.doorOut != 0 && room.doorOut != 0xFFFF) {
+                val byIndex = roomEdits.doorChanges.groupBy { it.doorIndex }
+                for ((doorIndex, changes) in byIndex) {
+                    val dc = changes.last()
+                    val entryPc = romParser.doorEntryPcOffset(room.doorOut, doorIndex) ?: continue
+                    if (entryPc + 11 >= romData.size) continue
+                    romData[entryPc] = (dc.destRoomPtr and 0xFF).toByte()
+                    romData[entryPc + 1] = ((dc.destRoomPtr shr 8) and 0xFF).toByte()
+                    romData[entryPc + 2] = (dc.bitflag and 0xFF).toByte()
+                    romData[entryPc + 3] = ((dc.bitflag shr 8) and 0xFF).toByte()
+                    romData[entryPc + 4] = (dc.doorCapCode and 0xFF).toByte()
+                    romData[entryPc + 5] = ((dc.doorCapCode shr 8) and 0xFF).toByte()
+                    romData[entryPc + 6] = (dc.screenX and 0xFF).toByte()
+                    romData[entryPc + 7] = (dc.screenY and 0xFF).toByte()
+                    romData[entryPc + 8] = (dc.distFromDoor and 0xFF).toByte()
+                    romData[entryPc + 9] = ((dc.distFromDoor shr 8) and 0xFF).toByte()
+                    romData[entryPc + 10] = (dc.entryCode and 0xFF).toByte()
+                    romData[entryPc + 11] = ((dc.entryCode shr 8) and 0xFF).toByte()
+                }
+                patchedRooms++
+            }
+
+            // Patch enemy population
+            if (hasEnemyEdits && room.enemySetPtr != 0 && room.enemySetPtr != 0xFFFF) {
+                val originalEnemies = romParser.parseEnemyPopulation(room.enemySetPtr)
+                val modified = originalEnemies.toMutableList()
+                for (ec in roomEdits.enemyChanges) {
+                    when (ec.action) {
+                        "add" -> modified.add(
+                            RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties)
+                        )
+                        "remove" -> modified.removeAll {
+                            it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
+                        }
+                        "update" -> {
+                            val idx = modified.indexOfFirst {
+                                it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY
+                            }
+                            if (idx >= 0) modified[idx] = RomParser.EnemyEntry(
+                                ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties
+                            )
+                        }
+                    }
+                }
+                val originalSize = originalEnemies.size * 16 + 4 // +4 for FFFF terminator pair
+                val newSize = modified.size * 16 + 4
+                val enemyPc = romParser.snesToPc(0xA10000 or room.enemySetPtr)
+
+                val writePc: Int
+                if (newSize <= originalSize) {
+                    writePc = enemyPc
+                } else if (enemyFreePtr + newSize <= bankA1End) {
+                    writePc = enemyFreePtr
+                    enemyFreePtr += newSize
+                    val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                    val newSnes = romParser.pcToSnes(writePc)
+                    val newPtr = newSnes and 0xFFFF
+                    for (stateOffset in allStateOffsets) {
+                        val existingPtr = (romData[stateOffset + 8].toInt() and 0xFF) or
+                                ((romData[stateOffset + 9].toInt() and 0xFF) shl 8)
+                        if (existingPtr == room.enemySetPtr) {
+                            romData[stateOffset + 8] = (newPtr and 0xFF).toByte()
+                            romData[stateOffset + 9] = ((newPtr shr 8) and 0xFF).toByte()
+                        }
+                    }
+                    println("Room 0x$roomKey: relocated enemy set to 0x${newSnes.toString(16)}")
+                } else {
+                    println("WARN: Room 0x$roomKey no free space for expanded enemy set — skipped")
+                    continue
+                }
+
+                var off = writePc
+                for (e in modified) {
+                    romData[off] = (e.id and 0xFF).toByte()
+                    romData[off + 1] = ((e.id shr 8) and 0xFF).toByte()
+                    romData[off + 2] = (e.x and 0xFF).toByte()
+                    romData[off + 3] = ((e.x shr 8) and 0xFF).toByte()
+                    romData[off + 4] = (e.y and 0xFF).toByte()
+                    romData[off + 5] = ((e.y shr 8) and 0xFF).toByte()
+                    romData[off + 6] = (e.initParam and 0xFF).toByte()
+                    romData[off + 7] = ((e.initParam shr 8) and 0xFF).toByte()
+                    romData[off + 8] = (e.properties and 0xFF).toByte()
+                    romData[off + 9] = ((e.properties shr 8) and 0xFF).toByte()
+                    for (i in 10..15) romData[off + i] = 0 // reserved bytes
+                    off += 16
+                }
+                // Terminator: 0xFFFF 0x0000
+                romData[off] = 0xFF.toByte(); romData[off + 1] = 0xFF.toByte()
+                romData[off + 2] = 0; romData[off + 3] = 0
+                if (writePc == enemyPc) {
+                    for (i in off + 4 until enemyPc + originalSize) romData[i] = 0
+                }
+                patchedRooms++
+            }
         }
         // Apply enabled patches (hex write operations)
         var patchesApplied = 0
@@ -1091,11 +1392,58 @@ class EditorState {
             patchesApplied++
         }
 
-        if (patchedRooms == 0 && patchesApplied == 0) return null
+        // Apply custom tileset graphics
+        var gfxPatched = 0
+        val gfxData = project.customGfx
+
+        // Custom CRE graphics (shared, always at $B9:8000)
+        val creB64 = gfxData.creGfx
+        if (creB64 != null) {
+            try {
+                val rawCre = java.util.Base64.getDecoder().decode(creB64)
+                val compressed = lz5Compress(rawCre)
+                val crePc = romParser.snesToPc(TileGraphics.CRE_GFX_SNES)
+                val (_, origSize) = romParser.decompressLZ2WithSize(TileGraphics.CRE_GFX_SNES)
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, crePc, compressed.size)
+                    for (i in compressed.size until origSize) romData[crePc + i] = 0xFF.toByte()
+                    gfxPatched++
+                    println("Patched CRE graphics in-place (${compressed.size}/$origSize bytes)")
+                } else {
+                    println("WARN: Compressed CRE gfx (${compressed.size}) exceeds original ($origSize) — skipped")
+                }
+            } catch (e: Exception) { println("WARN: CRE gfx patch failed: ${e.message}") }
+        }
+
+        // Custom variable (URE) graphics per tileset
+        val tablePC = romParser.snesToPc(TileGraphics.TILESET_TABLE_SNES)
+        for ((tsIdStr, varB64) in gfxData.varGfx) {
+            val tsId = tsIdStr.toIntOrNull() ?: continue
+            try {
+                val rawVar = java.util.Base64.getDecoder().decode(varB64)
+                val compressed = lz5Compress(rawVar)
+                val entryOffset = tablePC + tsId * 9
+                val gfxSnes = (romData[entryOffset + 3].toInt() and 0xFF) or
+                        ((romData[entryOffset + 4].toInt() and 0xFF) shl 8) or
+                        ((romData[entryOffset + 5].toInt() and 0xFF) shl 16)
+                val gfxPc = romParser.snesToPc(gfxSnes)
+                val (_, origSize) = romParser.decompressLZ2WithSize(gfxSnes)
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, gfxPc, compressed.size)
+                    for (i in compressed.size until origSize) romData[gfxPc + i] = 0xFF.toByte()
+                    gfxPatched++
+                    println("Patched tileset $tsId variable gfx in-place (${compressed.size}/$origSize bytes)")
+                } else {
+                    println("WARN: Compressed tileset $tsId gfx (${compressed.size}) exceeds original ($origSize) — skipped")
+                }
+            } catch (e: Exception) { println("WARN: Tileset $tsId gfx patch failed: ${e.message}") }
+        }
+
+        if (patchedRooms == 0 && patchesApplied == 0 && gfxPatched == 0) return null
         val orig = File(romPath)
         val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
         out.writeBytes(romData)
-        println("Exported: ${out.absolutePath} ($patchedRooms rooms, $patchesApplied patches)")
+        println("Exported: ${out.absolutePath} ($patchedRooms rooms, $patchesApplied patches, $gfxPatched gfx)")
         return out.absolutePath
     }
 
