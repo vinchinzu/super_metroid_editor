@@ -143,7 +143,9 @@ data class PatternCell(
     val blockType: Int = 0x8,  // upper 4 bits of block word
     val bts: Int = 0,
     val hFlip: Boolean = false,
-    val vFlip: Boolean = false
+    val vFlip: Boolean = false,
+    val plmId: Int = 0,        // PLM ID (item/station/gate); 0 = none
+    val plmParam: Int = 0      // PLM parameter byte
 )
 
 /**

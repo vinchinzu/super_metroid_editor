@@ -419,6 +419,7 @@ fun MapCanvas(
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                         
                         // Undo / Redo with icons
+                        @Suppress("UNUSED_VARIABLE") val uv = editorState.undoVersion
                         IconButton(
                             onClick = { editorState.undo(); mapFocusReq.requestFocus() },
                             enabled = editorState.undoStack.isNotEmpty(),
@@ -586,6 +587,12 @@ fun MapCanvas(
                             var propsBlockType by remember { mutableStateOf(0) }
                             var propsBts by remember { mutableStateOf(0) }
                             var propsMetatile by remember { mutableStateOf(0) }
+
+                            // Right-click context menu state
+                            var contextMenuExpanded by remember { mutableStateOf(false) }
+                            var contextMenuBx by remember { mutableStateOf(0) }
+                            var contextMenuBy by remember { mutableStateOf(0) }
+                            var showSavePatternDialog by remember { mutableStateOf(false) }
                             val density = LocalDensity.current.density
                             
                             fun pointerToBlock(posX: Float, posY: Float): Pair<Int, Int> {
@@ -632,16 +639,9 @@ fun MapCanvas(
                                         if (ne != null && ne.button == MouseEvent.BUTTON2) {
                                             isDragging = true; val p = event.changes.first().position; lastDragX = p.x; lastDragY = p.y
                                         } else if (ne != null && ne.button == MouseEvent.BUTTON3 && editorState != null) {
-                                            // Right-click: open tile properties
                                             val (bx, by) = pointerToBlock(event.changes.first().position.x, event.changes.first().position.y)
-                                            if (bx in 0 until data.blocksWide && by in 0 until data.blocksTall) {
-                                                val word = editorState.readBlockWord(bx, by)
-                                                propsBlockX = bx; propsBlockY = by
-                                                propsMetatile = word and 0x3FF
-                                                propsBlockType = (word shr 12) and 0xF
-                                                propsBts = editorState.readBts(bx, by)
-                                                propsExpanded = true
-                                            }
+                                            contextMenuBx = bx; contextMenuBy = by
+                                            contextMenuExpanded = true
                                         } else if (ne != null && ne.button == MouseEvent.BUTTON1 && editorState != null) {
                                             val (bx, by) = pointerToBlock(event.changes.first().position.x, event.changes.first().position.y)
                                             when (editorState.activeTool) {
@@ -854,6 +854,65 @@ fun MapCanvas(
                                 }
                             }
                             
+                            // ─── Right-click context menu ──────
+                            DropdownMenu(
+                                expanded = contextMenuExpanded,
+                                onDismissRequest = { contextMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Tile Properties", fontSize = 11.sp) },
+                                    onClick = {
+                                        contextMenuExpanded = false
+                                        if (editorState != null && contextMenuBx in 0 until data.blocksWide && contextMenuBy in 0 until data.blocksTall) {
+                                            val word = editorState.readBlockWord(contextMenuBx, contextMenuBy)
+                                            propsBlockX = contextMenuBx; propsBlockY = contextMenuBy
+                                            propsMetatile = word and 0x3FF
+                                            propsBlockType = (word shr 12) and 0xF
+                                            propsBts = editorState.readBts(contextMenuBx, contextMenuBy)
+                                            propsExpanded = true
+                                        }
+                                    }
+                                )
+                                if (editorState != null && editorState.mapSelStart != null && editorState.mapSelEnd != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Save Selection as Pattern", fontSize = 11.sp) },
+                                        onClick = {
+                                            contextMenuExpanded = false
+                                            showSavePatternDialog = true
+                                        }
+                                    )
+                                }
+                            }
+
+                            // Save-as-pattern dialog
+                            if (showSavePatternDialog && editorState != null) {
+                                var patName by remember { mutableStateOf("") }
+                                AlertDialog(
+                                    onDismissRequest = { showSavePatternDialog = false },
+                                    title = { Text("Save Selection as Pattern", fontSize = 14.sp) },
+                                    text = {
+                                        OutlinedTextField(
+                                            value = patName,
+                                            onValueChange = { patName = it },
+                                            label = { Text("Pattern name") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(onClick = {
+                                            val n = patName.ifBlank { "Selection" }
+                                            val pat = editorState.saveSelectionAsPattern(n)
+                                            if (pat != null) editorState.loadPatternForEdit(pat.id)
+                                            showSavePatternDialog = false
+                                        }) { Text("Save") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showSavePatternDialog = false }) { Text("Cancel") }
+                                    }
+                                )
+                            }
+
                             // ─── Right-click tile properties panel (floating, non-modal) ──────
                             if (propsExpanded && editorState != null) {
                                 val editableBlockTypes = listOf(

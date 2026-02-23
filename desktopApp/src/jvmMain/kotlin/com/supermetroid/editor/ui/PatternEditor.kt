@@ -3,13 +3,19 @@ package com.supermetroid.editor.ui
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
@@ -22,21 +28,11 @@ import com.supermetroid.editor.data.PatternCell
 import com.supermetroid.editor.data.TilePattern
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
-import com.supermetroid.editor.rom.TilesetGridData
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 
-private val PATTERN_BLOCK_TYPES = listOf(
-    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
-    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
-    0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
-    0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
-)
+// ─── Left column: pattern list ──────────────────────────────────────────
 
-// ─── Left column: pattern list panel ──────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PatternListPanel(
     editorState: EditorState,
@@ -44,6 +40,7 @@ fun PatternListPanel(
 ) {
     @Suppress("UNUSED_VARIABLE") val pv = editorState.patternVersion
     val patterns = editorState.project.patterns
+    val tg = editorState.tileGraphics
     val selectedId = editorState.selectedPatternId
     var showCreateDialog by remember { mutableStateOf(false) }
 
@@ -58,17 +55,13 @@ fun PatternListPanel(
                 onClick = { showCreateDialog = true },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                 modifier = Modifier.height(28.dp)
-            ) {
-                Text("+ New", fontSize = 11.sp)
-            }
+            ) { Text("+ New", fontSize = 11.sp) }
         }
 
         Divider()
 
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         ) {
             if (patterns.isEmpty()) {
                 Text(
@@ -83,42 +76,22 @@ fun PatternListPanel(
             val urePats = patterns.filter { it.tilesetId != null }
 
             if (crePats.isNotEmpty()) {
-                Text(
-                    "CRE (Common)",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                Text("CRE (Common)", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp)
-                )
-                for (pat in crePats) {
-                    PatternListItem(
-                        pattern = pat,
-                        isSelected = pat.id == selectedId,
-                        onSelect = { editorState.selectPattern(pat.id) },
-                        onUse = { editorState.selectAndApplyPattern(pat.id) },
-                        onDelete = if (pat.builtIn) null else {{ editorState.removePattern(pat.id) }}
-                    )
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                for (pat in crePats) PatternListItem(pat, pat.id == selectedId, tg) {
+                    editorState.loadPatternForEdit(pat.id)
                 }
             }
 
             if (urePats.isNotEmpty()) {
                 val grouped = urePats.groupBy { it.tilesetId!! }
                 for ((tsId, pats) in grouped.entries.sortedBy { it.key }) {
-                    Text(
-                        "Tileset $tsId",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                    Text("Tileset $tsId", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp)
-                    )
-                    for (pat in pats) {
-                        PatternListItem(
-                            pattern = pat,
-                            isSelected = pat.id == selectedId,
-                            onSelect = { editorState.selectPattern(pat.id) },
-                            onUse = { editorState.selectAndApplyPattern(pat.id) },
-                            onDelete = if (pat.builtIn) null else {{ editorState.removePattern(pat.id) }}
-                        )
+                        modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                    for (pat in pats) PatternListItem(pat, pat.id == selectedId, tg) {
+                        editorState.loadPatternForEdit(pat.id)
                     }
                 }
             }
@@ -131,7 +104,7 @@ fun PatternListPanel(
             onDismiss = { showCreateDialog = false },
             onCreate = { name, cols, rows, tilesetId ->
                 val pat = editorState.addPattern(name, cols, rows, tilesetId)
-                editorState.selectPattern(pat.id)
+                editorState.loadPatternForEdit(pat.id)
                 showCreateDialog = false
             }
         )
@@ -142,64 +115,46 @@ fun PatternListPanel(
 private fun PatternListItem(
     pattern: TilePattern,
     isSelected: Boolean,
+    tg: TileGraphics?,
     onSelect: () -> Unit,
-    onUse: () -> Unit,
-    onDelete: (() -> Unit)?
 ) {
-    val bg = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-             else Color.Transparent
-
+    val bg = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+    val thumb = remember(pattern, pattern.cells.hashCode(), tg) {
+        renderPatternThumbnail(pattern, tg)?.toComposeImageBitmap()
+    }
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelect() }
+        modifier = Modifier.fillMaxWidth().clickable { onSelect() }
             .padding(horizontal = 4.dp, vertical = 1.dp),
-        color = bg,
-        shape = RoundedCornerShape(4.dp)
+        color = bg, shape = RoundedCornerShape(4.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    pattern.name,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "${pattern.cols}×${pattern.rows}" +
-                        if (pattern.builtIn) " (built-in)" else "",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Text(
-                "Use",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable { onUse() }
-                    .background(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        RoundedCornerShape(4.dp)
+            Box(
+                modifier = Modifier.size(48.dp)
+                    .background(Color(0xFF0C0C18), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (thumb != null) {
+                    Image(
+                        bitmap = thumb,
+                        contentDescription = pattern.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(2.dp)
                     )
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-
-            if (onDelete != null) {
-                Text(
-                    "✕",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .clickable { onDelete() }
-                        .padding(4.dp)
-                )
+                } else {
+                    Text("?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.3f))
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(pattern.name, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${pattern.cols}×${pattern.rows}" +
+                    (if (pattern.tilesetId != null) " TS:${pattern.tilesetId}" else " CRE") +
+                    (if (pattern.builtIn) " (built-in)" else ""),
+                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -223,8 +178,7 @@ private fun CreatePatternDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
+                    value = name, onValueChange = { name = it },
                     label = { Text("Name", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
@@ -249,422 +203,870 @@ private fun CreatePatternDialog(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = isCre,
-                        onCheckedChange = { isCre = it },
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Checkbox(checked = isCre, onCheckedChange = { isCre = it }, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (isCre) "CRE (shared across all tilesets)"
-                        else "Tileset $currentTilesetId only",
-                        fontSize = 11.sp
-                    )
+                    Text(if (isCre) "CRE (shared)" else "Tileset $currentTilesetId", fontSize = 11.sp)
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val c = colsText.toIntOrNull()?.coerceIn(1, 16) ?: 4
-                    val r = rowsText.toIntOrNull()?.coerceIn(1, 16) ?: 4
-                    val n = name.ifBlank { "Pattern ${c}×${r}" }
-                    onCreate(n, c, r, if (isCre) null else currentTilesetId)
-                }
-            ) { Text("Create") }
+            Button(onClick = {
+                val c = colsText.toIntOrNull()?.coerceIn(1, 32) ?: 4
+                val r = rowsText.toIntOrNull()?.coerceIn(1, 32) ?: 4
+                onCreate(name.ifBlank { "Pattern ${c}×${r}" }, c, r, if (isCre) null else currentTilesetId)
+            }) { Text("Create") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
 
-// ─── Right canvas: pattern editor view ──────────────────────────────────
+// ─── Right canvas: pattern editor (mirrors MapCanvas) ───────────────────
 
 @OptIn(ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PatternEditorCanvas(
     editorState: EditorState,
-    romParser: RomParser?,
+    @Suppress("UNUSED_PARAMETER") romParser: RomParser?,
     modifier: Modifier = Modifier
 ) {
     @Suppress("UNUSED_VARIABLE") val pv = editorState.patternVersion
+    @Suppress("UNUSED_VARIABLE") val ev = editorState.patternEditVersion
     val pattern = editorState.activePattern
 
     if (pattern == null) {
         Box(modifier.fillMaxSize(), Alignment.Center) {
-            Text(
-                "Select a pattern to edit",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
-            )
+            Text("Select a pattern to edit", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         }
         return
     }
 
-    var tileGraphics by remember { mutableStateOf<TileGraphics?>(null) }
-    var tilesetGrid by remember { mutableStateOf<TilesetGridData?>(null) }
-
-    LaunchedEffect(editorState.currentTilesetId, romParser) {
-        if (romParser == null) return@LaunchedEffect
-        val tg = TileGraphics(romParser)
-        if (tg.loadTileset(editorState.currentTilesetId)) {
-            editorState.applyCustomGfxToTileGraphics(tg, editorState.currentTilesetId)
-            tileGraphics = tg
-            tilesetGrid = withContext(Dispatchers.Default) { tg.renderTilesetGrid() }
-        }
-    }
-
-    val tg = tileGraphics
+    @Suppress("UNUSED_VARIABLE") val uv = editorState.patUndoVersion
+    val tg = editorState.tileGraphics
     val density = LocalDensity.current.density
-    val cellPx = 48 // display size per cell in dp
+    var zoomLevel by remember { mutableStateOf(3f) }
+    val focusReq = remember { FocusRequester() }
+    var isPainting by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showResizeDialog by remember { mutableStateOf(false) }
 
-    var selectedCellR by remember { mutableStateOf(0) }
-    var selectedCellC by remember { mutableStateOf(0) }
-    var patternHFlip by remember { mutableStateOf(false) }
-    var patternVFlip by remember { mutableStateOf(false) }
+    // Tile properties panel state
+    var propsExpanded by remember { mutableStateOf(false) }
+    var propsBlockX by remember { mutableStateOf(0) }
+    var propsBlockY by remember { mutableStateOf(0) }
+    var propsBlockType by remember { mutableStateOf(0) }
+    var propsBts by remember { mutableStateOf(0) }
+    var propsMetatile by remember { mutableStateOf(0) }
 
-    Column(modifier = modifier.fillMaxSize().padding(8.dp)) {
-        // Pattern header
+    Column(modifier = modifier.fillMaxSize()) {
+        // ─── Toolbar (mirrors MapCanvas) ──────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(
-                pattern.name,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f)
+            // Pattern name + info
+            Text(pattern.name, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("${pattern.cols}×${pattern.rows}", fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (pattern.tilesetId != null) Text("TS:${pattern.tilesetId}", fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else Text("CRE", fontSize = 10.sp, color = MaterialTheme.colorScheme.tertiary)
+
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Tool buttons — identical to MapCanvas
+            FilterChip(
+                selected = editorState.activeTool == EditorTool.SELECT,
+                onClick = { editorState.activeTool = EditorTool.SELECT; focusReq.requestFocus() },
+                label = { Icon(Icons.Default.SelectAll, null, Modifier.size(14.dp)) },
+                modifier = Modifier.height(24.dp)
             )
-            Text(
-                "${pattern.cols}×${pattern.rows}",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            FilterChip(
+                selected = editorState.activeTool == EditorTool.PAINT,
+                onClick = { editorState.activeTool = EditorTool.PAINT; focusReq.requestFocus() },
+                label = { Icon(Icons.Default.Brush, null, Modifier.size(14.dp)) },
+                modifier = Modifier.height(24.dp)
             )
-            if (pattern.tilesetId != null) {
-                Text("TS: ${pattern.tilesetId}", fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text("CRE", fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.tertiary)
+            FilterChip(
+                selected = editorState.activeTool == EditorTool.FILL,
+                onClick = { editorState.activeTool = EditorTool.FILL; focusReq.requestFocus() },
+                label = { Icon(Icons.Default.FormatColorFill, null, Modifier.size(14.dp)) },
+                modifier = Modifier.height(24.dp)
+            )
+            FilterChip(
+                selected = editorState.activeTool == EditorTool.SAMPLE,
+                onClick = { editorState.activeTool = EditorTool.SAMPLE; focusReq.requestFocus() },
+                label = { Icon(Icons.Default.Colorize, null, Modifier.size(14.dp)) },
+                modifier = Modifier.height(24.dp)
+            )
+
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Undo / Redo
+            IconButton(onClick = { editorState.patUndo(); focusReq.requestFocus() },
+                enabled = editorState.patternUndoStack.isNotEmpty(), modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Undo, "Undo", Modifier.size(16.dp),
+                    tint = if (editorState.patternUndoStack.isNotEmpty()) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
             }
+            IconButton(onClick = { editorState.patRedo(); focusReq.requestFocus() },
+                enabled = editorState.patternRedoStack.isNotEmpty(), modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Redo, "Redo", Modifier.size(16.dp),
+                    tint = if (editorState.patternRedoStack.isNotEmpty()) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            }
+
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Flip / Rotate
+            IconButton(onClick = { editorState.flipOrCaptureH(); focusReq.requestFocus() },
+                enabled = editorState.brush != null, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Flip, "H-Flip", Modifier.size(16.dp),
+                    tint = if (editorState.brush?.hFlip == true) MaterialTheme.colorScheme.primary
+                    else if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            }
+            IconButton(onClick = { editorState.flipOrCaptureV(); focusReq.requestFocus() },
+                enabled = editorState.brush != null, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Flip, "V-Flip", Modifier.size(16.dp).graphicsLayer(rotationZ = 90f),
+                    tint = if (editorState.brush?.vFlip == true) MaterialTheme.colorScheme.primary
+                    else if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+            }
+
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Resize / Delete / Use
+            OutlinedButton(onClick = { showResizeDialog = true },
+                contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp)) {
+                Text("Resize", fontSize = 9.sp)
+            }
+            Button(onClick = {
+                editorState.brush = editorState.patternToBrush(pattern)
+                editorState.activeTool = EditorTool.PAINT
+            }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp)) {
+                Text("Use", fontSize = 9.sp)
+            }
+            if (!pattern.builtIn) {
+                OutlinedButton(onClick = { showDeleteConfirm = true },
+                    contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                    Text("Delete", fontSize = 9.sp)
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Brush / Hover info
+            val brush = editorState.brush
+            if (brush != null) {
+                Text("${brush.cols}×${brush.rows} #${brush.primaryIndex}" +
+                    (if (brush.hFlip) " H" else "") + (if (brush.vFlip) " V" else ""),
+                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (editorState.patHoverX >= 0) {
+                val hw = editorState.patCellWord(editorState.patHoverX, editorState.patHoverY)
+                val hIdx = hw and 0x3FF; val hType = (hw shr 12) and 0xF
+                Text("#$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
+                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp,
+                modifier = Modifier.width(36.dp))
+            Slider(
+                value = zoomLevel,
+                onValueChange = { zoomLevel = it },
+                valueRange = 1f..8f,
+                steps = 13,
+                modifier = Modifier.width(80.dp)
+            )
         }
 
-        Spacer(Modifier.height(4.dp))
-
-        // Toolbar: Use, Flip
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = {
-                    val p = editorState.activePattern ?: return@Button
-                    editorState.brush = editorState.patternToBrush(p, patternHFlip, patternVFlip)
-                    editorState.activeTool = EditorTool.PAINT
-                },
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                modifier = Modifier.height(30.dp)
-            ) { Text("Use Pattern", fontSize = 11.sp) }
-
-            OutlinedButton(
-                onClick = { patternHFlip = !patternHFlip },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(30.dp),
-                colors = if (patternHFlip) ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                ) else ButtonDefaults.outlinedButtonColors()
-            ) { Text("H-Flip", fontSize = 11.sp) }
-
-            OutlinedButton(
-                onClick = { patternVFlip = !patternVFlip },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                modifier = Modifier.height(30.dp),
-                colors = if (patternVFlip) ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                ) else ButtonDefaults.outlinedButtonColors()
-            ) { Text("V-Flip", fontSize = 11.sp) }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Divider()
-        Spacer(Modifier.height(8.dp))
-
-        // Pattern grid + cell properties in a row
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Left: Pattern grid
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Pattern Grid", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-
-                val gridImg = remember(pattern, pv, tg) {
-                    renderPatternGrid(pattern, tg, cellPx)
-                }
-
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFF0C0C18))
-                        .border(1.dp, Color(0xFF444444))
-                ) {
-                    if (gridImg != null) {
-                        Image(
-                            bitmap = gridImg.toComposeImageBitmap(),
-                            contentDescription = "Pattern grid",
-                            contentScale = ContentScale.None,
-                            modifier = Modifier
-                                .size(
-                                    (pattern.cols * cellPx).dp,
-                                    (pattern.rows * cellPx).dp
-                                )
-                                .onPointerEvent(PointerEventType.Press) { event ->
-                                    val pos = event.changes.firstOrNull()?.position ?: return@onPointerEvent
-                                    val px = pos.x / density
-                                    val py = pos.y / density
-                                    val c = (px / cellPx).toInt().coerceIn(0, pattern.cols - 1)
-                                    val r = (py / cellPx).toInt().coerceIn(0, pattern.rows - 1)
-                                    selectedCellR = r
-                                    selectedCellC = c
-
-                                    val brush = editorState.brush
-                                    if (brush != null && brush.rows == 1 && brush.cols == 1) {
-                                        val mt = brush.tiles[0][0]
-                                        val bt = brush.blockTypeAt(0, 0)
-                                        val bts = brush.btsAt(0, 0)
-                                        val hf = brush.tileHFlip(0, 0)
-                                        val vf = brush.tileVFlip(0, 0)
-                                        editorState.updatePatternCell(
-                                            pattern.id, r, c,
-                                            PatternCell(mt, bt, bts, hf, vf)
-                                        )
-                                    }
-                                }
-                        )
-
-                        // Selection highlight
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    (selectedCellC * cellPx).dp,
-                                    (selectedCellR * cellPx).dp
-                                )
-                                .size(cellPx.dp)
-                                .border(2.dp, Color(0xFFFFD740))
-                        )
-                    } else {
-                        Box(
-                            Modifier.size(
-                                (pattern.cols * cellPx).dp,
-                                (pattern.rows * cellPx).dp
-                            ),
-                            Alignment.Center
-                        ) {
-                            Text("No tileset loaded", color = Color.White, fontSize = 11.sp)
-                        }
+        // ─── Canvas ──────────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0C0C18))
+                .focusRequester(focusReq)
+                .focusable()
+                .onKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    when (event.key) {
+                        Key.S -> { editorState.activeTool = EditorTool.SELECT; true }
+                        Key.P -> { editorState.activeTool = EditorTool.PAINT; true }
+                        Key.F -> { editorState.activeTool = EditorTool.FILL; true }
+                        Key.I -> { editorState.activeTool = EditorTool.SAMPLE; true }
+                        Key.Z -> if (event.isCtrlPressed || event.isMetaPressed) {
+                            if (event.isShiftPressed) editorState.patRedo() else editorState.patUndo(); true
+                        } else false
+                        Key.H -> { editorState.flipOrCaptureH(); true }
+                        Key.V -> if (!event.isCtrlPressed && !event.isMetaPressed) {
+                            editorState.flipOrCaptureV(); true
+                        } else false
+                        Key.Equals -> { zoomLevel = (zoomLevel * 1.25f).coerceIn(1f, 8f); true }
+                        Key.Minus -> { zoomLevel = (zoomLevel / 1.25f).coerceIn(1f, 8f); true }
+                        else -> false
                     }
                 }
-
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Select a tile from the tileset, then click a cell to place it.",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 14.sp
-                )
-
-                Spacer(Modifier.height(8.dp))
-                Divider()
-                Spacer(Modifier.height(4.dp))
-                Text("Tileset", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-
-                // Mini tileset picker
-                val gridData = tilesetGrid
-                if (gridData != null) {
-                    val tsZoom = 1.5f
-                    val gridBitmap = remember(gridData) {
-                        BufferedImage(gridData.width, gridData.height, BufferedImage.TYPE_INT_ARGB).also { img ->
-                            img.setRGB(0, 0, gridData.width, gridData.height, gridData.pixels, 0, gridData.width)
-                        }.toComposeImageBitmap()
+                .onPointerEvent(PointerEventType.Scroll) { event ->
+                    val ne = event.nativeEvent as? MouseEvent
+                    val isZoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
+                    val sd = event.changes.firstOrNull()?.scrollDelta ?: return@onPointerEvent
+                    if (isZoom) {
+                        zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(1f, 8f)
                     }
-                    val hScroll = rememberScrollState()
-                    val vScroll = rememberScrollState()
-                    Box(
+                }
+        ) {
+            val tilePx = 16f * zoomLevel
+            val canvasW = (pattern.cols * tilePx).toInt()
+            val canvasH = (pattern.rows * tilePx).toInt()
+            val hScroll = rememberScrollState()
+            val vScroll = rememberScrollState()
+
+            fun pointerToBlock(px: Float, py: Float): Pair<Int, Int> {
+                val rawPx = px / density
+                val rawPy = py / density
+                val bx = ((rawPx + hScroll.value / density) / (tilePx / density)).toInt()
+                val by = ((rawPy + vScroll.value / density) / (tilePx / density)).toInt()
+                return Pair(bx.coerceIn(0, pattern.cols - 1), by.coerceIn(0, pattern.rows - 1))
+            }
+
+            // Render pattern image
+            val patImg = remember(pattern, ev, tg, zoomLevel) {
+                renderPatternImage(pattern, tg, zoomLevel)?.toComposeImageBitmap()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(hScroll)
+                    .verticalScroll(vScroll)
+            ) {
+                if (patImg != null) {
+                    Image(
+                        bitmap = patImg,
+                        contentDescription = "Pattern",
+                        contentScale = ContentScale.None,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .background(Color(0xFF0C0C18))
-                            .border(1.dp, Color(0xFF444444))
-                    ) {
-                        Image(
-                            bitmap = gridBitmap,
-                            contentDescription = "Tileset picker",
-                            contentScale = ContentScale.None,
-                            modifier = Modifier
-                                .horizontalScroll(hScroll)
-                                .verticalScroll(vScroll)
-                                .requiredWidth((gridData.width * tsZoom).dp)
-                                .requiredHeight((gridData.height * tsZoom).dp)
-                                .onPointerEvent(PointerEventType.Press) { event ->
-                                    val pos = event.changes.firstOrNull()?.position ?: return@onPointerEvent
-                                    val tilePxSize = 16f * tsZoom * density
-                                    val col = ((pos.x + hScroll.value) / tilePxSize).toInt()
-                                        .coerceIn(0, gridData.gridCols - 1)
-                                    val row = ((pos.y + vScroll.value) / tilePxSize).toInt()
-                                        .coerceIn(0, gridData.gridRows - 1)
-                                    editorState.beginTilesetDrag(col, row)
-                                    editorState.endTilesetDrag(gridData.gridCols)
+                            .requiredWidth((canvasW / density).dp)
+                            .requiredHeight((canvasH / density).dp)
+                            .onPointerEvent(PointerEventType.Press) { event ->
+                                focusReq.requestFocus()
+                                val pos = event.changes.firstOrNull()?.position ?: return@onPointerEvent
+                                val (bx, by) = pointerToBlock(pos.x, pos.y)
+                                val button = (event.nativeEvent as? MouseEvent)?.button ?: MouseEvent.BUTTON1
+                                if (button == MouseEvent.BUTTON3 || (button == MouseEvent.BUTTON1 &&
+                                    ((event.nativeEvent as? MouseEvent)?.modifiersEx
+                                        ?: 0) and java.awt.event.InputEvent.CTRL_DOWN_MASK != 0)) {
+                                    val cell = editorState.patReadCell(bx, by)
+                                    propsBlockX = bx; propsBlockY = by
+                                    propsMetatile = cell.metatile
+                                    propsBlockType = cell.blockType
+                                    propsBts = cell.bts
+                                    propsExpanded = true
+                                    return@onPointerEvent
                                 }
+                                when (editorState.activeTool) {
+                                    EditorTool.PAINT -> {
+                                        isPainting = true
+                                        editorState.patBeginStroke()
+                                        editorState.patPaintAt(bx, by)
+                                    }
+                                    EditorTool.FILL -> {
+                                        editorState.patFloodFill(bx, by)
+                                    }
+                                    EditorTool.SAMPLE -> {
+                                        editorState.patSampleTile(bx, by)
+                                    }
+                                    EditorTool.SELECT -> {}
+                                }
+                            }
+                            .onPointerEvent(PointerEventType.Move) { event ->
+                                val pos = event.changes.firstOrNull()?.position ?: return@onPointerEvent
+                                val (bx, by) = pointerToBlock(pos.x, pos.y)
+                                editorState.patHoverX = bx; editorState.patHoverY = by
+                                val btns = (event.nativeEvent as? MouseEvent)?.modifiersEx ?: 0
+                                val lmb = (btns and java.awt.event.InputEvent.BUTTON1_DOWN_MASK) != 0
+                                if (isPainting && lmb && editorState.activeTool == EditorTool.PAINT) {
+                                    editorState.patPaintAt(bx, by)
+                                }
+                            }
+                            .onPointerEvent(PointerEventType.Release) {
+                                if (isPainting) {
+                                    editorState.patEndStroke()
+                                    isPainting = false
+                                }
+                            }
+                            .onPointerEvent(PointerEventType.Exit) {
+                                editorState.patHoverX = -1; editorState.patHoverY = -1
+                            }
+                    )
+
+                    // Brush preview ghost
+                    if (editorState.patHoverX >= 0 && editorState.brush != null &&
+                        editorState.activeTool == EditorTool.PAINT && tg != null) {
+                        val hx = editorState.patHoverX
+                        val hy = editorState.patHoverY
+                        val b = editorState.brush!!
+                        val preview = remember(b, hx, hy, tg) {
+                            val pw = b.cols * 16; val ph = b.rows * 16
+                            val img = BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB)
+                            for (r in 0 until b.rows) for (c in 0 until b.cols) {
+                                val idx = b.tiles.getOrNull(r)?.getOrNull(c) ?: continue
+                                val pixels = tg.renderMetatile(idx) ?: continue
+                                val dc = if (b.hFlip) (b.cols - 1 - c) else c
+                                val dr = if (b.vFlip) (b.rows - 1 - r) else r
+                                val effH = b.tileHFlip(r, c); val effV = b.tileVFlip(r, c)
+                                for (ty in 0 until 16) for (tx in 0 until 16) {
+                                    val sx = if (effH) 15 - tx else tx
+                                    val sy = if (effV) 15 - ty else ty
+                                    val argb = pixels[sy * 16 + sx]
+                                    if (argb != 0) img.setRGB(dc * 16 + tx, dr * 16 + ty, argb)
+                                }
+                            }
+                            for (y in 0 until ph) for (x in 0 until pw) {
+                                val p = img.getRGB(x, y)
+                                if (p != 0) img.setRGB(x, y, (p and 0x00FFFFFF) or 0x99000000.toInt())
+                            }
+                            img.toComposeImageBitmap()
+                        }
+                        val tileSize = tilePx / density
+                        Image(
+                            bitmap = preview,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .offset(x = (hx * tileSize).dp, y = (hy * tileSize).dp)
+                                .requiredWidth((b.cols * tileSize).dp)
+                                .requiredHeight((b.rows * tileSize).dp),
+                            contentScale = ContentScale.FillBounds
                         )
                     }
                 } else {
-                    Box(
-                        Modifier.fillMaxWidth().height(100.dp)
-                            .background(Color(0xFF0C0C18)),
-                        Alignment.Center
-                    ) {
-                        Text(
-                            "Load a room to see the tileset",
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 11.sp
-                        )
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        Text("Load a room first to get tileset graphics",
+                            color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
                     }
                 }
             }
 
-            // Right: Cell properties
-            Column(
-                modifier = Modifier.width(180.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("Cell (${selectedCellR}, ${selectedCellC})", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            // ─── Tile Properties Panel (floating, right side) ──────
+            if (propsExpanded) {
+                val editableBlockTypes = listOf(
+                    0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
+                    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
+                    0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
+                    0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
+                )
+                val propsTypeName = blockTypeName(propsBlockType)
+                val btsOpts = btsOptionsForBlockType(propsBlockType)
 
-                val cell = pattern.getCell(selectedCellR, selectedCellC) ?: PatternCell(0)
-
-                Text("Metatile: 0x${cell.metatile.toString(16).uppercase().padStart(3, '0')}",
-                    fontSize = 11.sp)
-                Text("Block Type: ${PATTERN_BLOCK_TYPES.find { it.first == cell.blockType }?.second ?: "0x${cell.blockType.toString(16)}"}",
-                    fontSize = 11.sp)
-                if (cell.bts != 0) {
-                    Text("BTS: 0x${cell.bts.toString(16).uppercase().padStart(2, '0')}",
-                        fontSize = 11.sp)
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = cell.hFlip,
-                        onCheckedChange = { h ->
-                            editorState.updatePatternCell(
-                                pattern.id, selectedCellR, selectedCellC,
-                                cell.copy(hFlip = h)
-                            )
-                        },
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("H-Flip", fontSize = 11.sp)
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = cell.vFlip,
-                        onCheckedChange = { v ->
-                            editorState.updatePatternCell(
-                                pattern.id, selectedCellR, selectedCellC,
-                                cell.copy(vFlip = v)
-                            )
-                        },
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("V-Flip", fontSize = 11.sp)
-                }
-
-                Divider()
-
-                // Block type selector
-                Text("Block Type:", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                Card(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).width(240.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    for ((bt, label) in PATTERN_BLOCK_TYPES) {
-                        val isSel = bt == cell.blockType
-                        Surface(
-                            modifier = Modifier.fillMaxWidth()
-                                .clickable {
-                                    editorState.updatePatternCell(
-                                        pattern.id, selectedCellR, selectedCellC,
-                                        cell.copy(blockType = bt)
-                                    )
-                                },
-                            color = if (isSel) MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent,
-                            shape = RoundedCornerShape(2.dp)
+                    Column(modifier = Modifier.padding(10.dp).verticalScroll(rememberScrollState())) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "0x${bt.toString(16).uppercase()} $label",
-                                fontSize = 10.sp,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                "($propsBlockX,$propsBlockY) #$propsMetatile ${blockTypeName(propsBlockType)}",
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold
                             )
+                            Text("✕", modifier = Modifier.clickable { propsExpanded = false }.padding(4.dp),
+                                fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        Text("Block Type", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(2.dp))
+                        var btExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(32.dp).clickable { btExpanded = true },
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("0x${propsBlockType.toString(16).uppercase()} $propsTypeName",
+                                        fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                    Text("▾", fontSize = 10.sp)
+                                }
+                            }
+                            DropdownMenu(expanded = btExpanded, onDismissRequest = { btExpanded = false }) {
+                                for ((tv, tn) in editableBlockTypes) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                RadioButton(selected = propsBlockType == tv, onClick = null,
+                                                    modifier = Modifier.size(16.dp))
+                                                Text("0x${tv.toString(16).uppercase()} $tn", fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            btExpanded = false
+                                            if (tv != propsBlockType) {
+                                                propsBlockType = tv
+                                                editorState.patSetCellProperties(propsBlockX, propsBlockY, tv, propsBts)
+                                            }
+                                        },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        val btsLabel = when (propsBlockType) {
+                            0x9 -> "Door Connection Index"
+                            0x1 -> "Slope Type"
+                            else -> "Sub Type (BTS)"
+                        }
+                        Text(btsLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(2.dp))
+
+                        if (btsOpts.isNotEmpty()) {
+                            var btsDropExpanded by remember { mutableStateOf(false) }
+                            val btsName = btsOpts.firstOrNull { it.first == propsBts }?.second
+                                ?: "Custom (0x${propsBts.toString(16).uppercase().padStart(2, '0')})"
+                            Box {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(32.dp)
+                                        .clickable { btsDropExpanded = true },
+                                    shape = MaterialTheme.shapes.small,
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(btsName, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                        Text("▾", fontSize = 10.sp)
+                                    }
+                                }
+                                DropdownMenu(expanded = btsDropExpanded,
+                                    onDismissRequest = { btsDropExpanded = false }) {
+                                    for ((bv, bn) in btsOpts) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    RadioButton(selected = propsBts == bv, onClick = null,
+                                                        modifier = Modifier.size(16.dp))
+                                                    Text("0x${bv.toString(16).uppercase().padStart(2, '0')} $bn",
+                                                        fontSize = 11.sp)
+                                                }
+                                            },
+                                            onClick = {
+                                                btsDropExpanded = false
+                                                if (bv != propsBts) {
+                                                    propsBts = bv
+                                                    editorState.patSetCellProperties(
+                                                        propsBlockX, propsBlockY, propsBlockType, bv)
+                                                }
+                                            },
+                                            modifier = Modifier.height(28.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (btsOpts.isNotEmpty()) "Raw:" else "BTS:", fontSize = 10.sp)
+                            var rawText by remember(propsBlockX, propsBlockY, propsBts) {
+                                mutableStateOf(propsBts.toString(16).uppercase().padStart(2, '0'))
+                            }
+                            OutlinedTextField(
+                                value = rawText,
+                                onValueChange = { s ->
+                                    rawText = s
+                                    val v = s.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
+                                    if (v != null && v in 0..255 && v != propsBts) {
+                                        propsBts = v
+                                        editorState.patSetCellProperties(
+                                            propsBlockX, propsBlockY, propsBlockType, v)
+                                    }
+                                },
+                                modifier = Modifier.width(80.dp).height(36.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+                                singleLine = true
+                            )
+                        }
+
+                        // ── Items / PLMs ──
+                        Spacer(Modifier.height(8.dp))
+                        Divider()
+                        Spacer(Modifier.height(4.dp))
+                        Text("Items / PLMs", fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                        val cell = editorState.patReadCell(propsBlockX, propsBlockY)
+                        if (cell.plmId != 0) {
+                            val plmName = when {
+                                RomParser.isItemPlm(cell.plmId) ->
+                                    RomParser.itemNameForPlm(cell.plmId) ?: "Item 0x${cell.plmId.toString(16)}"
+                                RomParser.isStationPlm(cell.plmId) ->
+                                    RomParser.stationNameForPlm(cell.plmId) ?: "Station"
+                                RomParser.isGatePlm(cell.plmId) ->
+                                    RomParser.gateNameForPlm(cell.plmId, cell.plmParam) ?: "Gate"
+                                else -> RomParser.plmDisplayName(cell.plmId, cell.plmParam)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(plmName, fontSize = 10.sp)
+                                Text("✕", modifier = Modifier
+                                    .clickable { editorState.patRemoveCellPlm(propsBlockX, propsBlockY) }
+                                    .padding(horizontal = 4.dp),
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                            }
+                        } else {
+                            Text("None", fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+
+                        // Add Item
+                        Spacer(Modifier.height(4.dp))
+                        var addItemExpanded by remember { mutableStateOf(false) }
+                        var addItemStyle by remember { mutableStateOf(0) }
+                        Box {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                    .clickable { addItemExpanded = true },
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("+ Add Item", fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                }
+                            }
+                            DropdownMenu(expanded = addItemExpanded,
+                                onDismissRequest = { addItemExpanded = false }) {
+                                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf("Visible" to 0, "Chozo" to 1, "Hidden" to 2).forEach { (label, idx) ->
+                                        FilterChip(
+                                            selected = addItemStyle == idx,
+                                            onClick = { addItemStyle = idx },
+                                            label = { Text(label, fontSize = 9.sp) },
+                                            modifier = Modifier.height(24.dp)
+                                        )
+                                    }
+                                }
+                                Divider()
+                                for (item in RomParser.ITEM_DEFS) {
+                                    val plmId = when (addItemStyle) {
+                                        1 -> item.chozoId; 2 -> item.hiddenId; else -> item.visibleId
+                                    }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically) {
+                                                Text(item.shortLabel, fontSize = 9.sp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold)
+                                                Text(item.name, fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            addItemExpanded = false
+                                            editorState.patSetCellPlm(propsBlockX, propsBlockY, plmId, 0)
+                                        },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Add Station / Gate
+                        Spacer(Modifier.height(4.dp))
+                        var addStationExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                    .clickable { addStationExpanded = true },
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.secondaryContainer
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("+ Add Station / Gate", fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                }
+                            }
+                            DropdownMenu(expanded = addStationExpanded,
+                                onDismissRequest = { addStationExpanded = false }) {
+                                Text("Stations", fontSize = 9.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                for (station in RomParser.STATION_PLMS) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically) {
+                                                Text(station.shortLabel, fontSize = 9.sp,
+                                                    color = MaterialTheme.colorScheme.secondary,
+                                                    fontWeight = FontWeight.Bold)
+                                                Text(station.name, fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            addStationExpanded = false
+                                            editorState.patSetCellPlm(
+                                                propsBlockX, propsBlockY, station.plmId, station.defaultParam)
+                                        },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                                Divider()
+                                Text("Gates", fontSize = 9.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                for (gate in RomParser.GATE_PLMS) {
+                                    DropdownMenuItem(
+                                        text = { Text(gate.name, fontSize = 11.sp) },
+                                        onClick = {
+                                            addStationExpanded = false
+                                            editorState.patSetCellPlm(
+                                                propsBlockX, propsBlockY, gate.plmId, gate.param)
+                                        },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    // Delete confirmation dialog
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Pattern?") },
+            text = { Text("Delete \"${pattern.name}\"? This cannot be undone.") },
+            confirmButton = {
+                Button(onClick = {
+                    editorState.removePattern(pattern.id)
+                    showDeleteConfirm = false
+                }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } }
+        )
+    }
+
+    // Resize dialog
+    if (showResizeDialog) {
+        var newW by remember { mutableStateOf(pattern.cols.toString()) }
+        var newH by remember { mutableStateOf(pattern.rows.toString()) }
+        AlertDialog(
+            onDismissRequest = { showResizeDialog = false },
+            title = { Text("Resize Pattern", fontSize = 14.sp) },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newW, onValueChange = { newW = it.filter { c -> c.isDigit() } },
+                        label = { Text("Width") }, modifier = Modifier.weight(1f), singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = newH, onValueChange = { newH = it.filter { c -> c.isDigit() } },
+                        label = { Text("Height") }, modifier = Modifier.weight(1f), singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val w = newW.toIntOrNull()?.coerceIn(1, 32) ?: pattern.cols
+                    val h = newH.toIntOrNull()?.coerceIn(1, 32) ?: pattern.rows
+                    editorState.resizePattern(pattern.id, w, h)
+                    showResizeDialog = false
+                }) { Text("Resize") }
+            },
+            dismissButton = { TextButton(onClick = { showResizeDialog = false }) { Text("Cancel") } }
+        )
+    }
 }
 
-/** Render the pattern grid as a BufferedImage for display. */
-private fun renderPatternGrid(
-    pattern: TilePattern,
-    tg: TileGraphics?,
-    cellDp: Int
-): BufferedImage? {
-    if (tg == null) return null
-    val w = pattern.cols * cellDp
-    val h = pattern.rows * cellDp
-    val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
-    val g = img.createGraphics()
-    val bg = java.awt.Color(0x0C, 0x0C, 0x18)
-    g.color = bg
-    g.fillRect(0, 0, w, h)
+// ─── Pattern thumbnail list (for Rooms bottom pane & Tilesets sub-tab) ───
 
-    for (r in 0 until pattern.rows) {
-        for (c in 0 until pattern.cols) {
-            val cell = pattern.getCell(r, c) ?: continue
-            val pixels = tg.renderMetatile(cell.metatile) ?: continue
+@Composable
+fun PatternThumbnailList(
+    editorState: EditorState,
+    modifier: Modifier = Modifier
+) {
+    @Suppress("UNUSED_VARIABLE") val pv = editorState.patternVersion
+    val patterns = editorState.project.patterns
+    val tg = editorState.tileGraphics
+    var showCreateDialog by remember { mutableStateOf(false) }
 
-            val dx = c * cellDp
-            val dy = r * cellDp
-            val scale = cellDp / 16
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Patterns", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Button(
+                onClick = { showCreateDialog = true },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(26.dp)
+            ) { Text("+ New", fontSize = 10.sp) }
+        }
 
-            for (py in 0 until 16) {
-                for (px in 0 until 16) {
-                    val srcX = if (cell.hFlip) 15 - px else px
-                    val srcY = if (cell.vFlip) 15 - py else py
-                    val argb = pixels[srcY * 16 + srcX]
-                    if (argb == 0) continue
-                    for (sy in 0 until scale) {
-                        for (sx in 0 until scale) {
-                            val ix = dx + px * scale + sx
-                            val iy = dy + py * scale + sy
-                            if (ix in 0 until w && iy in 0 until h)
-                                img.setRGB(ix, iy, argb)
+        if (patterns.isEmpty()) {
+            Text("No patterns yet", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            for (pat in patterns) {
+                val isSelected = pat.id == editorState.selectedPatternId
+                val thumb = remember(pat, pat.cells.hashCode(), tg) {
+                    renderPatternThumbnail(pat, tg)?.toComposeImageBitmap()
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable { editorState.selectAndApplyPattern(pat.id) }
+                        .padding(horizontal = 3.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp)
+                                .background(Color(0xFF0C0C18), RoundedCornerShape(3.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (thumb != null) {
+                                Image(
+                                    bitmap = thumb,
+                                    contentDescription = pat.name,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize().padding(2.dp)
+                                )
+                            } else {
+                                Text("?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.3f))
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(pat.name, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${pat.cols}×${pat.rows}" +
+                                (if (pat.tilesetId != null) " TS:${pat.tilesetId}" else " CRE"),
+                                fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (showCreateDialog) {
+        CreatePatternDialog(
+            currentTilesetId = editorState.currentTilesetId,
+            onDismiss = { showCreateDialog = false },
+            onCreate = { name, cols, rows, tilesetId ->
+                val pat = editorState.addPattern(name, cols, rows, tilesetId)
+                editorState.loadPatternForEdit(pat.id)
+                showCreateDialog = false
+            }
+        )
+    }
+}
+
+private fun renderPatternThumbnail(
+    pattern: TilePattern,
+    tg: TileGraphics?
+): BufferedImage? {
+    if (tg == null) return null
+    val tilePx = 16
+    val w = pattern.cols * tilePx
+    val h = pattern.rows * tilePx
+    if (w <= 0 || h <= 0) return null
+    val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+    val g = img.createGraphics()
+    g.color = java.awt.Color(0x0C, 0x0C, 0x18)
+    g.fillRect(0, 0, w, h)
+
+    for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
+        val cell = pattern.getCell(r, c) ?: continue
+        val pixels = tg.renderMetatile(cell.metatile) ?: continue
+        val dx = c * tilePx; val dy = r * tilePx
+        for (py in 0 until 16) for (px in 0 until 16) {
+            val srcX = if (cell.hFlip) 15 - px else px
+            val srcY = if (cell.vFlip) 15 - py else py
+            val argb = pixels[srcY * 16 + srcX]
+            if (argb != 0) img.setRGB(dx + px, dy + py, argb)
+        }
+    }
+    g.dispose()
+    return img
+}
+
+/** Render the entire pattern as a BufferedImage at the given zoom level. */
+internal fun renderPatternImage(
+    pattern: TilePattern,
+    tg: TileGraphics?,
+    zoom: Float
+): BufferedImage? {
+    if (tg == null) return null
+    val tilePx = (16 * zoom).toInt()
+    val w = pattern.cols * tilePx
+    val h = pattern.rows * tilePx
+    if (w <= 0 || h <= 0) return null
+    val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+    val g = img.createGraphics()
+    g.color = java.awt.Color(0x0C, 0x0C, 0x18)
+    g.fillRect(0, 0, w, h)
+    val scale = tilePx / 16
+
+    for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
+        val cell = pattern.getCell(r, c) ?: continue
+        val pixels = tg.renderMetatile(cell.metatile) ?: continue
+        val dx = c * tilePx; val dy = r * tilePx
+        for (py in 0 until 16) for (px in 0 until 16) {
+            val srcX = if (cell.hFlip) 15 - px else px
+            val srcY = if (cell.vFlip) 15 - py else py
+            val argb = pixels[srcY * 16 + srcX]
+            if (argb == 0) continue
+            for (sy in 0 until scale) for (sx in 0 until scale) {
+                val ix = dx + px * scale + sx; val iy = dy + py * scale + sy
+                if (ix in 0 until w && iy in 0 until h) img.setRGB(ix, iy, argb)
             }
         }
     }
 
     // Grid lines
-    g.color = java.awt.Color(0x44, 0x44, 0x44)
-    for (c in 0..pattern.cols) g.drawLine(c * cellDp, 0, c * cellDp, h)
-    for (r in 0..pattern.rows) g.drawLine(0, r * cellDp, w, r * cellDp)
+    g.color = java.awt.Color(0x33, 0x33, 0x44)
+    for (c in 0..pattern.cols) g.drawLine(c * tilePx, 0, c * tilePx, h)
+    for (r in 0..pattern.rows) g.drawLine(0, r * tilePx, w, r * tilePx)
     g.dispose()
     return img
 }

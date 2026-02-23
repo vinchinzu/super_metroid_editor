@@ -1,7 +1,6 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.data.DoorChange
@@ -161,7 +160,8 @@ data class TileBrush(
     val vFlip: Boolean = false,
     val blockTypeOverrides: Map<Long, Int> = emptyMap(),
     val btsOverrides: Map<Long, Int> = emptyMap(),
-    val flipOverrides: Map<Long, Int> = emptyMap()  // per-tile: bit0=hflip, bit1=vflip
+    val flipOverrides: Map<Long, Int> = emptyMap(),  // per-tile: bit0=hflip, bit1=vflip
+    val plmOverrides: Map<Long, Pair<Int, Int>> = emptyMap()  // per-tile: (plmId, plmParam)
 ) {
     val cols get() = tiles.firstOrNull()?.size ?: 0
     val rows get() = tiles.size
@@ -170,6 +170,7 @@ data class TileBrush(
 
     fun blockTypeAt(r: Int, c: Int): Int = blockTypeOverrides[key(r, c)] ?: blockType
     fun btsAt(r: Int, c: Int): Int = btsOverrides[key(r, c)] ?: 0
+    fun plmAt(r: Int, c: Int): Pair<Int, Int>? = plmOverrides[key(r, c)]
 
     /** Per-tile flip state: original flips XOR'd with brush-level flips. */
     fun tileHFlip(r: Int, c: Int): Boolean {
@@ -226,8 +227,10 @@ class EditorState {
     var tilesetSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
         private set
 
-    val undoStack = mutableStateListOf<EditOperation>()
-    val redoStack = mutableStateListOf<EditOperation>()
+    val undoStack = mutableListOf<EditOperation>()
+    val redoStack = mutableListOf<EditOperation>()
+    var undoVersion by mutableStateOf(0)
+        private set
 
     private val pendingEdits = mutableListOf<TileEdit>()
     private val pendingPositions = mutableSetOf<Long>()
@@ -520,6 +523,7 @@ class EditorState {
         val btOverrides = mutableMapOf<Long, Int>()
         val btsOverrides = mutableMapOf<Long, Int>()
         val flipOverrides = mutableMapOf<Long, Int>()
+        val plmOverrides = mutableMapOf<Long, Pair<Int, Int>>()
         for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
             val key = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
             val cell = pattern.getCell(r, c) ?: continue
@@ -527,9 +531,11 @@ class EditorState {
             if (cell.bts != 0) btsOverrides[key] = cell.bts
             val flipBits = (if (cell.hFlip) 1 else 0) or (if (cell.vFlip) 2 else 0)
             if (flipBits != 0) flipOverrides[key] = flipBits
+            if (cell.plmId != 0) plmOverrides[key] = Pair(cell.plmId, cell.plmParam)
         }
         return TileBrush(tiles, blockType = 0x8, hFlip = hFlip, vFlip = vFlip,
-            blockTypeOverrides = btOverrides, btsOverrides = btsOverrides, flipOverrides = flipOverrides)
+            blockTypeOverrides = btOverrides, btsOverrides = btsOverrides,
+            flipOverrides = flipOverrides, plmOverrides = plmOverrides)
     }
 
     fun selectAndApplyPattern(id: String) {
@@ -543,6 +549,217 @@ class EditorState {
     /** Patterns visible for the current tileset: CRE patterns + current tileset patterns. */
     fun patternsForTileset(tilesetId: Int): List<TilePattern> {
         return project.patterns.filter { it.tilesetId == null || it.tilesetId == tilesetId }
+    }
+
+    // ─── Pattern editing (mini room editor for patterns) ────────────
+
+    data class PatternEdit(val r: Int, val c: Int, val old: PatternCell, val new: PatternCell)
+    data class PatternOperation(val edits: List<PatternEdit>)
+
+    val patternUndoStack = mutableListOf<PatternOperation>()
+    val patternRedoStack = mutableListOf<PatternOperation>()
+    private val pendingPatEdits = mutableListOf<PatternEdit>()
+    private val pendingPatPositions = mutableSetOf<Long>()
+
+    var patternEditVersion by mutableStateOf(0)
+        private set
+    var patUndoVersion by mutableStateOf(0)
+        private set
+    var patHoverX by mutableStateOf(-1)
+    var patHoverY by mutableStateOf(-1)
+
+    fun loadPatternForEdit(patternId: String) {
+        val pat = project.patterns.find { it.id == patternId } ?: return
+        selectedPatternId = patternId
+        activePattern = pat
+        patternUndoStack.clear()
+        patternRedoStack.clear()
+        patternEditVersion++; patUndoVersion++
+    }
+
+    fun resizePattern(patternId: String, newCols: Int, newRows: Int) {
+        val pat = project.patterns.find { it.id == patternId } ?: return
+        if (newCols == pat.cols && newRows == pat.rows) return
+        val newCells = MutableList(newRows * newCols) { idx ->
+            val r = idx / newCols; val c = idx % newCols
+            if (r < pat.rows && c < pat.cols) pat.getCell(r, c) ?: PatternCell(0)
+            else PatternCell(0)
+        }
+        val idx = project.patterns.indexOfFirst { it.id == patternId }
+        if (idx >= 0) {
+            project.patterns[idx] = pat.copy(cols = newCols, rows = newRows, cells = newCells)
+            activePattern = project.patterns[idx]
+        }
+        patternUndoStack.clear(); patternRedoStack.clear()
+        dirty = true; patternVersion++; patternEditVersion++; patUndoVersion++
+    }
+
+    fun patBeginStroke() {
+        pendingPatEdits.clear(); pendingPatPositions.clear()
+    }
+
+    fun patPaintAt(bx: Int, by: Int): Boolean {
+        val pat = activePattern ?: return false
+        val b = brush ?: return false
+        var changed = false
+        for (r in 0 until b.rows) {
+            for (c in 0 until b.cols) {
+                val tx = bx + if (b.hFlip) (b.cols - 1 - c) else c
+                val ty = by + if (b.vFlip) (b.rows - 1 - r) else r
+                if (tx < 0 || ty < 0 || tx >= pat.cols || ty >= pat.rows) continue
+                val key = (tx.toLong() shl 32) or (ty.toLong() and 0xFFFFFFFFL)
+                if (pendingPatPositions.contains(key)) continue
+                val oldCell = pat.getCell(ty, tx) ?: PatternCell(0)
+                val word = b.blockWordAt(r, c)
+                val mt = word and 0x3FF
+                val hf = (word shr 10) and 1 != 0
+                val vf = (word shr 11) and 1 != 0
+                val bt = (word shr 12) and 0xF
+                val bts = b.btsAt(r, c)
+                val newCell = PatternCell(mt, bt, bts, hf, vf)
+                if (oldCell == newCell) continue
+                pat.setCell(ty, tx, newCell)
+                pendingPatEdits.add(PatternEdit(ty, tx, oldCell, newCell))
+                pendingPatPositions.add(key)
+                changed = true
+            }
+        }
+        if (changed) patternEditVersion++
+        return changed
+    }
+
+    fun patEndStroke() {
+        if (pendingPatEdits.isEmpty()) return
+        val op = PatternOperation(pendingPatEdits.toList())
+        patternUndoStack.add(op)
+        patternRedoStack.clear()
+        dirty = true; patternVersion++; patUndoVersion++
+        pendingPatEdits.clear(); pendingPatPositions.clear()
+    }
+
+    fun patFloodFill(bx: Int, by: Int) {
+        val pat = activePattern ?: return
+        val b = brush ?: return
+        if (b.rows != 1 || b.cols != 1) return
+        if (bx < 0 || by < 0 || bx >= pat.cols || by >= pat.rows) return
+        val targetCell = pat.getCell(by, bx) ?: PatternCell(0)
+        val word = b.blockWordAt(0, 0)
+        val mt = word and 0x3FF; val hf = (word shr 10) and 1 != 0
+        val vf = (word shr 11) and 1 != 0; val bt = (word shr 12) and 0xF
+        val bts = b.btsAt(0, 0)
+        val fillCell = PatternCell(mt, bt, bts, hf, vf)
+        if (targetCell == fillCell) return
+        val edits = mutableListOf<PatternEdit>()
+        val visited = mutableSetOf<Long>()
+        val queue = ArrayDeque<Pair<Int, Int>>()
+        queue.add(Pair(bx, by))
+        while (queue.isNotEmpty()) {
+            val (cx, cy) = queue.removeFirst()
+            val k = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
+            if (k in visited) continue
+            if (cx < 0 || cy < 0 || cx >= pat.cols || cy >= pat.rows) continue
+            val cell = pat.getCell(cy, cx) ?: PatternCell(0)
+            if (cell != targetCell) continue
+            visited.add(k)
+            edits.add(PatternEdit(cy, cx, cell, fillCell))
+            pat.setCell(cy, cx, fillCell)
+            queue.add(Pair(cx - 1, cy)); queue.add(Pair(cx + 1, cy))
+            queue.add(Pair(cx, cy - 1)); queue.add(Pair(cx, cy + 1))
+        }
+        if (edits.isNotEmpty()) {
+            patternUndoStack.add(PatternOperation(edits))
+            patternRedoStack.clear()
+            dirty = true; patternVersion++; patternEditVersion++; patUndoVersion++
+        }
+    }
+
+    fun patSampleTile(bx: Int, by: Int) {
+        val pat = activePattern ?: return
+        if (bx < 0 || by < 0 || bx >= pat.cols || by >= pat.rows) return
+        val cell = pat.getCell(by, bx) ?: return
+        val btsMap = if (cell.bts != 0) mapOf(0L to cell.bts) else emptyMap()
+        val flipBits = (if (cell.hFlip) 1 else 0) or (if (cell.vFlip) 2 else 0)
+        val flipMap = if (flipBits != 0) mapOf(0L to flipBits) else emptyMap()
+        brush = TileBrush(
+            tiles = listOf(listOf(cell.metatile)),
+            blockType = cell.blockType,
+            btsOverrides = btsMap,
+            flipOverrides = flipMap
+        )
+        tilesetSelStart = Pair(cell.metatile % 32, cell.metatile / 32)
+        tilesetSelEnd = tilesetSelStart
+        activeTool = EditorTool.PAINT
+    }
+
+    fun patUndo() {
+        if (patternUndoStack.isEmpty()) return
+        val pat = activePattern ?: return
+        val op = patternUndoStack.removeAt(patternUndoStack.lastIndex)
+        for (edit in op.edits.reversed()) {
+            pat.setCell(edit.r, edit.c, edit.old)
+        }
+        patternRedoStack.add(op)
+        dirty = true; patternVersion++; patternEditVersion++; patUndoVersion++
+    }
+
+    fun patRedo(): Boolean {
+        if (patternRedoStack.isEmpty()) return false
+        val pat = activePattern ?: return false
+        val op = patternRedoStack.removeAt(patternRedoStack.lastIndex)
+        for (edit in op.edits) {
+            pat.setCell(edit.r, edit.c, edit.new)
+        }
+        patternUndoStack.add(op)
+        dirty = true; patternVersion++; patternEditVersion++; patUndoVersion++
+        return true
+    }
+
+    fun patReadCell(bx: Int, by: Int): PatternCell {
+        val pat = activePattern ?: return PatternCell(0)
+        return pat.getCell(by, bx) ?: PatternCell(0)
+    }
+
+    fun patCellWord(bx: Int, by: Int): Int {
+        val cell = patReadCell(bx, by)
+        var w = cell.metatile and 0x3FF
+        if (cell.hFlip) w = w or (1 shl 10)
+        if (cell.vFlip) w = w or (1 shl 11)
+        w = w or ((cell.blockType and 0xF) shl 12)
+        return w
+    }
+
+    fun patSetCellProperties(bx: Int, by: Int, blockType: Int, bts: Int) {
+        val pat = activePattern ?: return
+        val old = pat.getCell(by, bx) ?: PatternCell(0)
+        val newCell = old.copy(blockType = blockType, bts = bts)
+        if (old == newCell) return
+        pat.setCell(by, bx, newCell)
+        val edit = PatternEdit(bx, by, old, newCell)
+        val op = PatternOperation(listOf(edit))
+        patternUndoStack.add(op)
+        patternRedoStack.clear()
+        patUndoVersion++
+        dirty = true
+        patternEditVersion++
+    }
+
+    fun patSetCellPlm(bx: Int, by: Int, plmId: Int, plmParam: Int) {
+        val pat = activePattern ?: return
+        val old = pat.getCell(by, bx) ?: PatternCell(0)
+        val newCell = old.copy(plmId = plmId, plmParam = plmParam)
+        if (old == newCell) return
+        pat.setCell(by, bx, newCell)
+        val edit = PatternEdit(bx, by, old, newCell)
+        val op = PatternOperation(listOf(edit))
+        patternUndoStack.add(op)
+        patternRedoStack.clear()
+        patUndoVersion++
+        dirty = true
+        patternEditVersion++
+    }
+
+    fun patRemoveCellPlm(bx: Int, by: Int) {
+        patSetCellPlm(bx, by, 0, 0)
     }
 
     /** Save the current map selection rectangle as a new pattern. */
@@ -564,7 +781,10 @@ class EditorState {
                 val vFlip = (word shr 11) and 1 != 0
                 val blockType = (word shr 12) and 0xF
                 val bts = readBts(bx, by)
-                cells.add(PatternCell(metatile, blockType, bts, hFlip, vFlip))
+                val plmsAtTile = getPlmsAt(bx, by)
+                val plm = plmsAtTile.firstOrNull()
+                cells.add(PatternCell(metatile, blockType, bts, hFlip, vFlip,
+                    plm?.id ?: 0, plm?.param ?: 0))
             }
         }
         val id = "pattern_${System.currentTimeMillis()}"
@@ -949,6 +1169,7 @@ class EditorState {
         workingBlocksTall = blocksTall
         undoStack.clear()
         redoStack.clear()
+        undoVersion++
     }
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
@@ -995,6 +1216,7 @@ class EditorState {
 
         undoStack.clear()
         redoStack.clear()
+        undoVersion++
         pendingEdits.clear()
         pendingPositions.clear()
 
@@ -1025,6 +1247,7 @@ class EditorState {
                     }
                     undoStack.add(op)
                 }
+                undoVersion++
                 println("Replayed $count saved edits for room 0x$roomKey")
             }
             // Replay saved PLM changes
@@ -1138,6 +1361,11 @@ class EditorState {
                 pendingEdits.add(TileEdit(tx, ty, oldWord, newWord, oldBts, newBts))
                 pendingPositions.add(key)
                 changed = true
+                // Apply pattern PLMs if present
+                val plm = b.plmAt(r, c)
+                if (plm != null && plm.first != 0) {
+                    addPlm(plm.first, tx, ty, plm.second)
+                }
             }
         }
         if (changed) editVersion++
@@ -1177,6 +1405,7 @@ class EditorState {
             roomOps.add(op)
         }
         redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
         // Learn this metatile → block type mapping for future brush presets
@@ -1348,6 +1577,7 @@ class EditorState {
         val op = EditOperation(desc, pendingEdits.toList())
         undoStack.add(op)
         redoStack.clear()
+        undoVersion++
         project.getOrCreateRoom(currentRoomId).operations.add(op)
         dirty = true
         editVersion++
@@ -1365,6 +1595,7 @@ class EditorState {
             writeBts(edit.blockX, edit.blockY, edit.oldBts)
         }
         redoStack.add(op)
+        undoVersion++
         val roomEdits = project.rooms[project.roomKey(currentRoomId)]
         if (roomEdits != null && roomEdits.operations.isNotEmpty())
             roomEdits.operations.removeAt(roomEdits.operations.lastIndex)
@@ -1381,6 +1612,7 @@ class EditorState {
             writeBts(edit.blockX, edit.blockY, edit.newBts)
         }
         undoStack.add(op)
+        undoVersion++
         project.getOrCreateRoom(currentRoomId).operations.add(op)
         dirty = true
         editVersion++

@@ -11,9 +11,13 @@ import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.ui.DraggableDividerHorizontal
 import com.supermetroid.editor.ui.DraggableDividerVertical
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 import java.awt.FileDialog
 import java.awt.Frame
+import com.supermetroid.editor.data.AppConfig
+import com.supermetroid.editor.data.WindowConfig
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.data.RoomRepository
 import com.supermetroid.editor.rom.RomParser
@@ -27,6 +31,10 @@ import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatchEditorCanvas
 import com.supermetroid.editor.ui.PatternListPanel
 import com.supermetroid.editor.ui.PatternEditorCanvas
+import com.supermetroid.editor.ui.PatternThumbnailList
+import com.supermetroid.editor.ui.SoundListPanel
+import com.supermetroid.editor.ui.SoundEditorCanvas
+import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -39,7 +47,26 @@ fun main() = application {
     var selectedRoom by remember { mutableStateOf<RoomInfo?>(null) }
     var rooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
     val editorState = remember { EditorState() }
-    
+
+    fun pickDefaultRoom(allRooms: List<RoomInfo>, romPath: String): RoomInfo? {
+        val romKey = File(romPath).name
+        val lastRoomId = AppConfig.load().lastRoomPerRom[romKey]
+        if (lastRoomId != null) {
+            val found = allRooms.firstOrNull { it.id == lastRoomId }
+            if (found != null) return found
+        }
+        return allRooms
+            .filter { it.handle != "debugRoom" }
+            .minByOrNull { it.getRoomIdAsInt() }
+    }
+
+    fun saveLastRoom(romPath: String, room: RoomInfo) {
+        val romKey = File(romPath).name
+        AppConfig.update {
+            copy(lastRoomPerRom = lastRoomPerRom + (romKey to room.id))
+        }
+    }
+
     // Load rooms on startup
     LaunchedEffect(Unit) {
         rooms = roomRepository.getAllRooms()
@@ -51,14 +78,37 @@ fun main() = application {
                 romParser = RomParser.loadRom(lastRomPath)
                 romFileName = File(lastRomPath).nameWithoutExtension
                 editorState.initForRom(lastRomPath)
+                if (selectedRoom == null) {
+                    selectedRoom = pickDefaultRoom(rooms, lastRomPath)
+                }
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
             }
         }
     }
     
+    val appSettings = remember { AppConfig.load() }
+    val windowState = rememberWindowState(
+        width = appSettings.window.width.dp,
+        height = appSettings.window.height.dp,
+        position = if (appSettings.window.x >= 0 && appSettings.window.y >= 0)
+            WindowPosition(appSettings.window.x.dp, appSettings.window.y.dp)
+        else WindowPosition.PlatformDefault
+    )
+
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = {
+            AppConfig.update {
+                copy(window = WindowConfig(
+                    x = windowState.position.x.value.toInt(),
+                    y = windowState.position.y.value.toInt(),
+                    width = windowState.size.width.value.toInt(),
+                    height = windowState.size.height.value.toInt()
+                ))
+            }
+            exitApplication()
+        },
+        state = windowState,
         title = "Super Metroid Editor"
     ) {
         androidx.compose.runtime.CompositionLocalProvider(LocalSwingWindow provides window) {
@@ -92,6 +142,7 @@ fun main() = application {
                                         romFileName = file.nameWithoutExtension
                                         RomPreferences.setLastRomPath(file.absolutePath)
                                         editorState.initForRom(file.absolutePath)
+                                        selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
                                     } catch (e: Exception) { e.printStackTrace() }
                                 }
                             }
@@ -122,8 +173,11 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Patterns
+                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound
                 val tilesetEditorState = remember { TilesetEditorState() }
+                val soundEditorState = remember { SoundEditorState() }
+                var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
+                var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
                     Row(
@@ -147,7 +201,7 @@ fun main() = application {
                                 }
                                 Tab(selected = leftTab == 1, onClick = { leftTab = 1 },
                                     modifier = Modifier.height(32.dp)) {
-                                    Text("Tilesets", fontSize = 11.sp)
+                                    Text("Tiles", fontSize = 11.sp)
                                 }
                                 Tab(selected = leftTab == 2, onClick = {
                                     leftTab = 2
@@ -155,21 +209,24 @@ fun main() = application {
                                 }, modifier = Modifier.height(32.dp)) {
                                     Text("Patches", fontSize = 11.sp)
                                 }
-                                Tab(selected = leftTab == 3, onClick = {
-                                    leftTab = 3
-                                    editorState.seedBuiltInPatterns(romParser)
-                                }, modifier = Modifier.height(32.dp)) {
-                                    Text("Patterns", fontSize = 11.sp)
+                                Tab(selected = leftTab == 3, onClick = { leftTab = 3 },
+                                    modifier = Modifier.height(32.dp)) {
+                                    Text("Sound", fontSize = 11.sp)
                                 }
                             }
 
                             when (leftTab) {
                                 0 -> {
+                                    // Top: room list
                                     RoomListView(
                                         rooms = rooms,
                                         selectedRoom = selectedRoom,
                                         romParser = romParser,
-                                        onRoomSelected = { room -> selectedRoom = room },
+                                        onRoomSelected = { room ->
+                                            selectedRoom = room
+                                            val romPath = RomPreferences.getLastRomPath()
+                                            if (romPath != null) saveLastRoom(romPath, room)
+                                        },
                                         modifier = Modifier.weight(1f)
                                     )
                                     DraggableDividerHorizontal(
@@ -177,22 +234,83 @@ fun main() = application {
                                             tilesetHeightDp = (tilesetHeightDp - dy).coerceIn(120f, 700f)
                                         }
                                     )
-                                    TilesetPreview(
-                                        room = selectedRoom,
-                                        romParser = romParser,
-                                        editorState = editorState,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(tilesetHeightDp.dp)
-                                    )
+                                    // Bottom: sub-tabs [Tileset | Patterns]
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().height(tilesetHeightDp.dp)
+                                    ) {
+                                        TabRow(
+                                            selectedTabIndex = bottomPaneTab,
+                                            modifier = Modifier.fillMaxWidth().height(26.dp)
+                                        ) {
+                                            Tab(selected = bottomPaneTab == 0, onClick = { bottomPaneTab = 0 },
+                                                modifier = Modifier.height(26.dp)) {
+                                                Text("Tileset", fontSize = 10.sp)
+                                            }
+                                            Tab(selected = bottomPaneTab == 1, onClick = {
+                                                bottomPaneTab = 1
+                                                editorState.seedBuiltInPatterns(romParser)
+                                            }, modifier = Modifier.height(26.dp)) {
+                                                Text("Patterns", fontSize = 10.sp)
+                                            }
+                                        }
+                                        when (bottomPaneTab) {
+                                            0 -> TilesetPreview(
+                                                room = selectedRoom,
+                                                romParser = romParser,
+                                                editorState = editorState,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                            1 -> PatternThumbnailList(
+                                                editorState = editorState,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
                                 }
                                 1 -> {
-                                    TilesetListPanel(
-                                        romParser = romParser,
-                                        editorState = editorState,
-                                        tilesetEditorState = tilesetEditorState,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    // Tilesets tab: sub-tabs [Tilesets | Patterns]
+                                    TabRow(
+                                        selectedTabIndex = tilesetSubTab,
+                                        modifier = Modifier.fillMaxWidth().height(26.dp)
+                                    ) {
+                                        Tab(selected = tilesetSubTab == 0, onClick = { tilesetSubTab = 0 },
+                                            modifier = Modifier.height(26.dp)) {
+                                            Text("Tilesets", fontSize = 10.sp)
+                                        }
+                                        Tab(selected = tilesetSubTab == 1, onClick = {
+                                            tilesetSubTab = 1
+                                            editorState.seedBuiltInPatterns(romParser)
+                                        }, modifier = Modifier.height(26.dp)) {
+                                            Text("Patterns", fontSize = 10.sp)
+                                        }
+                                    }
+                                    when (tilesetSubTab) {
+                                        0 -> TilesetListPanel(
+                                            romParser = romParser,
+                                            editorState = editorState,
+                                            tilesetEditorState = tilesetEditorState,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        1 -> {
+                                            PatternListPanel(
+                                                editorState = editorState,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            DraggableDividerHorizontal(
+                                                onDelta = { dy ->
+                                                    tilesetHeightDp = (tilesetHeightDp - dy).coerceIn(120f, 700f)
+                                                }
+                                            )
+                                            TilesetPreview(
+                                                room = selectedRoom,
+                                                romParser = romParser,
+                                                editorState = editorState,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(tilesetHeightDp.dp)
+                                            )
+                                        }
+                                    }
                                 }
                                 2 -> {
                                     PatchListPanel(
@@ -201,8 +319,10 @@ fun main() = application {
                                     )
                                 }
                                 3 -> {
-                                    PatternListPanel(
+                                    SoundListPanel(
+                                        romParser = romParser,
                                         editorState = editorState,
+                                        soundEditorState = soundEditorState,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
@@ -215,7 +335,7 @@ fun main() = application {
                             }
                         )
 
-                        // ── Right canvas: swaps between map editor and tileset viewer ──
+                        // ── Right canvas ──
                         when (leftTab) {
                             0 -> MapCanvas(
                                 room = selectedRoom,
@@ -224,20 +344,31 @@ fun main() = application {
                                 rooms = rooms,
                                 modifier = Modifier.fillMaxSize()
                             )
-                            1 -> TilesetCanvas(
-                                romParser = romParser,
-                                editorState = editorState,
-                                tilesetEditorState = tilesetEditorState,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            1 -> {
+                                if (tilesetSubTab == 1) {
+                                    PatternEditorCanvas(
+                                        editorState = editorState,
+                                        romParser = romParser,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    TilesetCanvas(
+                                        romParser = romParser,
+                                        editorState = editorState,
+                                        tilesetEditorState = tilesetEditorState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
                             2 -> PatchEditorCanvas(
                                 editorState = editorState,
                                 romParser = romParser,
                                 modifier = Modifier.fillMaxSize()
                             )
-                            3 -> PatternEditorCanvas(
-                                editorState = editorState,
+                            3 -> SoundEditorCanvas(
                                 romParser = romParser,
+                                editorState = editorState,
+                                soundEditorState = soundEditorState,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

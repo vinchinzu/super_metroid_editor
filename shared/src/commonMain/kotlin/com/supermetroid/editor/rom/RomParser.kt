@@ -13,7 +13,7 @@ import com.supermetroid.editor.data.Room
  * Room IDs (e.g., 0x91F8 for Landing Site) are 16-bit pointers within
  * SNES bank $8F. Each room header lives at SNES address $8F:<roomId>.
  */
-class RomParser(private val romData: ByteArray) {
+class RomParser(internal val romData: ByteArray) {
     private val hasHeader: Boolean
         get() = romData.size == 0x300200
     
