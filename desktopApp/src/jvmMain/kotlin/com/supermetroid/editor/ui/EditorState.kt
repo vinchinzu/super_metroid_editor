@@ -118,6 +118,24 @@ val HARDCODED_PATCHES: List<SmPatch> = listOf(
     ),
 )
 
+/**
+ * Ceres escape timer LDA operand at $80:9E0D: `LDA #$0100 ; JSL $80:9E8C`
+ * The 2-byte immediate operand at $80:9E0E stores seconds (BCD) in the low
+ * byte and minutes (BCD) in the high byte. Vanilla = $0100 → 1 min 0 sec = 60s.
+ */
+const val CERES_TIMER_OPERAND_SNES = 0x809E0E
+
+/** Config patch: Ceres escape time in seconds. */
+val CERES_ESCAPE_PATCH = SmPatch(
+    id = "config_ceres_escape_time",
+    name = "Ceres Escape Time",
+    description = "Sets the Ceres station escape timer in seconds (vanilla: 60). Override when enabled.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "ceres_escape_seconds",
+    configValue = 60
+)
+
 /** Legacy/superseded patch IDs — removed on seed to avoid duplicates from old configs. */
 private val LEGACY_PATCH_IDS = setOf(
     "respin", "fast_doors", "no_fanfare", "blue_speed_air", "no_walljump_kick", "instant_stop",
@@ -446,6 +464,11 @@ class EditorState {
         dirty = true; patchVersion++
     }
 
+    fun setPatchConfigValue(id: String, value: Int) {
+        project.patches.find { it.id == id }?.let { it.configValue = value }
+        dirty = true; patchVersion++
+    }
+
     fun getSelectedPatch(): SmPatch? = project.patches.find { it.id == selectedPatchId }
 
     /** Ensure all default patches exist; loads bundled IPS + hardcoded hex demos. */
@@ -479,6 +502,20 @@ class EditorState {
                 project.patches.add(def.copy(writes = def.writes.toMutableList()))
                 added++
             }
+        }
+
+        // Add GUI config patches
+        if (CERES_ESCAPE_PATCH.id !in existingIds) {
+            project.patches.add(SmPatch(
+                id = CERES_ESCAPE_PATCH.id,
+                name = CERES_ESCAPE_PATCH.name,
+                description = CERES_ESCAPE_PATCH.description,
+                enabled = CERES_ESCAPE_PATCH.enabled,
+                writes = mutableListOf(),
+                configType = CERES_ESCAPE_PATCH.configType,
+                configValue = CERES_ESCAPE_PATCH.configValue
+            ))
+            added++
         }
 
         if (added > 0) { dirty = true; patchVersion++ }
@@ -1143,14 +1180,57 @@ class EditorState {
 
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
-    fun saveProject(): Boolean {
+    /**
+     * Save project to .smedit file. When romParser is provided, also export
+     * custom tileset graphics as PNGs to a project-specific folder
+     * ({romBase}_smedit/) so different ROMs don't overwrite each other.
+     */
+    fun saveProject(romParser: RomParser? = null): Boolean {
         if (projectFilePath.isEmpty()) return false
         return try {
             File(projectFilePath).writeText(json.encodeToString(SmEditProject.serializer(), project))
             dirty = false
             println("Project saved: $projectFilePath")
+            romParser?.let { exportCustomGfxPngs(it) }
             true
         } catch (e: Exception) { println("Save failed: ${e.message}"); false }
+    }
+
+    /** Export custom tileset graphics as PNGs to project folder. Folder is per-ROM so projects don't overwrite each other. */
+    private fun exportCustomGfxPngs(romParser: RomParser) {
+        val gfx = project.customGfx
+        val hasVar = gfx.varGfx.isNotEmpty()
+        val hasCre = gfx.creGfx != null
+        if (!hasVar && !hasCre) return
+        val projectFile = File(projectFilePath)
+        val folder = File(projectFile.parentFile, "${projectFile.nameWithoutExtension}_smedit")
+        folder.mkdirs()
+        val tg = TileGraphics(romParser)
+        for ((tilesetId, b64) in gfx.varGfx) {
+            if (!tg.loadTileset(tilesetId.toIntOrNull() ?: continue)) continue
+            try {
+                tg.applyCustomVarGfx(java.util.Base64.getDecoder().decode(b64))
+                val result = tg.renderTileSheet(0, tg.getVarTileCount())
+                if (result != null) {
+                    val (pixels, w, h) = result
+                    val out = File(folder, "ure_$tilesetId.png")
+                    if (writePng(out.absolutePath, pixels, w, h)) println("Exported $out")
+                }
+            } catch (_: Exception) {}
+        }
+        if (hasCre && gfx.creGfx != null) {
+            if (tg.loadTileset(0)) {
+                try {
+                    tg.applyCustomCreGfx(java.util.Base64.getDecoder().decode(gfx.creGfx))
+                    val result = tg.renderTileSheet(tg.getCreOffset(), tg.getCreTileCount())
+                    if (result != null) {
+                        val (pixels, w, h) = result
+                        val out = File(folder, "cre.png")
+                        if (writePng(out.absolutePath, pixels, w, h)) println("Exported $out")
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     // ─── Export: patch ROM ──────────────────────────────────────
@@ -1183,6 +1263,22 @@ class EditorState {
         }
         enemyFreePtr++
 
+        // Free space tracker for level data banks ($C0-$CE).
+        // Each bank is scanned from the end to find trailing 0xFF padding.
+        val levelBankFree = mutableMapOf<Int, Int>()  // bank -> next free PC offset
+        fun getLevelBankFreePtr(bank: Int): Int {
+            return levelBankFree.getOrPut(bank) {
+                val bankEnd = romParser.snesToPc((bank shl 16) or 0xFFFF) + 1
+                val bankStart = romParser.snesToPc((bank shl 16) or 0x8000)
+                var ptr = bankEnd
+                while (ptr > bankStart) {
+                    if ((romData[ptr - 1].toInt() and 0xFF) != 0xFF) break
+                    ptr--
+                }
+                ptr + 1
+            }
+        }
+
         for ((roomKey, roomEdits) in project.rooms) {
             val hasTileEdits = roomEdits.operations.isNotEmpty()
             val hasPlmEdits = roomEdits.plmChanges.isNotEmpty()
@@ -1209,7 +1305,44 @@ class EditorState {
                     System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
                     for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
                     patchedRooms++
-                } else println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize — skipped tiles")
+                } else {
+                    // Relocate: find free space, trying same bank first, then $CE-$C0
+                    val origBank = (room.levelDataPtr shr 16) and 0xFF
+                    val banksToTry = listOf(origBank) +
+                            (0xCE downTo 0xC0).filter { it != origBank }
+                    var relocated = false
+                    for (tryBank in banksToTry) {
+                        val bEnd = romParser.snesToPc((tryBank shl 16) or 0xFFFF) + 1
+                        val freeStart = getLevelBankFreePtr(tryBank)
+                        if (freeStart + compressed.size <= bEnd) {
+                            System.arraycopy(compressed, 0, romData, freeStart, compressed.size)
+                            val newSnes = romParser.pcToSnes(freeStart)
+                            levelBankFree[tryBank] = freeStart + compressed.size
+
+                            val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                            var updatedStates = 0
+                            for (stateOffset in allStateOffsets) {
+                                val existingPtr = (romData[stateOffset].toInt() and 0xFF) or
+                                        ((romData[stateOffset + 1].toInt() and 0xFF) shl 8) or
+                                        ((romData[stateOffset + 2].toInt() and 0xFF) shl 16)
+                                if (existingPtr == room.levelDataPtr) {
+                                    romData[stateOffset] = (newSnes and 0xFF).toByte()
+                                    romData[stateOffset + 1] = ((newSnes shr 8) and 0xFF).toByte()
+                                    romData[stateOffset + 2] = ((newSnes shr 16) and 0xFF).toByte()
+                                    updatedStates++
+                                }
+                            }
+                            for (i in pcOff until pcOff + origSize) romData[i] = 0xFF.toByte()
+                            println("Room 0x$roomKey: relocated level data to \$${tryBank.toString(16).uppercase()}:${(newSnes and 0xFFFF).toString(16).uppercase()} (${compressed.size} bytes, updated $updatedStates/${allStateOffsets.size} states)")
+                            patchedRooms++
+                            relocated = true
+                            break
+                        }
+                    }
+                    if (!relocated) {
+                        println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize and no free space in any bank — skipped tiles")
+                    }
+                }
             }
 
             // Patch PLM set
@@ -1389,14 +1522,27 @@ class EditorState {
                 patchedRooms++
             }
         }
-        // Apply enabled patches (hex write operations)
+        // Apply enabled patches (hex write operations + config patches)
         var patchesApplied = 0
         for (patch in project.patches) {
             if (!patch.enabled) continue
-            for (write in patch.writes) {
-                val off = write.offset.toInt()
-                for ((i, b) in write.bytes.withIndex()) {
-                    if (off + i < romData.size) romData[off + i] = b.toByte()
+            if (patch.configType == "ceres_escape_seconds") {
+                val totalSecs = (patch.configValue ?: 60).coerceIn(15, 300)
+                val mins = totalSecs / 60
+                val secs = totalSecs % 60
+                val secsBcd = ((secs / 10) shl 4) or (secs % 10)
+                val minsBcd = ((mins / 10) shl 4) or (mins % 10)
+                val off = romParser.snesToPc(CERES_TIMER_OPERAND_SNES)
+                if (off + 1 < romData.size) {
+                    romData[off] = secsBcd.toByte()
+                    romData[off + 1] = minsBcd.toByte()
+                }
+            } else {
+                for (write in patch.writes) {
+                    val off = write.offset.toInt()
+                    for ((i, b) in write.bytes.withIndex()) {
+                        if (off + i < romData.size) romData[off + i] = b.toByte()
+                    }
                 }
             }
             patchesApplied++

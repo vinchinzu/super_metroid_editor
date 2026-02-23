@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.PatchRepository
 import com.supermetroid.editor.data.PatchWrite
 import com.supermetroid.editor.data.SmPatch
+import com.supermetroid.editor.rom.RomParser
 import java.awt.FileDialog
 import java.io.File
 
@@ -182,6 +184,7 @@ private fun PatchListItem(
 @Composable
 fun PatchEditorCanvas(
     editorState: EditorState,
+    romParser: RomParser? = null,
     modifier: Modifier = Modifier
 ) {
     @Suppress("UNUSED_VARIABLE") val pv = editorState.patchVersion
@@ -203,8 +206,12 @@ fun PatchEditorCanvas(
         // Toolbar
         PatchToolbar(patch, editorState)
         Divider()
-        // Hex editor area
-        PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
+        // Config panel for GUI patches, hex editor for manual patches
+        if (patch.configType == "ceres_escape_seconds") {
+            CeresEscapeTimeConfig(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+        } else {
+            PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
+        }
     }
 }
 
@@ -301,6 +308,61 @@ private fun PatchToolbar(patch: SmPatch, editorState: EditorState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable { editingName = true }
             )
+        }
+    }
+}
+
+// ─── Config patch: Ceres escape time ────────────────────────────────────
+
+private val CERES_ESCAPE_OPTIONS = listOf(15, 16, 20, 30, 45, 60, 90, 120, 150, 180, 240, 300)  // 16s = Kaizo default, 60s = vanilla
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CeresEscapeTimeConfig(
+    patch: SmPatch,
+    editorState: EditorState,
+    romParser: RomParser?,
+    modifier: Modifier
+) {
+    val currentValue = (patch.configValue ?: 60).coerceIn(15, 300)
+    val romValue = remember(romParser) {
+        romParser?.let {
+            val off = it.snesToPc(CERES_TIMER_OPERAND_SNES)
+            val rom = it.getRomData()
+            if (off + 1 < rom.size) {
+                val secsBcd = rom[off].toInt() and 0xFF
+                val minsBcd = rom[off + 1].toInt() and 0xFF
+                val secs = (secsBcd shr 4) * 10 + (secsBcd and 0x0F)
+                val mins = (minsBcd shr 4) * 10 + (minsBcd and 0x0F)
+                mins * 60 + secs
+            } else 60
+        } ?: 60
+    }
+
+    Column(modifier = modifier.padding(16.dp)) {
+        Text(
+            "Set Ceres station escape timer (seconds). Override applies when patch is enabled.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "ROM default: ${romValue}s",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            for (secs in CERES_ESCAPE_OPTIONS) {
+                FilterChip(
+                    selected = currentValue == secs,
+                    onClick = { editorState.setPatchConfigValue(patch.id, secs) },
+                    label = { Text("${secs}s") }
+                )
+            }
         }
     }
 }

@@ -109,6 +109,8 @@ data class PatchWrite(
 
 /**
  * A named, toggleable patch: a collection of write operations.
+ * Config patches (configType != null) use a GUI to set parameters; writes may be
+ * computed at export time from configValue instead of stored in writes.
  */
 @Serializable
 data class SmPatch(
@@ -116,7 +118,9 @@ data class SmPatch(
     var name: String,
     var description: String = "",
     var enabled: Boolean = true,
-    val writes: MutableList<PatchWrite> = mutableListOf()
+    val writes: MutableList<PatchWrite> = mutableListOf(),
+    var configType: String? = null,
+    var configValue: Int? = null
 )
 
 /**

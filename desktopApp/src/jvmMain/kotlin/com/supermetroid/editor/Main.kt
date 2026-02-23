@@ -105,7 +105,7 @@ fun main() = application {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            onClick = { editorState.saveProject() },
+                            onClick = { editorState.saveProject(romParser) },
                             enabled = romParser != null
                         ) { Text(if (editorState.dirty) "Save*" else "Save") }
                         Button(
@@ -218,6 +218,7 @@ fun main() = application {
                             )
                             2 -> PatchEditorCanvas(
                                 editorState = editorState,
+                                romParser = romParser,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

@@ -138,4 +138,61 @@ class RomParserTest {
         println("First 20 bytes: ${levelData.take(20).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }}")
         assertTrue(levelData.size > 100, "Should decompress more than 100 bytes (got ${levelData.size})")
     }
+
+    @Test
+    fun `test LZ5 compress roundtrip and size for key rooms`() {
+        val parser = loadTestRom() ?: return
+        val testRooms = listOf(0x91F8, 0x975C, 0xA322, 0x96BA)
+        for (roomId in testRooms) {
+            val room = parser.readRoomHeader(roomId) ?: continue
+            if (room.levelDataPtr == 0) continue
+            val (originalData, origCompressedSize) = parser.decompressLZ2WithSize(room.levelDataPtr)
+            val recompressed = LZ5Compressor.compress(originalData)
+
+            val verifyParser = RomParser(recompressed)
+            val decompressed = verifyParser.decompressLZ5AtPc(0)
+
+            assertTrue(decompressed.contentEquals(originalData),
+                "Room 0x${roomId.toString(16)}: roundtrip decompression must match original")
+
+            val ratio = recompressed.size.toFloat() / origCompressedSize * 100
+            println("Room 0x${roomId.toString(16)}: orig_compressed=$origCompressedSize, " +
+                    "new_compressed=${recompressed.size}, ratio=${String.format("%.1f", ratio)}%")
+
+            assertTrue(recompressed.size <= origCompressedSize * 1.2,
+                "Room 0x${roomId.toString(16)}: recompressed ${recompressed.size} should be within 20% of original $origCompressedSize")
+        }
+    }
+
+    @Test
+    fun `test LZ5 compress roundtrip on Kaizo ROM`() {
+        val kaizoPaths = listOf(
+            "/Users/kenny/Dropbox/emulator/snes/Super Metroid/Super Metroid Kaizo Lite.smc"
+        )
+        var parser: RomParser? = null
+        for (p in kaizoPaths) {
+            val f = java.io.File(p)
+            if (f.exists()) { parser = RomParser.loadRom(f.absolutePath); break }
+        }
+        if (parser == null) { println("Kaizo ROM not found, skipping"); return }
+
+        val testRooms = listOf(0x91F8, 0x975C, 0xA322, 0x96BA)
+        for (roomId in testRooms) {
+            val room = parser.readRoomHeader(roomId) ?: continue
+            if (room.levelDataPtr == 0) continue
+            val (originalData, origCompressedSize) = parser.decompressLZ2WithSize(room.levelDataPtr)
+            val recompressed = LZ5Compressor.compress(originalData)
+
+            val verifyParser = RomParser(recompressed)
+            val decompressed = verifyParser.decompressLZ5AtPc(0)
+
+            assertTrue(decompressed.contentEquals(originalData),
+                "Kaizo Room 0x${roomId.toString(16)}: roundtrip mismatch!")
+
+            val ratio = recompressed.size.toFloat() / origCompressedSize * 100
+            val fits = recompressed.size <= origCompressedSize
+            println("Kaizo 0x${roomId.toString(16)}: orig=$origCompressedSize, new=${recompressed.size}, " +
+                    "ratio=${String.format("%.1f", ratio)}%, fits=$fits")
+        }
+    }
 }
