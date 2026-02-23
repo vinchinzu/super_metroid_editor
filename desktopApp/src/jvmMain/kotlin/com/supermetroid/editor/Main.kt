@@ -25,6 +25,8 @@ import com.supermetroid.editor.ui.TilesetCanvas
 import com.supermetroid.editor.ui.TilesetEditorState
 import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatchEditorCanvas
+import com.supermetroid.editor.ui.PatternListPanel
+import com.supermetroid.editor.ui.PatternEditorCanvas
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -120,7 +122,7 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches
+                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Patterns
                 val tilesetEditorState = remember { TilesetEditorState() }
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
@@ -152,6 +154,12 @@ fun main() = application {
                                     editorState.seedDefaultPatches()
                                 }, modifier = Modifier.height(32.dp)) {
                                     Text("Patches", fontSize = 11.sp)
+                                }
+                                Tab(selected = leftTab == 3, onClick = {
+                                    leftTab = 3
+                                    editorState.seedBuiltInPatterns(romParser)
+                                }, modifier = Modifier.height(32.dp)) {
+                                    Text("Patterns", fontSize = 11.sp)
                                 }
                             }
 
@@ -192,6 +200,12 @@ fun main() = application {
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
+                                3 -> {
+                                    PatternListPanel(
+                                        editorState = editorState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
                         }
 
@@ -217,6 +231,11 @@ fun main() = application {
                                 modifier = Modifier.fillMaxSize()
                             )
                             2 -> PatchEditorCanvas(
+                                editorState = editorState,
+                                romParser = romParser,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            3 -> PatternEditorCanvas(
                                 editorState = editorState,
                                 romParser = romParser,
                                 modifier = Modifier.fillMaxSize()

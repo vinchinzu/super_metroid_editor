@@ -134,6 +134,46 @@ data class TilesetGfxData(
 )
 
 /**
+ * A single cell in a tile pattern: metatile index + block type + BTS + per-tile flips.
+ * Encodes to the same 16-bit block word format the ROM uses.
+ */
+@Serializable
+data class PatternCell(
+    val metatile: Int,         // 0-1023 metatile index
+    val blockType: Int = 0x8,  // upper 4 bits of block word
+    val bts: Int = 0,
+    val hFlip: Boolean = false,
+    val vFlip: Boolean = false
+)
+
+/**
+ * A reusable tile pattern: a named rectangular grid of [PatternCell]s.
+ * CRE patterns (tilesetId == null) use only common tiles (640-1023) and apply
+ * to all tilesets. URE patterns are specific to a tileset.
+ */
+@Serializable
+data class TilePattern(
+    val id: String,
+    var name: String,
+    val cols: Int,
+    val rows: Int,
+    val tilesetId: Int? = null,  // null = CRE (shared), otherwise tileset-specific
+    val cells: MutableList<PatternCell> = mutableListOf(),  // row-major: cells[row * cols + col]
+    var builtIn: Boolean = false
+) {
+    fun getCell(r: Int, c: Int): PatternCell? {
+        val idx = r * cols + c
+        return if (idx in cells.indices) cells[idx] else null
+    }
+
+    fun setCell(r: Int, c: Int, cell: PatternCell) {
+        val idx = r * cols + c
+        while (cells.size <= idx) cells.add(PatternCell(0))
+        cells[idx] = cell
+    }
+}
+
+/**
  * The .smedit project file. JSON-serializable.
  * Keys are hex room IDs (as strings), values are the list of edit operations.
  */
@@ -143,7 +183,8 @@ data class SmEditProject(
     val rooms: MutableMap<String, RoomEdits> = mutableMapOf(),  // key = "91F8"
     val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf(), // key = "tilesetId:metatileIndex"
     val patches: MutableList<SmPatch> = mutableListOf(),
-    val customGfx: TilesetGfxData = TilesetGfxData()
+    val customGfx: TilesetGfxData = TilesetGfxData(),
+    val patterns: MutableList<TilePattern> = mutableListOf()
 ) {
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 

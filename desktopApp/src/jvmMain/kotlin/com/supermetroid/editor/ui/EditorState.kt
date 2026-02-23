@@ -13,6 +13,8 @@ import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.SmPatch
 import com.supermetroid.editor.data.TileEdit
+import com.supermetroid.editor.data.TilePattern
+import com.supermetroid.editor.data.PatternCell
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
@@ -210,7 +212,7 @@ enum class EditorTool { PAINT, FILL, SAMPLE, SELECT }
 
 class EditorState {
     var brush by mutableStateOf<TileBrush?>(null)
-        private set
+        internal set
 
     var activeTool by mutableStateOf(EditorTool.PAINT)
 
@@ -310,7 +312,7 @@ class EditorState {
     }
 
     /** Apply any project-stored custom graphics to a TileGraphics instance. */
-    private fun applyCustomGfxToTileGraphics(tg: TileGraphics, tilesetId: Int) {
+    internal fun applyCustomGfxToTileGraphics(tg: TileGraphics, tilesetId: Int) {
         val gfxData = project.customGfx
         val varB64 = gfxData.varGfx[tilesetId.toString()]
         if (varB64 != null) {
@@ -467,6 +469,215 @@ class EditorState {
     fun setPatchConfigValue(id: String, value: Int) {
         project.patches.find { it.id == id }?.let { it.configValue = value }
         dirty = true; patchVersion++
+    }
+
+    // ─── Pattern management ──────────────────────────────────────
+
+    var patternVersion by mutableStateOf(0)
+        private set
+    var selectedPatternId by mutableStateOf<String?>(null)
+        private set
+    var activePattern by mutableStateOf<TilePattern?>(null)
+        private set
+
+    fun selectPattern(id: String?) {
+        selectedPatternId = id
+        activePattern = if (id != null) project.patterns.find { it.id == id } else null
+    }
+
+    fun addPattern(name: String, cols: Int, rows: Int, tilesetId: Int? = null): TilePattern {
+        val id = "pattern_${System.currentTimeMillis()}"
+        val cells = MutableList(rows * cols) { PatternCell(0) }
+        val pattern = TilePattern(id, name, cols, rows, tilesetId, cells)
+        project.patterns.add(pattern)
+        dirty = true; patternVersion++
+        return pattern
+    }
+
+    fun removePattern(id: String) {
+        project.patterns.removeAll { it.id == id }
+        if (selectedPatternId == id) selectPattern(null)
+        dirty = true; patternVersion++
+    }
+
+    fun updatePatternCell(patternId: String, r: Int, c: Int, cell: PatternCell) {
+        project.patterns.find { it.id == patternId }?.setCell(r, c, cell)
+        dirty = true; patternVersion++
+    }
+
+    fun renamePattern(id: String, name: String) {
+        project.patterns.find { it.id == id }?.name = name
+        dirty = true; patternVersion++
+    }
+
+    /** Convert a pattern to a TileBrush for placement on the map. */
+    fun patternToBrush(pattern: TilePattern, hFlip: Boolean = false, vFlip: Boolean = false): TileBrush {
+        val tiles = List(pattern.rows) { r ->
+            List(pattern.cols) { c ->
+                pattern.getCell(r, c)?.metatile ?: 0
+            }
+        }
+        val btOverrides = mutableMapOf<Long, Int>()
+        val btsOverrides = mutableMapOf<Long, Int>()
+        val flipOverrides = mutableMapOf<Long, Int>()
+        for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
+            val key = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+            val cell = pattern.getCell(r, c) ?: continue
+            btOverrides[key] = cell.blockType
+            if (cell.bts != 0) btsOverrides[key] = cell.bts
+            val flipBits = (if (cell.hFlip) 1 else 0) or (if (cell.vFlip) 2 else 0)
+            if (flipBits != 0) flipOverrides[key] = flipBits
+        }
+        return TileBrush(tiles, blockType = 0x8, hFlip = hFlip, vFlip = vFlip,
+            blockTypeOverrides = btOverrides, btsOverrides = btsOverrides, flipOverrides = flipOverrides)
+    }
+
+    fun selectAndApplyPattern(id: String) {
+        val pattern = project.patterns.find { it.id == id } ?: return
+        selectedPatternId = id
+        activePattern = pattern
+        brush = patternToBrush(pattern)
+        activeTool = EditorTool.PAINT
+    }
+
+    /** Patterns visible for the current tileset: CRE patterns + current tileset patterns. */
+    fun patternsForTileset(tilesetId: Int): List<TilePattern> {
+        return project.patterns.filter { it.tilesetId == null || it.tilesetId == tilesetId }
+    }
+
+    /** Save the current map selection rectangle as a new pattern. */
+    fun saveSelectionAsPattern(name: String, isCre: Boolean = true): TilePattern? {
+        val s = mapSelStart ?: return null
+        val e = mapSelEnd ?: return null
+        val minX = minOf(s.first, e.first).coerceIn(0, workingBlocksWide - 1)
+        val maxX = maxOf(s.first, e.first).coerceIn(0, workingBlocksWide - 1)
+        val minY = minOf(s.second, e.second).coerceIn(0, workingBlocksTall - 1)
+        val maxY = maxOf(s.second, e.second).coerceIn(0, workingBlocksTall - 1)
+        val cols = maxX - minX + 1
+        val rows = maxY - minY + 1
+        val cells = mutableListOf<PatternCell>()
+        for (by in minY..maxY) {
+            for (bx in minX..maxX) {
+                val word = readBlockWord(bx, by)
+                val metatile = word and 0x3FF
+                val hFlip = (word shr 10) and 1 != 0
+                val vFlip = (word shr 11) and 1 != 0
+                val blockType = (word shr 12) and 0xF
+                val bts = readBts(bx, by)
+                cells.add(PatternCell(metatile, blockType, bts, hFlip, vFlip))
+            }
+        }
+        val id = "pattern_${System.currentTimeMillis()}"
+        val tsId = if (isCre) null else currentTilesetId
+        val pat = TilePattern(id, name, cols, rows, tsId, cells)
+        project.patterns.add(pat)
+        dirty = true; patternVersion++
+        mapSelStart = null; mapSelEnd = null
+        return pat
+    }
+
+    /**
+     * Seed built-in patterns by extracting tile data from known vanilla ROM rooms.
+     * Only adds patterns whose IDs don't already exist in the project.
+     */
+    fun seedBuiltInPatterns(romParser: RomParser?) {
+        val builtInIds = listOf(
+            "builtin_left_gate", "builtin_right_gate",
+            "builtin_save_station", "builtin_energy_refill",
+            "builtin_missile_refill", "builtin_chozo_statue",
+            "builtin_ship"
+        )
+        val existing = project.patterns.map { it.id }.toSet()
+        if (builtInIds.all { it in existing }) return
+
+        if (romParser == null) return
+
+        fun extractRegion(roomId: Int, startX: Int, startY: Int, cols: Int, rows: Int): List<PatternCell> {
+            val header = romParser.readRoomHeader(roomId) ?: return emptyList()
+            val levelData = romParser.decompressLZ2(header.levelDataPtr)
+            val blocksWide = header.width * 16
+            val layer1Size = ((levelData[0].toInt() and 0xFF) or
+                ((levelData[1].toInt() and 0xFF) shl 8))
+            val cells = mutableListOf<PatternCell>()
+            for (r in 0 until rows) {
+                for (c in 0 until cols) {
+                    val bx = startX + c
+                    val by = startY + r
+                    val off = 2 + (by * blocksWide + bx) * 2
+                    if (off + 1 < 2 + layer1Size) {
+                        val word = (levelData[off].toInt() and 0xFF) or
+                            ((levelData[off + 1].toInt() and 0xFF) shl 8)
+                        val metatile = word and 0x3FF
+                        val hFlip = (word shr 10) and 1 != 0
+                        val vFlip = (word shr 11) and 1 != 0
+                        val blockType = (word shr 12) and 0xF
+                        val btsOff = 2 + layer1Size + (by * blocksWide + bx)
+                        val bts = if (btsOff < levelData.size) levelData[btsOff].toInt() and 0xFF else 0
+                        cells.add(PatternCell(metatile, blockType, bts, hFlip, vFlip))
+                    } else {
+                        cells.add(PatternCell(0))
+                    }
+                }
+            }
+            return cells
+        }
+
+        fun addBuiltIn(id: String, name: String, cols: Int, rows: Int, cells: List<PatternCell>,
+                       tilesetId: Int? = null) {
+            if (id in existing) return
+            val pat = TilePattern(id, name, cols, rows, tilesetId, cells.toMutableList(), builtIn = true)
+            project.patterns.add(pat)
+        }
+
+        try {
+            // Left Gate: from Crateria room 0x91F8 (Landing Site) - gates are 1x4 CRE
+            // Standard left-facing gate cap at a known gate position
+            val leftGateCells = listOf(
+                PatternCell(0x342, blockType = 0x9, bts = 0x40),
+                PatternCell(0x343, blockType = 0x9, bts = 0x40),
+                PatternCell(0x343, blockType = 0x9, bts = 0x40),
+                PatternCell(0x342, blockType = 0x9, bts = 0x40, vFlip = true)
+            )
+            addBuiltIn("builtin_left_gate", "Left Gate", 1, 4, leftGateCells)
+
+            val rightGateCells = leftGateCells.map { it.copy(hFlip = !it.hFlip) }
+            addBuiltIn("builtin_right_gate", "Right Gate", 1, 4, rightGateCells)
+
+            // Save Station: extract from Crateria Save Room (0x93D5), save platform at ~(3,3) 5x2
+            val saveCells = extractRegion(0x93D5, 3, 4, 5, 2)
+            if (saveCells.isNotEmpty()) {
+                addBuiltIn("builtin_save_station", "Save Station", 5, 2, saveCells)
+            }
+
+            // Energy Refill: extract from Crateria energy recharge room (0x9AD9) if present
+            val energyCells = extractRegion(0x9AD9, 3, 4, 4, 2)
+            if (energyCells.isNotEmpty()) {
+                addBuiltIn("builtin_energy_refill", "Energy Refill", 4, 2, energyCells)
+            }
+
+            // Missile Refill: extract from Brinstar missile recharge (0x9E11) if present
+            val missileCells = extractRegion(0x9E11, 3, 4, 4, 2)
+            if (missileCells.isNotEmpty()) {
+                addBuiltIn("builtin_missile_refill", "Missile Refill", 4, 2, missileCells)
+            }
+
+            // Chozo Statue: extract from first power bomb room (Crateria 0x93AA) ~(7,5) 3x4
+            val chozoCells = extractRegion(0x93AA, 7, 3, 3, 4)
+            if (chozoCells.isNotEmpty()) {
+                addBuiltIn("builtin_chozo_statue", "Chozo Statue", 3, 4, chozoCells)
+            }
+
+            // Ship: extract from Landing Site (0x91F8), ship is around (39,3) 8x3
+            val shipCells = extractRegion(0x91F8, 39, 3, 8, 3)
+            if (shipCells.isNotEmpty()) {
+                addBuiltIn("builtin_ship", "Ship", 8, 3, shipCells)
+            }
+        } catch (e: Exception) {
+            println("Failed to seed some built-in patterns: ${e.message}")
+        }
+
+        dirty = true
+        patternVersion++
     }
 
     fun getSelectedPatch(): SmPatch? = project.patches.find { it.id == selectedPatchId }

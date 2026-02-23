@@ -244,11 +244,11 @@ fun MapCanvas(
             }
         ) {
             if (room != null && romParser != null) {
-                var isLoading by remember(room.id) { mutableStateOf(true) }
-                var errorMessage by remember(room.id) { mutableStateOf<String?>(null) }
-                var renderData by remember(room.id) { mutableStateOf<RoomRenderData?>(null) }
+                var isLoading by remember(room.id, romParser) { mutableStateOf(true) }
+                var errorMessage by remember(room.id, romParser) { mutableStateOf<String?>(null) }
+                var renderData by remember(room.id, romParser) { mutableStateOf<RoomRenderData?>(null) }
                 
-                LaunchedEffect(room.id) {
+                LaunchedEffect(room.id, romParser) {
                     isLoading = true
                     errorMessage = null
                     renderData = null
@@ -474,6 +474,44 @@ fun MapCanvas(
                                 modifier = Modifier.size(16.dp),
                                 tint = if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+
+                        // Save selection as pattern
+                        if (editorState.mapSelStart != null && editorState.mapSelEnd != null) {
+                            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                            var showSaveDialog by remember { mutableStateOf(false) }
+                            FilterChip(
+                                selected = false,
+                                onClick = { showSaveDialog = true },
+                                label = { Text("Save Pattern", fontSize = 9.sp) },
+                                modifier = Modifier.height(24.dp)
+                            )
+                            if (showSaveDialog) {
+                                var patName by remember { mutableStateOf("") }
+                                AlertDialog(
+                                    onDismissRequest = { showSaveDialog = false },
+                                    title = { Text("Save Selection as Pattern", fontSize = 14.sp) },
+                                    text = {
+                                        OutlinedTextField(
+                                            value = patName,
+                                            onValueChange = { patName = it },
+                                            label = { Text("Pattern name") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(onClick = {
+                                            val n = patName.ifBlank { "Selection" }
+                                            editorState.saveSelectionAsPattern(n)
+                                            showSaveDialog = false
+                                        }) { Text("Save") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showSaveDialog = false }) { Text("Cancel") }
+                                    }
+                                )
+                            }
                         }
 
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
