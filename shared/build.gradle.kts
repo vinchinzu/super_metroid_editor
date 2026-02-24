@@ -19,7 +19,7 @@ kotlin {
         
         val jvmMain by getting {
             dependencies {
-                // Add JVM-specific dependencies here
+                implementation("net.java.dev.jna:jna:5.14.0")
             }
         }
         

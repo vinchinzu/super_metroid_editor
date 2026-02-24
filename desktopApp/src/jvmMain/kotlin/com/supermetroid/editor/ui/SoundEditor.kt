@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.supermetroid.editor.rom.NativeSpcEmulator
 import com.supermetroid.editor.rom.NspcRenderer
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.SpcData
@@ -835,15 +836,33 @@ class SoundEditorState {
         val rate = sampleRate
 
         val trimmed = withContext(Dispatchers.Default) {
-            // Primary: render via N-SPC sequence parser
             val ram = spcRam
+            val parser = romParserRef ?: return@withContext ShortArray(0)
+
+            // 1) Try native SPC700 emulation (blargg's snes_spc via spc2wav tool)
+            if (ram != null) {
+                val nativeResult = tryNativeSpcRender(ram, parser, track, rate)
+                if (nativeResult != null && nativeResult.size > rate / 2) {
+                    val peak = nativeResult.maxOf { abs(it.toInt()) }
+                    if (peak > 200) {
+                        System.err.println("[SPC-NATIVE] Rendered ${track.name}: ${nativeResult.size} samples, peak=$peak")
+                        return@withContext nativeResult
+                    }
+                }
+            }
+
+            // 2) Voice clip tracks: play the largest unique BRR sample directly
+            val isVoiceClip = track.songSet in VOICE_CLIP_SONG_SETS
+            if (isVoiceClip) {
+                val result = renderVoiceClip(ram, parser, track, rate)
+                if (result.isNotEmpty()) return@withContext result
+            }
+
+            // 3) N-SPC sequence renderer (our Kotlin software synth)
             if (ram != null) {
                 try {
                     val fullRam = ram.copyOf()
-                    val blocks = SpcData.findSongSetTransferData(
-                        romParserRef ?: return@withContext ShortArray(0),
-                        track.songSet
-                    )
+                    val blocks = SpcData.findSongSetTransferData(parser, track.songSet)
                     if (blocks.isNotEmpty()) SpcData.applyTransferBlocks(fullRam, blocks)
 
                     val rendered = NspcRenderer.renderTrack(fullRam, track.playIndex, rate, 90.0)
@@ -852,13 +871,13 @@ class SoundEditorState {
                         System.err.println("[NSPC] Rendered ${track.name}: ${rendered.size} samples (${rendered.size * 1000L / rate}ms), peak=$renderPeak")
                         return@withContext rendered
                     }
-                    System.err.println("[NSPC] Render insufficient (${rendered.size} samples, peak=$renderPeak), falling back to instrument preview")
+                    System.err.println("[NSPC] Render insufficient (${rendered.size} samples, peak=$renderPeak), falling back")
                 } catch (e: Exception) {
                     System.err.println("[NSPC] Render failed for ${track.name}: ${e.message}, falling back")
                 }
             }
 
-            // Fallback: concatenate instrument samples (use all if unique set is empty)
+            // 4) Fallback: concatenate instrument samples
             val allSrcs = trackSamples.ifEmpty { return@withContext ShortArray(0) }
             val srcs = trackUniqueSamples.ifEmpty { allSrcs }
             val uniqueSamples = srcs
@@ -919,7 +938,108 @@ class SoundEditorState {
         }
     }
 
+    /**
+     * Try rendering via the native snes_spc emulator (JNA).
+     * Returns mono PCM at [sampleRate], or null on failure.
+     */
+    private fun tryNativeSpcRender(
+        baseRam: ByteArray,
+        romParser: RomParser,
+        track: SpcData.TrackInfo,
+        sampleRate: Int
+    ): ShortArray? {
+        if (!NativeSpcEmulator.isAvailable()) return null
+        return try {
+            val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
+            NativeSpcEmulator().use { emu ->
+                emu.loadFromRam(baseRam, blocks, track.playIndex)
+                val mono = emu.renderMono(15)
+                if (sampleRate != NativeSpcEmulator.SAMPLE_RATE && mono.isNotEmpty()) {
+                    resampleLinear(mono, NativeSpcEmulator.SAMPLE_RATE, sampleRate)
+                } else {
+                    mono
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("[SPC-JNA] Native render failed for ${track.name}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Voice clip song sets contain a single large BRR sample (the spoken audio).
+     * Instead of N-SPC sequence rendering, find and play that sample directly.
+     */
+    private fun renderVoiceClip(
+        baseRam: ByteArray?,
+        romParser: RomParser,
+        track: SpcData.TrackInfo,
+        @Suppress("UNUSED_PARAMETER") rate: Int
+    ): ShortArray {
+        val ram = (baseRam ?: SpcData.buildInitialSpcRam(romParser)).copyOf()
+        val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
+        System.err.println("[VOICE] ${track.name}: songSet=0x${track.songSet.toString(16)}, ${blocks.size} transfer blocks")
+        if (blocks.isEmpty()) return ShortArray(0)
+
+        val baseDirBefore = SpcData.findSampleDirectory(ram)
+        val beforeAddrs = baseDirBefore.map { it.startAddr }.toSet()
+        SpcData.applyTransferBlocks(ram, blocks)
+        val dirAfter = SpcData.findSampleDirectory(ram)
+
+        // Find samples that are new/changed after loading the voice song set
+        val candidates = mutableListOf<Pair<SpcData.SampleDirEntry, ShortArray>>()
+        for (entry in dirAfter) {
+            val isNew = entry.startAddr !in beforeAddrs
+            val wasModified = blocks.any { blk ->
+                val range = blk.destAddr until (blk.destAddr + blk.data.size)
+                entry.startAddr in range
+            }
+            if (!isNew && !wasModified) continue
+            try {
+                val (pcm, _) = SpcData.decodeBrrWithLoop(ram, entry, maxBlocks = 8192)
+                if (pcm.size > 500) {
+                    candidates.add(entry to pcm)
+                    System.err.println("[VOICE]   candidate #${entry.index}: ${pcm.size} pcm @ 0x${entry.startAddr.toString(16)}")
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (candidates.isEmpty()) {
+            System.err.println("[VOICE] No voice sample candidates found, trying all unique samples")
+            return ShortArray(0)
+        }
+
+        // The voice sample is typically the largest new/modified sample
+        val (_, voicePcm) = candidates.maxBy { it.second.size }
+        System.err.println("[VOICE] Selected sample with ${voicePcm.size} pcm samples")
+
+        val peak = voicePcm.maxOf { abs(it.toInt()) }.coerceAtLeast(1)
+        val gain = 26000.0 / peak
+        return ShortArray(voicePcm.size) { (voicePcm[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+
     companion object {
+        private val VOICE_CLIP_SONG_SETS = setOf(0x3F, 0x42)
+
+        fun resampleLinear(pcm: ShortArray, fromRate: Int, toRate: Int): ShortArray {
+            if (fromRate == toRate || pcm.isEmpty()) return pcm
+            val ratio = fromRate.toDouble() / toRate
+            val outLen = (pcm.size / ratio).toInt()
+            val out = ShortArray(outLen)
+            for (i in 0 until outLen) {
+                val srcPos = i * ratio
+                val idx = srcPos.toInt()
+                val frac = srcPos - idx
+                val s = if (idx + 1 < pcm.size) {
+                    (pcm[idx] * (1.0 - frac) + pcm[idx + 1] * frac).toInt()
+                } else if (idx < pcm.size) {
+                    pcm[idx].toInt()
+                } else break
+                out[i] = s.coerceIn(-32768, 32767).toShort()
+            }
+            return out
+        }
+
         fun extendWithLoop(
             pcm: ShortArray,
             loopStart: Int,

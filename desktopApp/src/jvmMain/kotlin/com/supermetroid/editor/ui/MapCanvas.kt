@@ -1799,9 +1799,14 @@ private fun buildCompositeImage(
             if (activeOverlays.contains(TileOverlay.TREADMILL) && blockType == 0x3) matchingOverlays.add(TileOverlay.TREADMILL)
             if (activeOverlays.contains(TileOverlay.ITEMS) && itemBlocks.contains(idx)) matchingOverlays.add(TileOverlay.ITEMS)
             
-            var iconX = px + 16 - 8
-            val iconY = py + 16 - 8
+            val iconSize = 12
+            var iconX = px + 16 - iconSize
+            val iconY = py + 16 - iconSize
             
+            val g2 = g as java.awt.Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
+
             for (overlay in matchingOverlays) {
                 val color = java.awt.Color(
                     ((overlay.color shr 16) and 0xFF).toInt(),
@@ -1809,20 +1814,18 @@ private fun buildCompositeImage(
                     (overlay.color and 0xFF).toInt(),
                     ((overlay.color shr 24) and 0xFF).toInt()
                 )
-                // Black fill, 2px colored border, centered white letter (match dropdown)
-                g.color = java.awt.Color.BLACK
-                g.fillRect(iconX, iconY, 8, 8)
-                g.color = color
-                val g2 = g as? java.awt.Graphics2D
-                g2?.stroke = java.awt.BasicStroke(2f)
-                g.drawRect(iconX + 1, iconY + 1, 5, 5) // inset so 2px stroke fits in 8x8
-                g2?.stroke = java.awt.BasicStroke(1f)
-                g.color = java.awt.Color.WHITE
-                g.font = java.awt.Font("Monospaced", java.awt.Font.BOLD, 7)
-                val fm = g.fontMetrics
-                val textY = iconY + (8 - fm.height) / 2 + fm.ascent
-                g.drawString(overlay.shortLabel, iconX + 1, textY)
-                iconX -= 9
+                g2.color = java.awt.Color(0, 0, 0, 200)
+                g2.fillRect(iconX, iconY, iconSize, iconSize)
+                g2.color = color
+                g2.stroke = java.awt.BasicStroke(2f)
+                g2.drawRect(iconX + 1, iconY + 1, iconSize - 3, iconSize - 3)
+                g2.stroke = java.awt.BasicStroke(1f)
+                g2.color = java.awt.Color.WHITE
+                val fm = g2.fontMetrics
+                val label = overlay.shortLabel
+                val tw = fm.stringWidth(label)
+                g2.drawString(label, iconX + (iconSize - tw) / 2, iconY + (iconSize + fm.ascent - fm.descent) / 2)
+                iconX -= (iconSize + 1)
             }
         }
     }
