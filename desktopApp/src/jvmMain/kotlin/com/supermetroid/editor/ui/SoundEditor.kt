@@ -940,6 +940,7 @@ class SoundEditorState {
 
     /**
      * Try rendering via the native snes_spc emulator (JNA).
+     * Renders the full song (~120s) with fade-out, trims trailing silence.
      * Returns mono PCM at [sampleRate], or null on failure.
      */
     private fun tryNativeSpcRender(
@@ -953,9 +954,36 @@ class SoundEditorState {
             val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
             NativeSpcEmulator().use { emu ->
                 emu.loadFromRam(baseRam, blocks, track.playIndex)
-                val mono = emu.renderMono(15)
-                if (sampleRate != NativeSpcEmulator.SAMPLE_RATE && mono.isNotEmpty()) {
-                    resampleLinear(mono, NativeSpcEmulator.SAMPLE_RATE, sampleRate)
+                val renderSeconds = 120
+                val fadeSeconds = 5
+                val nativeSr = NativeSpcEmulator.SAMPLE_RATE
+                var mono = emu.renderMono(renderSeconds)
+
+                val fadeSamples = nativeSr * fadeSeconds
+                if (mono.size > fadeSamples) {
+                    val fadeStart = mono.size - fadeSamples
+                    for (i in 0 until fadeSamples) {
+                        val gain = 1.0f - (i.toFloat() / fadeSamples)
+                        mono[fadeStart + i] = (mono[fadeStart + i] * gain).toInt().toShort()
+                    }
+                }
+
+                // Trim trailing silence (peak below threshold for > 0.5s)
+                val silenceThreshold = 64
+                val silenceWindow = nativeSr / 2
+                var trimEnd = mono.size
+                while (trimEnd > silenceWindow) {
+                    val windowStart = trimEnd - silenceWindow
+                    val windowPeak = (windowStart until trimEnd).maxOf { abs(mono[it].toInt()) }
+                    if (windowPeak > silenceThreshold) break
+                    trimEnd = windowStart
+                }
+                if (trimEnd < mono.size) {
+                    mono = mono.copyOf(trimEnd)
+                }
+
+                if (sampleRate != nativeSr && mono.isNotEmpty()) {
+                    resampleLinear(mono, nativeSr, sampleRate)
                 } else {
                     mono
                 }

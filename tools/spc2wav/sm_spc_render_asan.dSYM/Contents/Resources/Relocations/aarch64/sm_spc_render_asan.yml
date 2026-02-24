@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     sm_spc_render_asan
-relocations:     []
-...
