@@ -10,16 +10,17 @@ private data class PatchMeta(
     val description: String = ""
 )
 
+/** Load a classpath resource with fallback to thread context classloader. */
+fun loadResource(path: String): java.io.InputStream? =
+    PatchRepository::class.java.classLoader.getResourceAsStream(path)
+        ?: Thread.currentThread().contextClassLoader.getResourceAsStream(path)
+
 object PatchRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
 
     fun loadBundledPatches(): List<SmPatch> {
-        val metaStream = javaClass.classLoader
-            .getResourceAsStream("patches/patches.json")
-            ?: Thread.currentThread().contextClassLoader
-                .getResourceAsStream("patches/patches.json")
-            ?: return emptyList()
+        val metaStream = loadResource("patches/patches.json") ?: return emptyList()
 
         val metaList: List<PatchMeta> = json.decodeFromString(
             kotlinx.serialization.builtins.ListSerializer(PatchMeta.serializer()),
@@ -27,10 +28,7 @@ object PatchRepository {
         )
 
         return metaList.mapNotNull { meta ->
-            val ipsStream = javaClass.classLoader
-                .getResourceAsStream("patches/${meta.file}")
-                ?: Thread.currentThread().contextClassLoader
-                    .getResourceAsStream("patches/${meta.file}")
+            val ipsStream = loadResource("patches/${meta.file}")
             if (ipsStream == null) {
                 println("WARN: bundled patch ${meta.file} not found")
                 return@mapNotNull null

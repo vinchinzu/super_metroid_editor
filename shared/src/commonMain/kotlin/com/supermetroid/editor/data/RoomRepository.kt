@@ -10,11 +10,7 @@ class RoomRepository {
     
     fun loadRoomMapping(): RoomMapping {
         if (roomMapping == null) {
-            // Try multiple ways to load the resource
-            val inputStream = this::class.java.classLoader
-                .getResourceAsStream("room_mapping_complete.json")
-                ?: Thread.currentThread().contextClassLoader
-                    .getResourceAsStream("room_mapping_complete.json")
+            val inputStream = loadResource("room_mapping_complete.json")
                 ?: throw IllegalStateException("Could not load room_mapping_complete.json")
             
             val jsonString = inputStream.bufferedReader().use { it.readText() }

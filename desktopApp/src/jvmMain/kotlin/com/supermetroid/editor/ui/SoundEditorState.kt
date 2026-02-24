@@ -1,0 +1,588 @@
+package com.supermetroid.editor.ui
+
+import androidx.compose.runtime.*
+import com.supermetroid.editor.rom.NativeSpcEmulator
+import com.supermetroid.editor.rom.NspcRenderer
+import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.rom.SpcData
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.math.abs
+
+class SoundEditorState {
+    private val player = SoundPlayer()
+
+    var selectedTrackId by mutableStateOf(-1)
+        private set
+    var selectedTrack by mutableStateOf<SpcData.TrackInfo?>(null)
+        private set
+    var selectedSampleIndex by mutableStateOf(-1)
+        private set
+    var selectedSample by mutableStateOf<DecodedSample?>(null)
+        private set
+    var currentWaveform by mutableStateOf<ShortArray?>(null)
+        private set
+    var currentLoopStart by mutableStateOf(-1)
+        private set
+    var sampleRate by mutableStateOf(32000)
+    var loopEnabled by mutableStateOf(false)
+    var autoPlayEnabled by mutableStateOf(false)
+    var playAllEnabled by mutableStateOf(false)
+    var statusMessage by mutableStateOf("")
+        private set
+    var isLoadingSamples by mutableStateOf(false)
+        private set
+    var isLoadingTrack by mutableStateOf(false)
+        private set
+    var samples by mutableStateOf<List<DecodedSample>>(emptyList())
+        private set
+    var trackSamples by mutableStateOf<List<DecodedSample>>(emptyList())
+        private set
+    var trackUniqueSamples by mutableStateOf<List<DecodedSample>>(emptyList())
+        private set
+
+    var playbackPosition by mutableStateOf(0f)
+    var isPlaying by mutableStateOf(false)
+        private set
+
+    private var spcRam: ByteArray? = null
+    private var romParserRef: RomParser? = null
+    private var lastLoadedSongSet = -1
+    private var loadVersion = 0
+
+    data class DecodedSample(
+        val dirEntry: SpcData.SampleDirEntry,
+        val pcmData: ShortArray,
+        val loopStart: Int
+    )
+
+    fun selectTrack(track: SpcData.TrackInfo) {
+        val wasPlaying = player.isActive()
+        player.stop()
+        playbackPosition = 0f
+
+        val clearSamples = track.songSet != lastLoadedSongSet
+        selectedTrackId = track.id
+        selectedTrack = track
+        selectedSample = null
+        selectedSampleIndex = -1
+        statusMessage = "Track: ${track.name}"
+        if (wasPlaying) autoPlayEnabled = true
+        if (clearSamples) {
+            trackSamples = emptyList()
+            trackUniqueSamples = emptyList()
+            currentWaveform = null
+            currentLoopStart = -1
+        }
+    }
+
+    suspend fun selectSample(sample: DecodedSample) {
+        val extended = withContext(Dispatchers.Default) {
+            extendWithLoop(sample.pcmData, sample.loopStart, sampleRate, 4.0)
+        }
+        selectedSampleIndex = sample.dirEntry.index
+        selectedSample = sample
+        selectedTrack = null
+        selectedTrackId = -1
+        currentWaveform = extended
+        currentLoopStart = sample.loopStart
+        statusMessage = "Sample #${sample.dirEntry.index}: ${sample.pcmData.size} pcm" +
+            if (sample.loopStart >= 0) " (extended to ${extended.size})" else ""
+    }
+
+    suspend fun loadSamples(romParser: RomParser) {
+        isLoadingSamples = true
+        statusMessage = "Loading SPC data..."
+        try {
+            val result = withContext(Dispatchers.Default) {
+                val ram = SpcData.buildInitialSpcRam(romParser)
+                val dir = SpcData.findSampleDirectory(ram)
+                System.err.println("[SPC] Sample directory: ${dir.size} entries")
+                val decoded = dir.mapNotNull { entry ->
+                    try {
+                        val (pcm, loop) = SpcData.decodeBrrWithLoop(ram, entry)
+                        if (pcm.isNotEmpty()) DecodedSample(entry, pcm, loop) else null
+                    } catch (e: Exception) {
+                        System.err.println("[SPC]   Failed to decode #${entry.index}: ${e.message}")
+                        null
+                    }
+                }
+                Pair(ram, decoded)
+            }
+            spcRam = result.first
+            samples = result.second
+            statusMessage = "Loaded ${result.second.size} BRR samples"
+        } catch (e: Exception) {
+            statusMessage = "Error: ${e.message}"
+            System.err.println("[SPC] Load failed: ${e.message}")
+        } finally {
+            isLoadingSamples = false
+        }
+    }
+
+    suspend fun loadTrackSamples(romParser: RomParser) {
+        val track = selectedTrack ?: return
+        val version = ++loadVersion
+        romParserRef = romParser
+
+        if (track.songSet == lastLoadedSongSet && trackSamples.isNotEmpty()) {
+            buildCompositeWaveform(track, version)
+            return
+        }
+        isLoadingTrack = true
+        statusMessage = "Loading instruments for ${track.name}..."
+
+        try {
+            val result = withContext(Dispatchers.Default) {
+                val baseRam = spcRam ?: SpcData.buildInitialSpcRam(romParser)
+                val ram = baseRam.copyOf()
+
+                val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
+                System.err.println("[SPC] Track '${track.name}' songSet=0x${track.songSet.toString(16)}: ${blocks.size} transfer blocks")
+
+                val baseDir = SpcData.findSampleDirectory(baseRam)
+                val baseDirMap = baseDir.associate { it.index to it }
+
+                if (blocks.isNotEmpty()) {
+                    SpcData.applyTransferBlocks(ram, blocks)
+                }
+                val dir = SpcData.findSampleDirectory(ram)
+
+                val modifiedRanges = blocks.map { it.destAddr until (it.destAddr + it.data.size) }
+
+                val allDecoded = mutableListOf<DecodedSample>()
+                val uniqueDecoded = mutableListOf<DecodedSample>()
+
+                for (entry in dir) {
+                    try {
+                        val (pcm, loop) = SpcData.decodeBrrWithLoop(ram, entry)
+                        if (pcm.size <= 16 || pcm.all { it.toInt() == 0 }) continue
+                        val sample = DecodedSample(entry, pcm, loop)
+                        allDecoded.add(sample)
+
+                        val brrModified = modifiedRanges.any { range ->
+                            entry.startAddr in range || (entry.startAddr + 9) in range
+                        }
+                        val baseEntry = baseDirMap[entry.index]
+                        val dirChanged = baseEntry == null ||
+                            baseEntry.startAddr != entry.startAddr ||
+                            baseEntry.loopAddr != entry.loopAddr
+
+                        if (brrModified || dirChanged) uniqueDecoded.add(sample)
+                    } catch (_: Exception) {}
+                }
+
+                System.err.println("[SPC] Directory: ${dir.size} entries, ${allDecoded.size} decoded, ${uniqueDecoded.size} unique to song set")
+                arrayOf(baseRam, allDecoded, uniqueDecoded, blocks.size)
+            }
+
+            if (version != loadVersion) return
+            @Suppress("UNCHECKED_CAST")
+            val baseRam = result[0] as ByteArray
+            @Suppress("UNCHECKED_CAST")
+            val allSamples = result[1] as List<DecodedSample>
+            @Suppress("UNCHECKED_CAST")
+            val uniqueSamples = result[2] as List<DecodedSample>
+            val blockCount = result[3] as Int
+            if (spcRam == null) spcRam = baseRam
+            lastLoadedSongSet = track.songSet
+            trackSamples = allSamples
+            trackUniqueSamples = uniqueSamples
+            statusMessage = "${uniqueSamples.size} unique / ${allSamples.size} total instruments ($blockCount blocks) for ${track.name}"
+            buildCompositeWaveform(track, version)
+        } catch (e: Exception) {
+            if (version == loadVersion) {
+                statusMessage = "Error loading track: ${e.message}"
+            }
+            System.err.println("[SPC] Track load error: ${e.message}")
+        } finally {
+            if (version == loadVersion) {
+                isLoadingTrack = false
+            }
+        }
+    }
+
+    private suspend fun buildCompositeWaveform(track: SpcData.TrackInfo, version: Int) {
+        val rate = sampleRate
+
+        val trimmed = withContext(Dispatchers.Default) {
+            val ram = spcRam
+            val parser = romParserRef ?: return@withContext ShortArray(0)
+
+            if (ram != null) {
+                val nativeResult = tryNativeSpcRender(ram, parser, track, rate)
+                if (nativeResult != null && nativeResult.size > rate / 2) {
+                    val peak = nativeResult.maxOf { abs(it.toInt()) }
+                    if (peak > 200) {
+                        System.err.println("[SPC-NATIVE] Rendered ${track.name}: ${nativeResult.size} samples, peak=$peak")
+                        return@withContext nativeResult
+                    }
+                }
+            }
+
+            val isVoiceClip = track.songSet in VOICE_CLIP_SONG_SETS
+            if (isVoiceClip) {
+                val result = renderVoiceClip(ram, parser, track, rate)
+                if (result.isNotEmpty()) return@withContext result
+            }
+
+            if (ram != null) {
+                try {
+                    val fullRam = ram.copyOf()
+                    val blocks = SpcData.findSongSetTransferData(parser, track.songSet)
+                    if (blocks.isNotEmpty()) SpcData.applyTransferBlocks(fullRam, blocks)
+
+                    val rendered = NspcRenderer.renderTrack(fullRam, track.playIndex, rate, 90.0)
+                    val renderPeak = if (rendered.isNotEmpty()) rendered.maxOf { abs(it.toInt()) } else 0
+                    if (rendered.size > rate / 2 && renderPeak > 200) {
+                        System.err.println("[NSPC] Rendered ${track.name}: ${rendered.size} samples (${rendered.size * 1000L / rate}ms), peak=$renderPeak")
+                        return@withContext rendered
+                    }
+                    System.err.println("[NSPC] Render insufficient (${rendered.size} samples, peak=$renderPeak), falling back")
+                } catch (e: Exception) {
+                    System.err.println("[NSPC] Render failed for ${track.name}: ${e.message}, falling back")
+                }
+            }
+
+            val allSrcs = trackSamples.ifEmpty { return@withContext ShortArray(0) }
+            val srcs = trackUniqueSamples.ifEmpty { allSrcs }
+            val uniqueSamples = srcs
+                .distinctBy { it.dirEntry.startAddr }
+                .filter { it.pcmData.size >= 100 }
+                .ifEmpty {
+                    allSrcs.distinctBy { it.dirEntry.startAddr }
+                        .filter { it.pcmData.size >= 100 }
+                }
+
+            if (uniqueSamples.isEmpty()) return@withContext ShortArray(0)
+
+            val gapSamples = rate / 10
+            val segments = mutableListOf<ShortArray>()
+
+            for (s in uniqueSamples) {
+                val loopRegionSize = if (s.loopStart in 0 until s.pcmData.size)
+                    s.pcmData.size - s.loopStart else 0
+                val isLoopable = loopRegionSize > 200
+
+                val segment: ShortArray = if (isLoopable) {
+                    extendWithLoop(s.pcmData, s.loopStart, rate, 1.2)
+                } else {
+                    s.pcmData.copyOf()
+                }
+
+                val fadeLen = minOf(segment.size, rate / 5)
+                for (i in 0 until fadeLen) {
+                    val idx = segment.size - fadeLen + i
+                    segment[idx] = (segment[idx] * (fadeLen - i) / fadeLen).toShort()
+                }
+                segments.add(segment)
+                segments.add(ShortArray(gapSamples))
+            }
+
+            val totalLen = segments.sumOf { it.size }
+            val mixed = ShortArray(totalLen)
+            var pos = 0
+            for (seg in segments) {
+                seg.copyInto(mixed, pos)
+                pos += seg.size
+            }
+
+            val peak = mixed.maxOf { abs(it.toInt()) }.coerceAtLeast(1)
+            if (peak < 200) return@withContext mixed
+            val gain = 26000.0 / peak
+            ShortArray(mixed.size) { (mixed[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+        }
+
+        if (version != loadVersion) return
+        currentWaveform = trimmed
+        currentLoopStart = -1
+        statusMessage = "${track.name}: ${trimmed.size * 1000L / rate}ms"
+
+        if ((autoPlayEnabled || playAllEnabled) && trimmed.isNotEmpty()) {
+            autoPlayEnabled = false
+            playTrackPreview()
+        }
+    }
+
+    private fun tryNativeSpcRender(
+        baseRam: ByteArray,
+        romParser: RomParser,
+        track: SpcData.TrackInfo,
+        sampleRate: Int
+    ): ShortArray? {
+        if (!NativeSpcEmulator.isAvailable()) return null
+        return try {
+            val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
+            NativeSpcEmulator().use { emu ->
+                emu.loadFromRam(baseRam, blocks, track.playIndex)
+                val renderSeconds = 120
+                val fadeSeconds = 5
+                val nativeSr = NativeSpcEmulator.SAMPLE_RATE
+                var mono = emu.renderMono(renderSeconds)
+
+                val fadeSamples = nativeSr * fadeSeconds
+                if (mono.size > fadeSamples) {
+                    val fadeStart = mono.size - fadeSamples
+                    for (i in 0 until fadeSamples) {
+                        val gain = 1.0f - (i.toFloat() / fadeSamples)
+                        mono[fadeStart + i] = (mono[fadeStart + i] * gain).toInt().toShort()
+                    }
+                }
+
+                val silenceThreshold = 64
+                val silenceWindow = nativeSr / 2
+                var trimEnd = mono.size
+                while (trimEnd > silenceWindow) {
+                    val windowStart = trimEnd - silenceWindow
+                    val windowPeak = (windowStart until trimEnd).maxOf { abs(mono[it].toInt()) }
+                    if (windowPeak > silenceThreshold) break
+                    trimEnd = windowStart
+                }
+                if (trimEnd < mono.size) {
+                    mono = mono.copyOf(trimEnd)
+                }
+
+                if (sampleRate != nativeSr && mono.isNotEmpty()) {
+                    resampleLinear(mono, nativeSr, sampleRate)
+                } else {
+                    mono
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("[SPC-JNA] Native render failed for ${track.name}: ${e.message}")
+            null
+        }
+    }
+
+    private fun renderVoiceClip(
+        baseRam: ByteArray?,
+        romParser: RomParser,
+        track: SpcData.TrackInfo,
+        @Suppress("UNUSED_PARAMETER") rate: Int
+    ): ShortArray {
+        val ram = (baseRam ?: SpcData.buildInitialSpcRam(romParser)).copyOf()
+        val blocks = SpcData.findSongSetTransferData(romParser, track.songSet)
+        System.err.println("[VOICE] ${track.name}: songSet=0x${track.songSet.toString(16)}, ${blocks.size} transfer blocks")
+        if (blocks.isEmpty()) return ShortArray(0)
+
+        val baseDirBefore = SpcData.findSampleDirectory(ram)
+        val beforeAddrs = baseDirBefore.map { it.startAddr }.toSet()
+        SpcData.applyTransferBlocks(ram, blocks)
+        val dirAfter = SpcData.findSampleDirectory(ram)
+
+        val candidates = mutableListOf<Pair<SpcData.SampleDirEntry, ShortArray>>()
+        for (entry in dirAfter) {
+            val isNew = entry.startAddr !in beforeAddrs
+            val wasModified = blocks.any { blk ->
+                val range = blk.destAddr until (blk.destAddr + blk.data.size)
+                entry.startAddr in range
+            }
+            if (!isNew && !wasModified) continue
+            try {
+                val (pcm, _) = SpcData.decodeBrrWithLoop(ram, entry, maxBlocks = 8192)
+                if (pcm.size > 500) {
+                    candidates.add(entry to pcm)
+                    System.err.println("[VOICE]   candidate #${entry.index}: ${pcm.size} pcm @ 0x${entry.startAddr.toString(16)}")
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (candidates.isEmpty()) {
+            System.err.println("[VOICE] No voice sample candidates found, trying all unique samples")
+            return ShortArray(0)
+        }
+
+        val (_, voicePcm) = candidates.maxBy { it.second.size }
+        System.err.println("[VOICE] Selected sample with ${voicePcm.size} pcm samples")
+
+        val peak = voicePcm.maxOf { abs(it.toInt()) }.coerceAtLeast(1)
+        val gain = 26000.0 / peak
+        return ShortArray(voicePcm.size) { (voicePcm[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+
+    companion object {
+        private val VOICE_CLIP_SONG_SETS = setOf(0x3F, 0x42)
+
+        fun resampleLinear(pcm: ShortArray, fromRate: Int, toRate: Int): ShortArray {
+            if (fromRate == toRate || pcm.isEmpty()) return pcm
+            val ratio = fromRate.toDouble() / toRate
+            val outLen = (pcm.size / ratio).toInt()
+            val out = ShortArray(outLen)
+            for (i in 0 until outLen) {
+                val srcPos = i * ratio
+                val idx = srcPos.toInt()
+                val frac = srcPos - idx
+                val s = if (idx + 1 < pcm.size) {
+                    (pcm[idx] * (1.0 - frac) + pcm[idx + 1] * frac).toInt()
+                } else if (idx < pcm.size) {
+                    pcm[idx].toInt()
+                } else break
+                out[i] = s.coerceIn(-32768, 32767).toShort()
+            }
+            return out
+        }
+
+        fun extendWithLoop(
+            pcm: ShortArray,
+            loopStart: Int,
+            sampleRate: Int,
+            targetSeconds: Double
+        ): ShortArray {
+            val targetLen = (sampleRate * targetSeconds).toInt()
+            if (pcm.size >= targetLen) return pcm
+
+            if (loopStart in 0 until pcm.size) {
+                val attack = pcm.copyOfRange(0, loopStart)
+                val loopRegion = pcm.copyOfRange(loopStart, pcm.size)
+                if (loopRegion.isEmpty()) return pcm
+
+                val out = ShortArray(targetLen)
+                attack.copyInto(out)
+                var pos = attack.size
+                while (pos < targetLen) {
+                    val remaining = targetLen - pos
+                    val copyLen = minOf(loopRegion.size, remaining)
+                    loopRegion.copyInto(out, pos, 0, copyLen)
+                    pos += copyLen
+                }
+                val fadeLen = minOf(out.size, (sampleRate * 0.3).toInt())
+                for (i in 0 until fadeLen) {
+                    val idx = out.size - fadeLen + i
+                    out[idx] = (out[idx] * (fadeLen - i) / fadeLen).toShort()
+                }
+                return out
+            }
+
+            val fadeLen = minOf(pcm.size, (sampleRate * 0.2).toInt())
+            val out = pcm.copyOf()
+            for (i in 0 until fadeLen) {
+                val idx = out.size - fadeLen + i
+                out[idx] = (out[idx] * (fadeLen - i) / fadeLen).toShort()
+            }
+            return out
+        }
+
+        fun resamplePitch(
+            pcm: ShortArray,
+            loopStart: Int,
+            pitchFactor: Double,
+            sampleRate: Int,
+            targetSeconds: Double
+        ): ShortArray {
+            if (pcm.isEmpty()) return pcm
+            val extended = extendWithLoop(pcm, loopStart, sampleRate, targetSeconds * pitchFactor + 0.1)
+            val outLen = (extended.size / pitchFactor).toInt().coerceAtMost((sampleRate * targetSeconds).toInt())
+            val out = ShortArray(outLen)
+            for (i in 0 until outLen) {
+                val srcPos = i * pitchFactor
+                val idx = srcPos.toInt()
+                if (idx + 1 >= extended.size) break
+                val frac = (srcPos - idx).toFloat()
+                val v = (extended[idx] * (1f - frac) + extended[idx + 1] * frac).toInt()
+                out[i] = v.coerceIn(-32768, 32767).toShort()
+            }
+            return out
+        }
+    }
+
+    fun playSample(sample: DecodedSample, loop: Boolean = false) {
+        if (sample.pcmData.isEmpty()) { statusMessage = "Empty sample"; return }
+        val extended = extendWithLoop(sample.pcmData, sample.loopStart, sampleRate, 4.0)
+        val pcm = normalizePcm(extended)
+        statusMessage = "Playing sample #${sample.dirEntry.index}..."
+        player.onComplete = { isPlaying = false; playbackPosition = 0f }
+        player.play(pcm, sampleRate, loop)
+        isPlaying = true
+    }
+
+    fun playTrackPreview(startFraction: Float = 0f) {
+        val waveform = currentWaveform
+        if (waveform == null || waveform.isEmpty()) {
+            statusMessage = "No waveform loaded"
+            return
+        }
+        val startFrame = (startFraction * waveform.size).toLong().coerceIn(0, waveform.size.toLong() - 1)
+        val loopStr = if (loopEnabled) " (loop)" else ""
+        statusMessage = "Playing ${selectedTrack?.name ?: "preview"}$loopStr..."
+        player.onComplete = {
+            isPlaying = false
+            playbackPosition = 0f
+            if (playAllEnabled) advanceToNextTrack()
+        }
+        player.play(waveform, sampleRate, loop = loopEnabled, startFrame = startFrame)
+        isPlaying = true
+    }
+
+    fun stopPlayback() {
+        player.stop()
+        isPlaying = false
+        playbackPosition = 0f
+        statusMessage = "Stopped"
+    }
+
+    fun seekTo(fraction: Float) {
+        if (player.isActive()) {
+            player.seekFraction(fraction)
+        } else {
+            playbackPosition = fraction
+        }
+    }
+
+    fun updatePlaybackPosition() {
+        if (player.isActive()) {
+            playbackPosition = player.positionFraction()
+            isPlaying = true
+        } else if (isPlaying) {
+            isPlaying = false
+        }
+    }
+
+    var pendingNextTrack by mutableStateOf(false)
+        private set
+
+    fun checkPendingAdvance() {
+        if (!pendingNextTrack) return
+        pendingNextTrack = false
+        val tracks = SpcData.KNOWN_TRACKS
+        val currentIdx = tracks.indexOfFirst { it.id == selectedTrackId }
+        if (currentIdx >= 0 && currentIdx + 1 < tracks.size) {
+            val next = tracks[currentIdx + 1]
+            selectTrack(next)
+        } else {
+            playAllEnabled = false
+            statusMessage = "Finished playing all tracks"
+        }
+    }
+
+    private fun advanceToNextTrack() {
+        pendingNextTrack = true
+    }
+
+    fun exportCurrentWav() {
+        val waveform = currentWaveform ?: return
+        val name = selectedTrack?.name?.replace(Regex("[^a-zA-Z0-9_\\- ]"), "")?.trim()
+            ?: selectedSample?.let { "sample_${it.dirEntry.index}" }
+            ?: "sound"
+
+        val dir = File(System.getProperty("user.home"), "Desktop")
+        if (!dir.exists()) dir.mkdirs()
+        val file = File(dir, "${name}.wav")
+        try {
+            exportWav(waveform, sampleRate, file)
+            statusMessage = "Exported: ${file.absolutePath}"
+            System.err.println("[SPC] Exported WAV: ${file.absolutePath} (${waveform.size} samples, ${sampleRate}Hz)")
+        } catch (e: Exception) {
+            statusMessage = "Export failed: ${e.message}"
+            System.err.println("[SPC] WAV export error: ${e.message}")
+        }
+    }
+
+    private fun normalizePcm(pcm: ShortArray): ShortArray {
+        if (pcm.isEmpty()) return pcm
+        val peak = pcm.maxOf { abs(it.toInt()) }
+        if (peak < 100 || peak > 20000) return pcm
+        val gain = 26000.0 / peak
+        return ShortArray(pcm.size) { (pcm[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+    }
+}

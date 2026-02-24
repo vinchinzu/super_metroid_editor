@@ -1,5 +1,7 @@
 package com.supermetroid.editor.ui
 
+import com.supermetroid.editor.data.PatternCell
+import com.supermetroid.editor.data.TilePattern
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -540,6 +542,330 @@ class EditorStateTest {
             assertEquals(1, b.tiles[0][1])
             assertEquals(2, b.tiles[0][2])
             assertEquals(32, b.tiles[1][0])
+        }
+    }
+
+    // ── Pattern CRUD ─────────────────────────────────────────────
+
+    @Nested
+    inner class PatternCrud {
+        @Test
+        fun `addPattern creates pattern with correct dimensions`() {
+            val pat = state.addPattern("test", cols = 3, rows = 2)
+            assertEquals("test", pat.name)
+            assertEquals(3, pat.cols)
+            assertEquals(2, pat.rows)
+            assertEquals(6, pat.cells.size)
+            assertTrue(state.project.patterns.contains(pat))
+        }
+
+        @Test
+        fun `removePattern deletes pattern and clears selection`() {
+            val pat = state.addPattern("doomed", cols = 2, rows = 2)
+            state.selectPattern(pat.id)
+            assertEquals(pat.id, state.selectedPatternId)
+
+            state.removePattern(pat.id)
+            assertNull(state.selectedPatternId)
+            assertFalse(state.project.patterns.any { it.id == pat.id })
+        }
+
+        @Test
+        fun `renamePattern changes name`() {
+            val pat = state.addPattern("old", cols = 1, rows = 1)
+            state.renamePattern(pat.id, "new")
+            assertEquals("new", state.project.patterns.find { it.id == pat.id }?.name)
+        }
+
+        @Test
+        fun `updatePatternCell modifies specific cell`() {
+            val pat = state.addPattern("grid", cols = 2, rows = 2)
+            val cell = PatternCell(42, blockType = 0xA, bts = 5, hFlip = true)
+            state.updatePatternCell(pat.id, r = 1, c = 0, cell)
+
+            val actual = pat.getCell(1, 0)
+            assertNotNull(actual)
+            assertEquals(42, actual!!.metatile)
+            assertEquals(0xA, actual.blockType)
+            assertEquals(5, actual.bts)
+            assertTrue(actual.hFlip)
+        }
+
+        @Test
+        fun `resizePattern preserves existing cells`() {
+            val pat = state.addPattern("grow", cols = 2, rows = 2)
+            state.updatePatternCell(pat.id, r = 0, c = 1, PatternCell(99))
+
+            state.resizePattern(pat.id, newCols = 3, newRows = 3)
+
+            val resized = state.project.patterns.find { it.id == pat.id }!!
+            assertEquals(3, resized.cols)
+            assertEquals(3, resized.rows)
+            assertEquals(99, resized.getCell(0, 1)?.metatile)
+            assertEquals(0, resized.getCell(2, 2)?.metatile)
+        }
+
+        @Test
+        fun `resizePattern shrinking truncates cells`() {
+            val pat = state.addPattern("shrink", cols = 3, rows = 3)
+            state.updatePatternCell(pat.id, r = 2, c = 2, PatternCell(77))
+
+            state.resizePattern(pat.id, newCols = 2, newRows = 2)
+
+            val resized = state.project.patterns.find { it.id == pat.id }!!
+            assertEquals(2, resized.cols)
+            assertEquals(2, resized.rows)
+            assertEquals(4, resized.cells.size)
+        }
+
+        @Test
+        fun `patternsForTileset returns CRE and matching tileset patterns`() {
+            state.addPattern("cre", cols = 1, rows = 1, tilesetId = null)
+            state.addPattern("ts5", cols = 1, rows = 1, tilesetId = 5)
+            state.addPattern("ts10", cols = 1, rows = 1, tilesetId = 10)
+
+            val forTs5 = state.patternsForTileset(5)
+            assertTrue(forTs5.any { it.name == "cre" })
+            assertTrue(forTs5.any { it.name == "ts5" })
+            assertFalse(forTs5.any { it.name == "ts10" })
+        }
+    }
+
+    // ── Pattern to Brush conversion ──────────────────────────────
+
+    @Nested
+    inner class PatternToBrush {
+        @Test
+        fun `patternToBrush creates brush with correct tiles`() {
+            val pat = state.addPattern("test", cols = 2, rows = 2)
+            state.updatePatternCell(pat.id, 0, 0, PatternCell(10, blockType = 0x8))
+            state.updatePatternCell(pat.id, 0, 1, PatternCell(20, blockType = 0x8))
+            state.updatePatternCell(pat.id, 1, 0, PatternCell(30, blockType = 0xA))
+            state.updatePatternCell(pat.id, 1, 1, PatternCell(40, blockType = 0x8))
+
+            val brush = state.patternToBrush(pat)
+            assertEquals(2, brush.rows)
+            assertEquals(2, brush.cols)
+            assertEquals(10, brush.tiles[0][0])
+            assertEquals(20, brush.tiles[0][1])
+            assertEquals(30, brush.tiles[1][0])
+            assertEquals(40, brush.tiles[1][1])
+        }
+
+        @Test
+        fun `patternToBrush preserves blockType overrides`() {
+            val pat = state.addPattern("bt", cols = 2, rows = 1)
+            state.updatePatternCell(pat.id, 0, 0, PatternCell(1, blockType = 0x3))
+            state.updatePatternCell(pat.id, 0, 1, PatternCell(2, blockType = 0xA))
+
+            val brush = state.patternToBrush(pat)
+            assertEquals(0x3, (brush.blockWordAt(0, 0) shr 12) and 0xF)
+            assertEquals(0xA, (brush.blockWordAt(0, 1) shr 12) and 0xF)
+        }
+
+        @Test
+        fun `patternToBrush preserves flip overrides`() {
+            val pat = state.addPattern("flip", cols = 1, rows = 1)
+            state.updatePatternCell(pat.id, 0, 0, PatternCell(5, hFlip = true, vFlip = true))
+
+            val brush = state.patternToBrush(pat)
+            assertTrue(brush.tileHFlip(0, 0))
+            assertTrue(brush.tileVFlip(0, 0))
+        }
+
+        @Test
+        fun `patternToBrush preserves BTS overrides`() {
+            val pat = state.addPattern("bts", cols = 1, rows = 1)
+            state.updatePatternCell(pat.id, 0, 0, PatternCell(5, bts = 0x0C))
+
+            val brush = state.patternToBrush(pat)
+            assertEquals(0x0C, brush.btsAt(0, 0))
+        }
+
+        @Test
+        fun `selectAndApplyPattern sets brush and tool`() {
+            val pat = state.addPattern("apply", cols = 2, rows = 1)
+            state.updatePatternCell(pat.id, 0, 0, PatternCell(7))
+            state.updatePatternCell(pat.id, 0, 1, PatternCell(8))
+
+            state.selectAndApplyPattern(pat.id)
+
+            assertNotNull(state.brush)
+            assertEquals(7, state.brush!!.tiles[0][0])
+            assertEquals(8, state.brush!!.tiles[0][1])
+            assertEquals(EditorTool.PAINT, state.activeTool)
+        }
+    }
+
+    // ── Pattern editing (mini editor) ────────────────────────────
+
+    @Nested
+    inner class PatternEditing {
+        private fun setupPatternForEdit(): TilePattern {
+            val pat = state.addPattern("editable", cols = 3, rows = 3)
+            state.loadPatternForEdit(pat.id)
+            return pat
+        }
+
+        @Test
+        fun `patPaintAt writes cell to pattern`() {
+            val pat = setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(42, blockType = 0xA))
+            state.patBeginStroke()
+            val changed = state.patPaintAt(1, 1)
+
+            assertTrue(changed)
+            val cell = pat.getCell(1, 1)!!
+            assertEquals(42, cell.metatile)
+            assertEquals(0xA, cell.blockType)
+        }
+
+        @Test
+        fun `patPaintAt out of bounds is safe`() {
+            setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(1))
+            state.patBeginStroke()
+            assertFalse(state.patPaintAt(-1, 0))
+            assertFalse(state.patPaintAt(99, 0))
+        }
+
+        @Test
+        fun `patPaintAt same cell twice in stroke is idempotent`() {
+            setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(5, blockType = 0x8))
+            state.patBeginStroke()
+            state.patPaintAt(0, 0)
+            val changed = state.patPaintAt(0, 0)
+            assertFalse(changed)
+        }
+
+        @Test
+        fun `patEndStroke creates undo operation`() {
+            setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(5, blockType = 0x8))
+            state.patBeginStroke()
+            state.patPaintAt(0, 0)
+            state.patEndStroke()
+
+            assertEquals(1, state.patternUndoStack.size)
+        }
+
+        @Test
+        fun `patUndo restores previous cell`() {
+            val pat = setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(42, blockType = 0x8))
+            state.patBeginStroke()
+            state.patPaintAt(0, 0)
+            state.patEndStroke()
+
+            assertEquals(42, pat.getCell(0, 0)?.metatile)
+            state.patUndo()
+            assertEquals(0, pat.getCell(0, 0)?.metatile)
+        }
+
+        @Test
+        fun `patRedo reapplies undone edit`() {
+            val pat = setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(42, blockType = 0x8))
+            state.patBeginStroke()
+            state.patPaintAt(0, 0)
+            state.patEndStroke()
+            state.patUndo()
+
+            state.patRedo()
+            assertEquals(42, pat.getCell(0, 0)?.metatile)
+        }
+
+        @Test
+        fun `patFloodFill fills connected region`() {
+            val pat = setupPatternForEdit()
+            state.setBrushForTest(TileBrush.single(77, blockType = 0x8))
+            state.patFloodFill(0, 0)
+
+            for (r in 0 until 3) for (c in 0 until 3) {
+                assertEquals(77, pat.getCell(r, c)?.metatile, "Cell ($r,$c) should be filled")
+            }
+        }
+
+        @Test
+        fun `patFloodFill respects boundaries`() {
+            val pat = setupPatternForEdit()
+            // Place a wall at row 1
+            for (c in 0 until 3) {
+                pat.setCell(1, c, PatternCell(99, blockType = 0x8))
+            }
+
+            state.setBrushForTest(TileBrush.single(5, blockType = 0x8))
+            state.patFloodFill(0, 0)
+
+            assertEquals(5, pat.getCell(0, 0)?.metatile)
+            assertEquals(5, pat.getCell(0, 1)?.metatile)
+            assertEquals(99, pat.getCell(1, 0)?.metatile, "Wall should be untouched")
+            assertEquals(0, pat.getCell(2, 0)?.metatile, "Below wall should be untouched")
+        }
+
+        @Test
+        fun `patSampleTile creates brush from pattern cell`() {
+            val pat = setupPatternForEdit()
+            pat.setCell(1, 2, PatternCell(55, blockType = 0xA, bts = 3, hFlip = true))
+
+            state.patSampleTile(2, 1)
+
+            val b = state.brush!!
+            assertEquals(55, b.primaryIndex)
+            assertEquals(0xA, b.blockTypeAt(0, 0))
+            assertEquals(3, b.btsAt(0, 0))
+        }
+    }
+
+    // ── Save selection as pattern ────────────────────────────────
+
+    @Nested
+    inner class SaveSelectionAsPattern {
+        @Test
+        fun `saveSelectionAsPattern captures map region`() {
+            writeWord(0, 0, 5 or (0x8 shl 12))
+            writeWord(1, 0, 6 or (0xA shl 12) or (1 shl 10)) // hFlip
+            writeWord(0, 1, 7 or (0x8 shl 12) or (1 shl 11)) // vFlip
+            writeWord(1, 1, 8 or (0x8 shl 12))
+            writeBts(1, 0, 0x0C)
+
+            state.mapSelStart = Pair(0, 0)
+            state.mapSelEnd = Pair(1, 1)
+            val pat = state.saveSelectionAsPattern("captured")
+
+            assertNotNull(pat)
+            assertEquals(2, pat!!.cols)
+            assertEquals(2, pat.rows)
+            assertEquals(5, pat.getCell(0, 0)?.metatile)
+            assertEquals(6, pat.getCell(0, 1)?.metatile)
+            assertTrue(pat.getCell(0, 1)?.hFlip == true)
+            assertEquals(0x0C, pat.getCell(0, 1)?.bts)
+            assertTrue(pat.getCell(1, 0)?.vFlip == true)
+        }
+
+        @Test
+        fun `saveSelectionAsPattern clears map selection`() {
+            state.mapSelStart = Pair(0, 0)
+            state.mapSelEnd = Pair(1, 1)
+            state.saveSelectionAsPattern("test")
+
+            assertNull(state.mapSelStart)
+            assertNull(state.mapSelEnd)
+        }
+
+        @Test
+        fun `saveSelectionAsPattern with no selection returns null`() {
+            state.mapSelStart = null
+            assertNull(state.saveSelectionAsPattern("nope"))
+        }
+
+        @Test
+        fun `saveSelectionAsPattern CRE has null tilesetId`() {
+            state.mapSelStart = Pair(0, 0)
+            state.mapSelEnd = Pair(0, 0)
+            val pat = state.saveSelectionAsPattern("cre", isCre = true)
+            assertNull(pat?.tilesetId)
         }
     }
 }
