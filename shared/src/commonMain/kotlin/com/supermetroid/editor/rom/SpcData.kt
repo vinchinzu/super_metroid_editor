@@ -232,8 +232,7 @@ object SpcData {
                     }
 
                     val clamped = filtered.coerceIn(-32768, 32767)
-                    // Clip to 15-bit signed then sign-extend (SPC700 behavior)
-                    val clipped = (clamped shl 1) shr 1
+                    val clipped = (clamped shl 1).toShort().toInt() shr 1
                     prev2 = prev1
                     prev1 = clipped
                     samples.add(clipped.toShort())
@@ -296,7 +295,7 @@ object SpcData {
                     }
 
                     val clamped = filtered.coerceIn(-32768, 32767)
-                    val clipped = (clamped shl 1) shr 1
+                    val clipped = (clamped shl 1).toShort().toInt() shr 1
                     prev2 = prev1
                     prev1 = clipped
                     samples.add(clipped.toShort())
@@ -314,136 +313,134 @@ object SpcData {
     // ─── Song set pointer table ─────────────────────────────────────
 
     /**
-     * Find the song set pointer table in the ROM.
-     * The music loading routine at $80:8FC7 (approximately) uses a table of
-     * 3-byte pointers indexed by (songSet / 3). Each pointer leads to a chain
-     * of SPC transfer blocks for that song set.
+     * Vanilla table address: $8F:E7E1.
      *
-     * We find the table by scanning bank $CF's transfer block chain to identify
-     * additional data sets.
+     * The music loading routine at $80:8F62 does:
+     *   LDA $8FE7E1,X  ; X = songSet value (0x00, 0x03, 0x06, ...)
+     *   STA $00
+     *   LDA $8FE7E2,X
+     *   STA $01         ; 3-byte pointer now in $00-$02
+     *   JSL $80:8024    ; call SPC upload routine
+     *
+     * The table is a packed array of 3-byte SNES pointers. Each song set
+     * value (a multiple of 3) is used DIRECTLY as a byte offset into the
+     * table, so songSet 0x03 reads bytes at table+3..table+5, etc.
+     * Song set 0x00 points to the base SPC data at $CF:8000.
      */
+    private const val VANILLA_TABLE_SNES = 0x8FE7E1
+
     fun findSongSetTransferData(
         romParser: RomParser,
         songSet: Int
     ): List<TransferBlock> {
-        // Song set 0 = the base SPC data at $CF:8000.
-        // Other song sets load additional transfer blocks from specific ROM locations.
-        // The pointer table is indexed by songSet value.
-        //
-        // Known table location: $80:8FC9 has a table of 3-byte SNES pointers.
-        // For now, scan room states to build the mapping, or use a hardcoded table
-        // based on the known SM song set locations.
-
-        val songSetPointers = findSongSetPointerTable(romParser)
-        val ptr = songSetPointers[songSet] ?: return emptyList()
+        val ptr = readSongSetPointer(romParser, songSet)
+        if (ptr <= 0) return emptyList()
         val pc = romParser.snesToPc(ptr)
+        if (pc < 0 || pc + 4 >= romParser.romData.size) return emptyList()
         return parseTransferBlocks(romParser.romData, pc)
     }
 
     /**
-     * Try to locate the song set -> SPC data pointer table.
-     * Returns a map of songSet value -> SNES address of transfer block chain.
-     *
-     * SM's music loading routine multiplies the song set value by 3 to get a
-     * byte offset into a table of 3-byte SNES pointers. Song set values are
-     * multiples of 3: 0x03, 0x06, ..., 0x45.
-     *
-     * Vanilla table is at $80:C4C5; ROM hacks may relocate it.
+     * Read the 3-byte pointer for a given song set from the pointer table.
+     * Tries the vanilla table at $8F:E7E1 first, then scans for a relocated table.
      */
-    fun findSongSetPointerTable(romParser: RomParser): Map<Int, Int> {
+    fun readSongSetPointer(romParser: RomParser, songSet: Int): Int {
         val rom = romParser.romData
 
-        val diagPc = romParser.snesToPc(0x80C4C5)
-        if (diagPc in 0 until rom.size - 30) {
-            val hex = (0 until 30).joinToString(" ") {
-                (rom[diagPc + it].toInt() and 0xFF).toString(16).padStart(2, '0')
-            }
-            System.err.println("[SPC] Bytes at \$80:C4C5 (PC=0x${diagPc.toString(16)}): $hex")
+        // Try vanilla table location first
+        val vanillaPc = romParser.snesToPc(VANILLA_TABLE_SNES)
+        val ptr = readPointerAt(rom, vanillaPc + songSet)
+        if (ptr > 0 && isValidTransferBlockPointer(rom, romParser, ptr)) {
+            return ptr
         }
 
-        for (tableBase in listOf(
-            0x80C4C5, 0x80C4C0, 0x80C4D0,
-            0x8FE000, 0x8FE010, 0x8FE020,
-            0x808FDB, 0x808FC9
-        )) {
-            val pc = romParser.snesToPc(tableBase)
-            if (pc < 0 || pc >= rom.size) continue
-            val map = tryParseSongSetTable(rom, pc, romParser)
-            if (map.size >= 5) {
-                System.err.println("[SPC] Found song set table at \$${tableBase.toString(16).uppercase()} with ${map.size} entries")
-                for ((ss, addr) in map.entries.sortedBy { it.key }) {
-                    System.err.println("[SPC]   songSet 0x${ss.toString(16).padStart(2, '0')} -> \$${addr.toString(16).uppercase()}")
-                }
-                return map
-            } else {
-                System.err.println("[SPC] Table at \$${tableBase.toString(16).uppercase()}: ${map.size} valid entries, skipping")
+        // Table may have been relocated by a ROM hack.
+        // The loader code at $80:8F72 uses LDA $XXXXXX,X (opcode BF).
+        // Scan for the pattern: BF xx xx 8F 85 00 BF yy yy 8F 85 01
+        // where yy = xx+1 (the overlapping 3-byte read pattern).
+        val tableAddr = findRelocatedTable(rom, romParser)
+        if (tableAddr >= 0) {
+            val relocPtr = readPointerAt(rom, tableAddr + songSet)
+            if (relocPtr > 0 && isValidTransferBlockPointer(rom, romParser, relocPtr)) {
+                return relocPtr
             }
         }
 
-        System.err.println("[SPC] Brute-force scanning bank \$80 for pointer table...")
-        val bankStart = romParser.snesToPc(0x808000)
-        val bankEnd = minOf(romParser.snesToPc(0x80FFFF), rom.size - 3)
-        var bestMap = emptyMap<Int, Int>()
-        var bestScan = -1
-        var scan = bankStart
-        while (scan < bankEnd) {
-            val map = tryParseSongSetTable(rom, scan, romParser)
-            if (map.size > bestMap.size) { bestMap = map; bestScan = scan }
-            if (map.size >= 8) {
-                System.err.println("[SPC] Found song set table by scan at PC=0x${scan.toString(16)} with ${map.size} entries")
-                return map
-            }
-            scan++
-        }
-        if (bestMap.size >= 3) {
-            System.err.println("[SPC] Using best scan result at PC=0x${bestScan.toString(16)} with ${bestMap.size} entries")
-            return bestMap
-        }
-        System.err.println("[SPC] Best scan: PC=0x${bestScan.toString(16)} with ${bestMap.size} entries")
-        System.err.println("[SPC] WARNING: could not find song set pointer table")
-        return emptyMap()
+        System.err.println("[SPC] WARNING: no valid pointer for songSet 0x${songSet.toString(16).padStart(2, '0')}")
+        return 0
     }
 
     /**
-     * Validate a 3-byte pointer table by checking that entries actually point
-     * to parseable SPC transfer block chains in the ROM. This is bank-agnostic
-     * and works regardless of where ROM hacks place their music data.
+     * Build the full map of songSet -> SNES pointer for all known song sets.
+     * Used for diagnostics and testing.
      */
-    private fun tryParseSongSetTable(rom: ByteArray, tablePc: Int, romParser: RomParser): Map<Int, Int> {
+    fun findSongSetPointerTable(romParser: RomParser): Map<Int, Int> {
         val result = mutableMapOf<Int, Int>()
-        var consecutiveInvalid = 0
-        for (i in 0 until 70) {
-            val off = tablePc + i * 3
-            if (off + 2 >= rom.size) break
-            val lo = rom[off].toInt() and 0xFF
-            val mid = rom[off + 1].toInt() and 0xFF
-            val hi = rom[off + 2].toInt() and 0xFF
-            val ptr = (hi shl 16) or (mid shl 8) or lo
-
-            if (ptr == 0) {
-                consecutiveInvalid++
-                if (consecutiveInvalid > 8) break
-                continue
-            }
-
-            val pc = romParser.snesToPc(ptr)
-            if (pc < 0 || pc + 4 >= rom.size) {
-                consecutiveInvalid++
-                if (consecutiveInvalid > 8) break
-                continue
-            }
-
-            val blockSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
-            val blockDest = (rom[pc + 2].toInt() and 0xFF) or ((rom[pc + 3].toInt() and 0xFF) shl 8)
-
-            if (blockSize in 1..0xF000 && blockDest < 0x10000 && pc + 4 + blockSize <= rom.size) {
-                consecutiveInvalid = 0
-                result[i] = ptr
-            } else {
-                consecutiveInvalid++
-                if (consecutiveInvalid > 8) break
+        val knownSets = listOf(0x00, 0x03, 0x06, 0x09, 0x0C, 0x0F, 0x12, 0x15,
+            0x18, 0x1B, 0x1E, 0x21, 0x24, 0x27, 0x2A, 0x2D,
+            0x30, 0x33, 0x36, 0x39, 0x3C, 0x3F, 0x42, 0x45)
+        for (ss in knownSets) {
+            val ptr = readSongSetPointer(romParser, ss)
+            if (ptr > 0) result[ss] = ptr
+        }
+        if (result.isNotEmpty()) {
+            System.err.println("[SPC] Found ${result.size} song set pointers")
+            for ((ss, addr) in result.entries.sortedBy { it.key }) {
+                System.err.println("[SPC]   songSet 0x${ss.toString(16).padStart(2, '0')} -> \$${addr.toString(16).uppercase().padStart(6, '0')}")
             }
         }
         return result
+    }
+
+    private fun readPointerAt(rom: ByteArray, pc: Int): Int {
+        if (pc < 0 || pc + 2 >= rom.size) return 0
+        val lo = rom[pc].toInt() and 0xFF
+        val mid = rom[pc + 1].toInt() and 0xFF
+        val hi = rom[pc + 2].toInt() and 0xFF
+        return (hi shl 16) or (mid shl 8) or lo
+    }
+
+    private fun isValidTransferBlockPointer(rom: ByteArray, romParser: RomParser, snesPtr: Int): Boolean {
+        val pc = romParser.snesToPc(snesPtr)
+        if (pc < 0 || pc + 4 >= rom.size) return false
+        val blkSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
+        val blkDest = (rom[pc + 2].toInt() and 0xFF) or ((rom[pc + 3].toInt() and 0xFF) shl 8)
+        return blkSize in 1..0xF000 && blkDest < 0x10000 && pc + 4 + blkSize <= rom.size
+    }
+
+    /**
+     * Scan $80:8F60-$80:8F90 for the BF opcode pattern that reads the table,
+     * in case a ROM hack relocated the table address.
+     * Pattern: BF [lo] [mid] [hi] 85 00 BF [lo+1] [mid'] [hi'] 85 01
+     */
+    private fun findRelocatedTable(rom: ByteArray, romParser: RomParser): Int {
+        val searchStart = romParser.snesToPc(0x808F50)
+        val searchEnd = minOf(romParser.snesToPc(0x808FA0), rom.size - 12)
+        if (searchStart < 0) return -1
+        for (i in searchStart until searchEnd) {
+            if (rom[i].toInt() and 0xFF != 0xBF) continue
+            if (i + 11 >= rom.size) break
+            if ((rom[i + 4].toInt() and 0xFF) != 0x85) continue
+            if ((rom[i + 5].toInt() and 0xFF) != 0x00) continue
+            if ((rom[i + 6].toInt() and 0xFF) != 0xBF) continue
+            if ((rom[i + 10].toInt() and 0xFF) != 0x85) continue
+            if ((rom[i + 11].toInt() and 0xFF) != 0x01) continue
+
+            val lo1 = rom[i + 1].toInt() and 0xFF
+            val mid1 = rom[i + 2].toInt() and 0xFF
+            val hi1 = rom[i + 3].toInt() and 0xFF
+            val lo2 = rom[i + 7].toInt() and 0xFF
+            val mid2 = rom[i + 8].toInt() and 0xFF
+            val hi2 = rom[i + 9].toInt() and 0xFF
+
+            val addr1 = (hi1 shl 16) or (mid1 shl 8) or lo1
+            val addr2 = (hi2 shl 16) or (mid2 shl 8) or lo2
+            if (addr2 == addr1 + 1) {
+                val tablePc = romParser.snesToPc(addr1)
+                System.err.println("[SPC] Found relocated table at \$${addr1.toString(16).uppercase()} (PC 0x${tablePc.toString(16)})")
+                return tablePc
+            }
+        }
+        return -1
     }
 }

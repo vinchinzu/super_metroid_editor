@@ -4,7 +4,11 @@ build/
 gradle-app.setting
 !gradle-wrapper.jar
 !gradle-wrapper.properties
+
+
 docs/Super Metroid Mod 3.0.80/*
+docs/*.png
+docs/*.txt
 
 # IDE
 .idea/
@@ -34,5 +38,6 @@ dist/
 *.smc
 *.sfc
 *.rom
+*.wav
 # But keep test-resources directory structure
 !test-resources/.gitkeep

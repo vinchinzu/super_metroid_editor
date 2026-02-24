@@ -38,6 +38,7 @@ import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
+import androidx.compose.ui.input.key.*
 import java.io.File
 
 fun main() = application {
@@ -109,7 +110,14 @@ fun main() = application {
             exitApplication()
         },
         state = windowState,
-        title = "Super Metroid Editor"
+        title = "Super Metroid Editor",
+        onPreviewKeyEvent = { keyEvent ->
+            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.S &&
+                (keyEvent.isCtrlPressed || keyEvent.isMetaPressed)) {
+                editorState.saveProject(romParser)
+                true
+            } else false
+        }
     ) {
         androidx.compose.runtime.CompositionLocalProvider(LocalSwingWindow provides window) {
         MaterialTheme {
@@ -215,6 +223,7 @@ fun main() = application {
                                 }
                             }
 
+                            key(leftTab) {
                             when (leftTab) {
                                 0 -> {
                                     // Top: room list
@@ -253,6 +262,7 @@ fun main() = application {
                                                 Text("Patterns", fontSize = 10.sp)
                                             }
                                         }
+                                        key(bottomPaneTab) {
                                         when (bottomPaneTab) {
                                             0 -> TilesetPreview(
                                                 room = selectedRoom,
@@ -264,6 +274,7 @@ fun main() = application {
                                                 editorState = editorState,
                                                 modifier = Modifier.fillMaxSize()
                                             )
+                                        }
                                         }
                                     }
                                 }
@@ -284,6 +295,7 @@ fun main() = application {
                                             Text("Patterns", fontSize = 10.sp)
                                         }
                                     }
+                                    key(tilesetSubTab) {
                                     when (tilesetSubTab) {
                                         0 -> TilesetListPanel(
                                             romParser = romParser,
@@ -311,6 +323,7 @@ fun main() = application {
                                             )
                                         }
                                     }
+                                    }
                                 }
                                 2 -> {
                                     PatchListPanel(
@@ -327,6 +340,7 @@ fun main() = application {
                                     )
                                 }
                             }
+                            }
                         }
 
                         DraggableDividerVertical(
@@ -336,6 +350,7 @@ fun main() = application {
                         )
 
                         // ── Right canvas ──
+                        key(leftTab, tilesetSubTab) {
                         when (leftTab) {
                             0 -> MapCanvas(
                                 room = selectedRoom,
@@ -371,6 +386,7 @@ fun main() = application {
                                 soundEditorState = soundEditorState,
                                 modifier = Modifier.fillMaxSize()
                             )
+                        }
                         }
                     }
                 }

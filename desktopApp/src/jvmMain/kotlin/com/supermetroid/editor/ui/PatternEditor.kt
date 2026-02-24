@@ -248,6 +248,7 @@ fun PatternEditorCanvas(
     var isPainting by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showResizeDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
 
     // Tile properties panel state
     var propsExpanded by remember { mutableStateOf(false) }
@@ -257,6 +258,9 @@ fun PatternEditorCanvas(
     var propsBts by remember { mutableStateOf(0) }
     var propsMetatile by remember { mutableStateOf(0) }
 
+    // Tile meta overlay toggle
+    var showTileMeta by remember { mutableStateOf(false) }
+
     Column(modifier = modifier.fillMaxSize()) {
         // ─── Toolbar (mirrors MapCanvas) ──────────────────────
         Row(
@@ -264,8 +268,13 @@ fun PatternEditorCanvas(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            // Pattern name + info
-            Text(pattern.name, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            // Pattern name + info (double-click to rename)
+            Text(pattern.name, fontWeight = FontWeight.Bold, fontSize = 12.sp,
+                modifier = Modifier.clickable { showRenameDialog = true })
+            IconButton(onClick = { showRenameDialog = true }, modifier = Modifier.size(20.dp)) {
+                Icon(Icons.Default.Edit, "Rename", Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text("${pattern.cols}×${pattern.rows}", fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (pattern.tilesetId != null) Text("TS:${pattern.tilesetId}", fontSize = 10.sp,
@@ -355,6 +364,17 @@ fun PatternEditorCanvas(
                 }
             }
 
+            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Tile Meta overlay toggle
+            FilterChip(
+                selected = showTileMeta,
+                onClick = { showTileMeta = !showTileMeta },
+                label = { Text("Meta", fontSize = 9.sp) },
+                modifier = Modifier.height(24.dp),
+                leadingIcon = if (showTileMeta) { { Icon(Icons.Default.Visibility, null, Modifier.size(12.dp)) } } else null
+            )
+
             Spacer(Modifier.weight(1f))
 
             // Brush / Hover info
@@ -434,8 +454,8 @@ fun PatternEditorCanvas(
             }
 
             // Render pattern image
-            val patImg = remember(pattern, ev, tg, zoomLevel) {
-                renderPatternImage(pattern, tg, zoomLevel)?.toComposeImageBitmap()
+            val patImg = remember(pattern, ev, tg, zoomLevel, showTileMeta) {
+                renderPatternImage(pattern, tg, zoomLevel, showTileMeta)?.toComposeImageBitmap()
             }
 
             Box(
@@ -874,6 +894,32 @@ fun PatternEditorCanvas(
         )
     }
 
+    // Rename dialog
+    if (showRenameDialog) {
+        var newName by remember { mutableStateOf(pattern.name) }
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename Pattern", fontSize = 14.sp) },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it },
+                    label = { Text("Name") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val trimmed = newName.trim()
+                    if (trimmed.isNotEmpty()) {
+                        editorState.renamePattern(pattern.id, trimmed)
+                    }
+                    showRenameDialog = false
+                }) { Text("Rename") }
+            },
+            dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } }
+        )
+    }
+
     // Resize dialog
     if (showResizeDialog) {
         var newW by remember { mutableStateOf(pattern.cols.toString()) }
@@ -1034,7 +1080,8 @@ private fun renderPatternThumbnail(
 internal fun renderPatternImage(
     pattern: TilePattern,
     tg: TileGraphics?,
-    zoom: Float
+    zoom: Float,
+    showTileMeta: Boolean = false
 ): BufferedImage? {
     if (tg == null) return null
     val tilePx = (16 * zoom).toInt()
@@ -1043,6 +1090,7 @@ internal fun renderPatternImage(
     if (w <= 0 || h <= 0) return null
     val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
     val g = img.createGraphics()
+    g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
     g.color = java.awt.Color(0x0C, 0x0C, 0x18)
     g.fillRect(0, 0, w, h)
     val scale = tilePx / 16
@@ -1067,6 +1115,56 @@ internal fun renderPatternImage(
     g.color = java.awt.Color(0x33, 0x33, 0x44)
     for (c in 0..pattern.cols) g.drawLine(c * tilePx, 0, c * tilePx, h)
     for (r in 0..pattern.rows) g.drawLine(0, r * tilePx, w, r * tilePx)
+
+    // Tile meta overlays
+    if (showTileMeta) {
+        val g2 = g as java.awt.Graphics2D
+        val iconSize = maxOf(tilePx / 2, 8)
+        val fontSize = maxOf(iconSize - 3, 6)
+        g2.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize)
+
+        for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
+            val cell = pattern.getCell(r, c) ?: continue
+            val bt = cell.blockType
+            if (bt == 0) continue
+            val overlay = blockTypeToOverlay(bt, cell.bts) ?: continue
+            val color = java.awt.Color(
+                ((overlay.color shr 16) and 0xFF).toInt(),
+                ((overlay.color shr 8) and 0xFF).toInt(),
+                (overlay.color and 0xFF).toInt(),
+                ((overlay.color shr 24) and 0xFF).toInt()
+            )
+            val ix = (c + 1) * tilePx - iconSize
+            val iy = (r + 1) * tilePx - iconSize
+
+            g2.color = java.awt.Color(0, 0, 0, 200)
+            g2.fillRect(ix, iy, iconSize, iconSize)
+            g2.color = color
+            g2.stroke = java.awt.BasicStroke(2f)
+            g2.drawRect(ix + 1, iy + 1, iconSize - 3, iconSize - 3)
+            g2.stroke = java.awt.BasicStroke(1f)
+
+            g2.color = java.awt.Color.WHITE
+            val fm = g2.fontMetrics
+            val label = overlay.shortLabel
+            val tw = fm.stringWidth(label)
+            g2.drawString(label, ix + (iconSize - tw) / 2, iy + (iconSize + fm.ascent - fm.descent) / 2)
+        }
+    }
+
     g.dispose()
     return img
+}
+
+private fun blockTypeToOverlay(blockType: Int, bts: Int): TileOverlay? = when (blockType) {
+    0x8 -> TileOverlay.SOLID
+    0x1 -> TileOverlay.SLOPE
+    0x9 -> TileOverlay.DOOR
+    0xA -> TileOverlay.SPIKE
+    0xF -> TileOverlay.BOMB
+    0xE -> TileOverlay.GRAPPLE
+    0x3 -> TileOverlay.TREADMILL
+    0xC -> TileOverlay.SHOT_BEAM
+    0xB -> if (bts == 0x0E || bts == 0x0F) TileOverlay.SPEED else TileOverlay.CRUMBLE
+    else -> null
 }

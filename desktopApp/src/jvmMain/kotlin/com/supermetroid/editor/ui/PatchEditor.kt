@@ -129,19 +129,19 @@ private fun PatchListItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect() }
-            .padding(horizontal = 4.dp, vertical = 1.dp),
+            .padding(horizontal = 2.dp),
         color = bg,
-        shape = RoundedCornerShape(4.dp)
+        shape = RoundedCornerShape(3.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Checkbox(
                 checked = patch.enabled,
                 onCheckedChange = { onToggle() },
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(16.dp),
                 colors = CheckboxDefaults.colors(
                     checkedColor = Color(0xFF4CAF50),
                     uncheckedColor = Color(0xFF888888),
@@ -152,28 +152,23 @@ private fun PatchListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     patch.name,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
+                    lineHeight = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = if (patch.enabled) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 )
-                val writeCount = patch.writes.sumOf { it.bytes.size }
-                Text(
-                    "${patch.writes.size} record${if (patch.writes.size != 1) "s" else ""}, $writeCount byte${if (writeCount != 1) "s" else ""}",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             Text(
                 "✕",
-                fontSize = 12.sp,
+                fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
                 modifier = Modifier
                     .clickable { onDelete() }
-                    .padding(4.dp)
+                    .padding(2.dp)
             )
         }
     }
@@ -314,7 +309,7 @@ private fun PatchToolbar(patch: SmPatch, editorState: EditorState) {
 
 // ─── Config patch: Ceres escape time ────────────────────────────────────
 
-private val CERES_ESCAPE_OPTIONS = listOf(15, 16, 20, 30, 45, 60, 90, 120, 150, 180, 240, 300)  // 16s = Kaizo default, 60s = vanilla
+private val CERES_ESCAPE_OPTIONS = listOf(15, 16, 20, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 540, 600)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -324,7 +319,7 @@ private fun CeresEscapeTimeConfig(
     romParser: RomParser?,
     modifier: Modifier
 ) {
-    val currentValue = (patch.configValue ?: 60).coerceIn(15, 300)
+    val currentValue = (patch.configValue ?: 60).coerceIn(15, 600)
     val romValue = remember(romParser) {
         romParser?.let {
             val off = it.snesToPc(CERES_TIMER_OPERAND_SNES)

@@ -195,4 +195,5 @@ class RomParserTest {
                     "ratio=${String.format("%.1f", ratio)}%, fits=$fits")
         }
     }
+
 }
