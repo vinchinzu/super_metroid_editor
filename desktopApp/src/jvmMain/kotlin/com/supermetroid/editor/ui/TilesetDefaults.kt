@@ -191,6 +191,16 @@ val CERES_ESCAPE_PATCH = SmPatch(
     configValue = 60
 )
 
+/** Config patch: Beam Damage overrides. Stores per-beam damage values in configData. */
+val BEAM_DAMAGE_PATCH = SmPatch(
+    id = "config_beam_damage",
+    name = "Beam Damage Override",
+    description = "Override uncharged and charged beam damage values for all beam types.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "beam_damage"
+)
+
 /** Legacy/superseded patch IDs — removed on seed to avoid duplicates from old configs. */
 internal val LEGACY_PATCH_IDS = setOf(
     "respin", "fast_doors", "no_fanfare", "blue_speed_air", "no_walljump_kick", "instant_stop",

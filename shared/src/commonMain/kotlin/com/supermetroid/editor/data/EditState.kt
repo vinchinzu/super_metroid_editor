@@ -120,7 +120,8 @@ data class SmPatch(
     var enabled: Boolean = true,
     val writes: MutableList<PatchWrite> = mutableListOf(),
     var configType: String? = null,
-    var configValue: Int? = null
+    var configValue: Int? = null,
+    var configData: MutableMap<String, Int>? = null
 )
 
 /**

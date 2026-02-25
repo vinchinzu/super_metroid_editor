@@ -204,6 +204,8 @@ fun PatchEditorCanvas(
         // Config panel for GUI patches, hex editor for manual patches
         if (patch.configType == "ceres_escape_seconds") {
             CeresEscapeTimeConfig(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+        } else if (patch.configType == "beam_damage") {
+            BeamDamageEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
         } else {
             PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
         }

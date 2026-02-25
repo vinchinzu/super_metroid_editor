@@ -287,6 +287,14 @@ class EditorState {
         dirty = true; patchVersion++
     }
 
+    fun setPatchConfigData(id: String, key: String, value: Int) {
+        val patch = project.patches.find { it.id == id } ?: return
+        val data = patch.configData ?: mutableMapOf()
+        data[key] = value
+        patch.configData = data
+        dirty = true; patchVersion++
+    }
+
     // ─── Pattern management ──────────────────────────────────────
 
     var patternVersion by mutableStateOf(0)
@@ -758,6 +766,17 @@ class EditorState {
                 writes = mutableListOf(),
                 configType = CERES_ESCAPE_PATCH.configType,
                 configValue = CERES_ESCAPE_PATCH.configValue
+            ))
+            added++
+        }
+        if (BEAM_DAMAGE_PATCH.id !in existingIds) {
+            project.patches.add(SmPatch(
+                id = BEAM_DAMAGE_PATCH.id,
+                name = BEAM_DAMAGE_PATCH.name,
+                description = BEAM_DAMAGE_PATCH.description,
+                enabled = BEAM_DAMAGE_PATCH.enabled,
+                writes = mutableListOf(),
+                configType = BEAM_DAMAGE_PATCH.configType
             ))
             added++
         }
@@ -1792,6 +1811,22 @@ class EditorState {
                 if (off + 1 < romData.size) {
                     romData[off] = secsBcd.toByte()
                     romData[off + 1] = minsBcd.toByte()
+                }
+            } else if (patch.configType == "beam_damage") {
+                val data = patch.configData ?: continue
+                for (beam in ALL_BEAMS) {
+                    val dmg = data[beam.key] ?: continue
+                    val charged = dmg * 3
+                    val pcUncharged = romParser.snesToPc(beam.snesAddress)
+                    if (pcUncharged + 1 < romData.size) {
+                        romData[pcUncharged] = (dmg and 0xFF).toByte()
+                        romData[pcUncharged + 1] = ((dmg shr 8) and 0xFF).toByte()
+                    }
+                    val pcCharged = romParser.snesToPc(beam.chargedSnesAddress)
+                    if (pcCharged + 1 < romData.size) {
+                        romData[pcCharged] = (charged and 0xFF).toByte()
+                        romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
+                    }
                 }
             } else {
                 for (write in patch.writes) {
