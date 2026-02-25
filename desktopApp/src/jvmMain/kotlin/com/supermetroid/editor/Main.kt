@@ -38,6 +38,7 @@ import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
+import com.supermetroid.editor.ui.RoomPropertiesPanel
 import androidx.compose.ui.input.key.*
 import java.io.File
 
@@ -261,6 +262,10 @@ fun main() = application {
                                             }, modifier = Modifier.height(26.dp)) {
                                                 Text("Patterns", fontSize = 10.sp)
                                             }
+                                            Tab(selected = bottomPaneTab == 2, onClick = { bottomPaneTab = 2 },
+                                                modifier = Modifier.height(26.dp)) {
+                                                Text("Room Info", fontSize = 10.sp)
+                                            }
                                         }
                                         key(bottomPaneTab) {
                                         when (bottomPaneTab) {
@@ -274,6 +279,28 @@ fun main() = application {
                                                 editorState = editorState,
                                                 modifier = Modifier.fillMaxSize()
                                             )
+                                            2 -> {
+                                                val rp = romParser
+                                                val sr = selectedRoom
+                                                if (rp != null && sr != null) {
+                                                    val roomHeader = remember(sr) { rp.readRoomHeader(sr.getRoomIdAsInt()) }
+                                                    if (roomHeader != null) {
+                                                        RoomPropertiesPanel(
+                                                            room = roomHeader,
+                                                            romParser = rp,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                    } else {
+                                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                            Text("Could not parse room header", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                                        }
+                                                    }
+                                                } else {
+                                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                        Text("Select a room", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                }
+                                            }
                                         }
                                         }
                                     }

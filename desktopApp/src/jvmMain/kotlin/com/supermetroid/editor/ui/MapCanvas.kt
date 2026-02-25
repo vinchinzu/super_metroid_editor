@@ -79,58 +79,101 @@ private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
 
 private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
 
-/** Named BTS options for block types that have well-known sub-types. */
+/**
+ * Named BTS options for block types that have well-known sub-types.
+ * Values from SMILE RF documentation / Super Metroid Mod Manual.
+ */
 internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
-    0xC -> listOf(
-        0x00 to "Beam/Bomb (reform)",
-        0x01 to "Beam/Bomb (no reform)",
-        0x02 to "Beam/Bomb (reform, alt)",
-        0x03 to "Beam/Bomb (no reform, alt)",
-        0x04 to "Hidden (reform)",
-        0x05 to "Hidden (no reform)",
-        0x06 to "Hidden (reform, alt)",
-        0x07 to "Hidden (no reform, alt)",
-        0x08 to "Power Bomb (reform)",
-        0x09 to "Power Bomb (no reform)",
-        0x0A to "Super Missile (reform)",
-        0x0B to "Super Missile (no reform)",
+    0x2 -> listOf(
+        0x00 to "Air (X-Ray safe)",
+        0x02 to "Spike (low damage, passthrough)",
+        0x0C to "Morph Lock (custom patch)",
+        0x0D to "Morph Unlock (custom patch)",
     )
     0x3 -> listOf(
-        0x08 to "Treadmill (left)",
-        0x09 to "Treadmill (right)",
-        0x81 to "Treadmill (down, var 1)",
-        0x82 to "Treadmill (down, var 2)",
-        0x83 to "Treadmill (down, var 3)",
-        0x85 to "Treadmill (down, var 5)",
+        0x08 to "Conveyor Right",
+        0x09 to "Conveyor Left",
+        0x82 to "Quicksand (Maridia)",
+        0x85 to "Sandfall (Maridia)",
+    )
+    0x4 -> listOf(
+        0x00 to "Shootable Air (reform, 1x1)",
+        0x01 to "Shootable Air (reform, 2x1)",
+        0x02 to "Shootable Air (reform, 1x2)",
+        0x03 to "Shootable Air (reform, 2x2)",
+        0x04 to "Shootable Air (permanent, 1x1)",
+        0x05 to "Shootable Air (permanent, 2x1)",
+        0x06 to "Shootable Air (permanent, 1x2)",
+        0x07 to "Shootable Air (permanent, 2x2)",
+    )
+    0x7 -> listOf(
+        0x00 to "Bomb Air (reform, 1x1)",
+        0x01 to "Bomb Air (reform, 2x1)",
+        0x02 to "Bomb Air (reform, 1x2)",
+        0x03 to "Bomb Air (reform, 2x2)",
+        0x04 to "Bomb Air (permanent, 1x1)",
+        0x05 to "Bomb Air (permanent, 2x1)",
+        0x06 to "Bomb Air (permanent, 1x2)",
+        0x07 to "Bomb Air (permanent, 2x2)",
     )
     0xA -> listOf(
-        0x00 to "Spike (normal)",
-        0x0F to "Grinder",
+        0x00 to "Spike (normal, \$003C dmg)",
+        0x01 to "Spike (weak, \$0010 dmg)",
+        0x03 to "Spike (weak variant, \$0010 dmg)",
+        0x0E to "Invisible Bridge (solid, X-Ray reveals)",
+        0x0F to "Enemy-break Block",
     )
     0xB -> listOf(
-        0x00 to "Crumble (reform)",
-        0x04 to "Crumble (permanent)",
+        0x00 to "Crumble (reform, 1x1)",
+        0x01 to "Crumble (reform, 2x1)",
+        0x02 to "Crumble (reform, 1x2)",
+        0x03 to "Crumble (reform, 2x2)",
+        0x04 to "Crumble (permanent, 1x1)",
+        0x05 to "Crumble (permanent, 2x1)",
+        0x06 to "Crumble (permanent, 1x2)",
+        0x07 to "Crumble (permanent, 2x2)",
+        0x0B to "Enemy-Solid (air for Samus)",
         0x0E to "Speed Booster (reform)",
         0x0F to "Speed Booster (permanent)",
-        0x0B to "Barrier",
+        0x10 to "Enemy-Solid (no X-Ray)",
+    )
+    0xC -> listOf(
+        0x00 to "Beam/Bomb (reform, 1x1)",
+        0x01 to "Beam/Bomb (reform, 2x1)",
+        0x02 to "Beam/Bomb (reform, 1x2)",
+        0x03 to "Beam/Bomb (reform, 2x2)",
+        0x04 to "Hidden (reform, 1x1)",
+        0x05 to "Hidden (reform, 2x1)",
+        0x06 to "Hidden (reform, 1x2)",
+        0x07 to "Hidden (reform, 2x2)",
+        0x08 to "Power Bomb (reform)",
+        0x09 to "Power Bomb (permanent)",
+        0x0A to "Super Missile (reform)",
+        0x0B to "Super Missile (permanent)",
     )
     0xE -> listOf(
-        0x00 to "Grapple (normal)",
-        0x01 to "Crumble grapple (reform)",
-        0x02 to "Crumble grapple (permanent)",
+        0x00 to "Grapple",
+        0x01 to "Crumble Grapple (reform)",
+        0x02 to "Crumble Grapple (permanent)",
     )
     0xF -> listOf(
-        0x00 to "Bomb (reform)",
-        0x04 to "Bomb (permanent)",
+        0x00 to "Bomb Block (reform, 1x1)",
+        0x01 to "Bomb Block (reform, 2x1)",
+        0x02 to "Bomb Block (reform, 1x2)",
+        0x03 to "Bomb Block (reform, 2x2)",
+        0x04 to "Bomb Block (permanent, 1x1)",
+        0x05 to "Bomb Block (permanent, 2x1)",
+        0x06 to "Bomb Block (permanent, 1x2)",
+        0x07 to "Bomb Block (permanent, 2x2)",
     )
     else -> emptyList()
 }
 
 internal val blockTypeNames = mapOf(
     0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
-    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid", 0x9 to "Door",
-    0xA to "Spike", 0xB to "Crumble", 0xC to "Shot Block", 0xD to "V-Extend",
-    0xE to "Grapple", 0xF to "Bomb Block"
+    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x6 to "Unused", 0x7 to "Air (Bomb)",
+    0x8 to "Solid", 0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
+    0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
 )
 internal fun blockTypeName(type: Int): String = blockTypeNames[type] ?: "0x${type.toString(16).uppercase()}"
 
@@ -153,6 +196,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     ITEMS("Items", "I", 0xCCFFCC00),       // gold/yellow
     // Enemies (from enemy population data in bank $A1)
     ENEMIES("Enemies", "E", 0xCCFF6644),   // orange-red
+    // Per-screen scroll colors (Red/Blue/Green)
+    SCROLLS("Scroll Colors", "Sc", 0x60FFFFFF),
 }
 
 /** Shared tile-meta icon: black fill, colored 2px border, centered white letter (matches map). */
@@ -533,9 +578,16 @@ fun MapCanvas(
                         renderData != null -> {
                             val data = renderData!!
                             val activeOverlays = overlayToggles.filter { it.value }.keys
-                            
-                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid) {
-                                buildCompositeImage(data, activeOverlays, showGrid)
+
+                            val roomHeader = remember(room) { room?.let { romParser.readRoomHeader(it.getRoomIdAsInt()) } }
+                            val scrollDataForOverlay = remember(roomHeader) {
+                                roomHeader?.let { rh -> romParser.parseScrollData(rh.roomScrollsPtr, rh.width, rh.height) }
+                            }
+                            val rWidthScreens = roomHeader?.width ?: 0
+                            val rHeightScreens = roomHeader?.height ?: 0
+
+                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid, scrollDataForOverlay) {
+                                buildCompositeImage(data, activeOverlays, showGrid, scrollDataForOverlay, rWidthScreens, rHeightScreens)
                             }
                             
                             val hScrollState = rememberScrollState()
@@ -572,13 +624,13 @@ fun MapCanvas(
                             }
                             
                             // Re-render from working data (reacts to editVersion from EditorState)
-                            val compositeForEdit = remember(data, editVersion, activeOverlays.toSet(), showGrid) {
+                            val compositeForEdit = remember(data, editVersion, activeOverlays.toSet(), showGrid, scrollDataForOverlay) {
                                 val es = editorState
                                 if (es != null && es.workingLevelData != null) {
-                                    val roomHeader = romParser.readRoomHeader(room.getRoomIdAsInt())
-                                    if (roomHeader != null) {
-                                        val r = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(roomHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
-                                        if (r != null) return@remember buildCompositeImage(r, activeOverlays, showGrid)
+                                    val rh = roomHeader
+                                    if (rh != null) {
+                                        val r = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(rh, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
+                                        if (r != null) return@remember buildCompositeImage(r, activeOverlays, showGrid, scrollDataForOverlay, rWidthScreens, rHeightScreens)
                                     }
                                 }
                                 compositeImage
@@ -905,9 +957,10 @@ fun MapCanvas(
                             if (propsExpanded && editorState != null) {
                                 val editableBlockTypes = listOf(
                                     0x0 to "Air", 0x1 to "Slope", 0x2 to "X-Ray Air", 0x3 to "Treadmill",
-                                    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x8 to "Solid",
-                                    0x9 to "Door", 0xA to "Spike", 0xB to "Crumble",
-                                    0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
+                                    0x4 to "Shootable Air", 0x5 to "H-Extend", 0x6 to "Unused",
+                                    0x7 to "Air (Bomb)", 0x8 to "Solid", 0x9 to "Door", 0xA to "Spike",
+                                    0xB to "Crumble", 0xC to "Shot Block", 0xD to "V-Extend",
+                                    0xE to "Grapple", 0xF to "Bomb Block"
                                 )
                                 val propsTypeName = blockTypeName(propsBlockType)
                                 val btsOptions = btsOptionsForBlockType(propsBlockType)
@@ -1559,58 +1612,108 @@ fun MapCanvas(
                                                     )
                                                 }
                                             } else {
-                                                // Inline edit form
                                                 var editX by remember { mutableStateOf(enemy.x.toString()) }
                                                 var editY by remember { mutableStateOf(enemy.y.toString()) }
-                                                var editProps by remember { mutableStateOf("0x${enemy.properties.toString(16).uppercase().padStart(4, '0')}") }
+                                                var editProps by remember { mutableStateOf(enemy.properties) }
+                                                var editInitParam by remember { mutableStateOf(enemy.initParam.toString(16).uppercase().padStart(4, '0')) }
+                                                var editExtra1 by remember { mutableStateOf(enemy.extra1.toString(16).uppercase().padStart(4, '0')) }
+                                                var editExtra2 by remember { mutableStateOf(enemy.extra2.toString(16).uppercase().padStart(4, '0')) }
+                                                var editExtra3 by remember { mutableStateOf(enemy.extra3.toString(16).uppercase().padStart(4, '0')) }
                                                 Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                                                     Text(eName, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    Text("ID: 0x${enemy.id.toString(16).uppercase().padStart(4, '0')}",
+                                                        fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                                    // Position
                                                     Row(
                                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text("X:", fontSize = 9.sp)
                                                         OutlinedTextField(
-                                                            value = editX,
-                                                            onValueChange = { editX = it },
+                                                            value = editX, onValueChange = { editX = it },
                                                             modifier = Modifier.width(60.dp).height(32.dp),
                                                             textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
                                                             singleLine = true
                                                         )
                                                         Text("Y:", fontSize = 9.sp)
                                                         OutlinedTextField(
-                                                            value = editY,
-                                                            onValueChange = { editY = it },
+                                                            value = editY, onValueChange = { editY = it },
                                                             modifier = Modifier.width(60.dp).height(32.dp),
                                                             textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
                                                             singleLine = true
                                                         )
                                                     }
-                                                    Row(
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text("Props:", fontSize = 9.sp)
-                                                        OutlinedTextField(
-                                                            value = editProps,
-                                                            onValueChange = { editProps = it },
-                                                            modifier = Modifier.width(80.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                            singleLine = true
-                                                        )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                                    // Property flag checkboxes (from SMILE enemy editor)
+                                                    Text("Enemy Data Flags", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    val flagDefs = listOf(
+                                                        0x0100 to "Invisible",
+                                                        0x0200 to "Move Off-Screen",
+                                                        0x0400 to "Platform",
+                                                        0x0800 to "Non-Responsive",
+                                                        0x1000 to "Respawn",
+                                                        0x2000 to "Block Plasma",
+                                                    )
+                                                    for ((bit, label) in flagDefs) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.fillMaxWidth().height(22.dp)
+                                                        ) {
+                                                            Checkbox(
+                                                                checked = (editProps and bit) != 0,
+                                                                onCheckedChange = { checked ->
+                                                                    editProps = if (checked) editProps or bit else editProps and bit.inv()
+                                                                },
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                            Text(label, fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+                                                        }
                                                     }
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                        modifier = Modifier.padding(top = 2.dp)) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                                    // Extended fields
+                                                    @Composable
+                                                    fun HexField(label: String, value: String, onValueChange: (String) -> Unit) {
+                                                        Row(
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Text(label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                modifier = Modifier.width(60.dp))
+                                                            OutlinedTextField(
+                                                                value = value, onValueChange = onValueChange,
+                                                                modifier = Modifier.weight(1f).height(30.dp),
+                                                                textStyle = LocalTextStyle.current.copy(fontSize = 9.sp),
+                                                                singleLine = true
+                                                            )
+                                                        }
+                                                    }
+                                                    HexField("Tilemaps:", editInitParam) { editInitParam = it }
+                                                    HexField("Graphics:", editExtra1) { editExtra1 = it }
+                                                    HexField("Speed:", editExtra2) { editExtra2 = it }
+                                                    HexField("Speed 2:", editExtra3) { editExtra3 = it }
+
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                                         Surface(
                                                             modifier = Modifier.height(24.dp).clickable {
                                                                 val nx = editX.toIntOrNull() ?: enemy.x
                                                                 val ny = editY.toIntOrNull() ?: enemy.y
-                                                                val np = editProps.removePrefix("0x").removePrefix("0X")
-                                                                    .toIntOrNull(16) ?: enemy.properties
+                                                                val nInit = editInitParam.removePrefix("0x").removePrefix("0X")
+                                                                    .toIntOrNull(16) ?: enemy.initParam
+                                                                val nE1 = editExtra1.removePrefix("0x").removePrefix("0X")
+                                                                    .toIntOrNull(16) ?: enemy.extra1
+                                                                val nE2 = editExtra2.removePrefix("0x").removePrefix("0X")
+                                                                    .toIntOrNull(16) ?: enemy.extra2
+                                                                val nE3 = editExtra3.removePrefix("0x").removePrefix("0X")
+                                                                    .toIntOrNull(16) ?: enemy.extra3
                                                                 editorState.updateEnemy(
                                                                     enemy,
-                                                                    RomParser.EnemyEntry(enemy.id, nx, ny, enemy.initParam, np,
-                                                                        enemy.extra1, enemy.extra2, enemy.extra3)
+                                                                    RomParser.EnemyEntry(enemy.id, nx, ny, nInit, editProps, nE1, nE2, nE3)
                                                                 )
                                                                 editing = false
                                                             },
@@ -1728,7 +1831,10 @@ private const val SCREEN_PX = 16 * 16  // 256 — one screen in pixels
 private fun buildCompositeImage(
     data: RoomRenderData,
     activeOverlays: Set<TileOverlay>,
-    showGrid: Boolean
+    showGrid: Boolean,
+    scrollData: IntArray? = null,
+    roomWidthScreens: Int = 0,
+    roomHeightScreens: Int = 0
 ): BufferedImage {
     val img = BufferedImage(data.width, data.height, BufferedImage.TYPE_INT_ARGB)
     img.setRGB(0, 0, data.width, data.height, data.pixels, 0, data.width)
@@ -1736,6 +1842,42 @@ private fun buildCompositeImage(
     val g = img.createGraphics()
     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
     
+    // Draw per-screen scroll color overlay
+    if (activeOverlays.contains(TileOverlay.SCROLLS) && scrollData != null && roomWidthScreens > 0) {
+        val scrollColors = arrayOf(
+            java.awt.Color(200, 40, 40, 40),   // Red (hidden)
+            java.awt.Color(40, 80, 200, 40),    // Blue (explorable)
+            java.awt.Color(40, 160, 50, 40),    // Green (show floor)
+        )
+        val scrollBorderColors = arrayOf(
+            java.awt.Color(200, 40, 40, 120),
+            java.awt.Color(40, 80, 200, 120),
+            java.awt.Color(40, 160, 50, 120),
+        )
+        val scrollLabels = arrayOf("RED", "BLUE", "GREEN")
+        val g2 = g as java.awt.Graphics2D
+        g2.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 12)
+        for (sy in 0 until roomHeightScreens) {
+            for (sx in 0 until roomWidthScreens) {
+                val idx = sy * roomWidthScreens + sx
+                val scrollVal = scrollData.getOrElse(idx) { 0x01 }.coerceIn(0, 2)
+                val px = sx * SCREEN_PX
+                val py = sy * SCREEN_PX
+                g2.color = scrollColors[scrollVal]
+                g2.fillRect(px, py, SCREEN_PX, SCREEN_PX)
+                g2.color = scrollBorderColors[scrollVal]
+                g2.stroke = java.awt.BasicStroke(2f)
+                g2.drawRect(px + 1, py + 1, SCREEN_PX - 3, SCREEN_PX - 3)
+                g2.stroke = java.awt.BasicStroke(1f)
+                val fm = g2.fontMetrics
+                val label = scrollLabels[scrollVal]
+                val tw = fm.stringWidth(label)
+                g2.color = java.awt.Color(255, 255, 255, 100)
+                g2.drawString(label, px + (SCREEN_PX - tw) / 2, py + 16)
+            }
+        }
+    }
+
     // Draw screen grid when toggle is on (one line every 256 px)
     if (showGrid) {
         g.color = java.awt.Color(255, 255, 255, 0x30)

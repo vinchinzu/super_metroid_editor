@@ -369,6 +369,256 @@ class RomParser(internal val romData: ByteArray) {
         }
     }
     
+    // ─── FX data parsing ──────────────────────────────────────────────
+
+    /**
+     * 16-byte FX entry in bank $83.
+     * See SMILE documentation for full field descriptions.
+     */
+    data class FxEntry(
+        val doorSelect: Int,       // +0: door address for door-specific FX (0x0000 = default)
+        val liquidSurfaceStart: Int,// +2: starting liquid height (0xFFFF = none)
+        val liquidSurfaceNew: Int,  // +4: target liquid height for rising/lowering
+        val liquidSpeed: Int,       // +6: vertical speed of liquid
+        val liquidDelay: Int,       // +8: delay before liquid moves (1 byte)
+        val fxType: Int,            // +9: effect type (1 byte)
+        val fxBitA: Int,            // +10: lighting/transparency (1 byte)
+        val fxBitB: Int,            // +11: layer 3 draw priority (1 byte)
+        val fxBitC: Int,            // +12: liquid options bitfield (1 byte)
+        val paletteFxBitflags: Int, // +13: palette glow toggles (1 byte)
+        val tileAnimBitflags: Int,  // +14: animated tile toggles (1 byte)
+        val paletteBlend: Int       // +15: palette blend index (1 byte)
+    ) {
+        val fxTypeName: String get() = FX_TYPE_NAMES[fxType] ?: "Unknown (0x${fxType.toString(16).uppercase().padStart(2, '0')})"
+        val hasLiquid: Boolean get() = liquidSurfaceStart != 0xFFFF
+
+        companion object {
+            val FX_TYPE_NAMES = mapOf(
+                0x00 to "None",
+                0x02 to "Fog",
+                0x04 to "Water (normal)",
+                0x06 to "Lava",
+                0x08 to "Acid",
+                0x0A to "Rain",
+                0x0C to "Spores",
+                0x0E to "Haze",
+                0x10 to "Fog (dense)",
+                0x12 to "Water (Ceres)",
+                0x14 to "Water (Ceres, flowing)",
+                0x16 to "Firefleas",
+                0x18 to "Lightning",
+                0x1A to "Smoke",
+                0x1C to "Heat shimmer",
+                0x1E to "Tourian escape",
+                0x20 to "Ceres escape",
+                0x22 to "Intro / special",
+                0x24 to "BG3 transparent",
+                0x26 to "Sandstorm",
+                0x28 to "Dark visor",
+                0x2A to "Darker visor",
+                0x2C to "Black",
+            )
+
+            val LIQUID_OPTION_NAMES = mapOf(
+                0x01 to "Flowing Left",
+                0x02 to "BG Heat FX",
+                0x04 to "BG Liquid",
+                0x08 to "Large Tide",
+                0x10 to "Small Tide",
+            )
+        }
+    }
+
+    /**
+     * Parse FX data for a room. fxPtr is a 16-bit pointer in bank $83.
+     * Returns the default FX entry (door select = 0x0000) plus any door-specific entries.
+     */
+    fun parseFxEntries(fxPtr: Int): List<FxEntry> {
+        if (fxPtr == 0 || fxPtr == 0xFFFF) return emptyList()
+        val snesAddr = 0x830000 or fxPtr
+        var pc = snesToPc(snesAddr)
+        val entries = mutableListOf<FxEntry>()
+        var safety = 0
+        while (pc + 15 < romData.size && safety < 16) {
+            val entry = FxEntry(
+                doorSelect = readUInt16At(pc),
+                liquidSurfaceStart = readUInt16At(pc + 2),
+                liquidSurfaceNew = readUInt16At(pc + 4),
+                liquidSpeed = readUInt16At(pc + 6),
+                liquidDelay = romData[pc + 8].toInt() and 0xFF,
+                fxType = romData[pc + 9].toInt() and 0xFF,
+                fxBitA = romData[pc + 10].toInt() and 0xFF,
+                fxBitB = romData[pc + 11].toInt() and 0xFF,
+                fxBitC = romData[pc + 12].toInt() and 0xFF,
+                paletteFxBitflags = romData[pc + 13].toInt() and 0xFF,
+                tileAnimBitflags = romData[pc + 14].toInt() and 0xFF,
+                paletteBlend = romData[pc + 15].toInt() and 0xFF
+            )
+            entries.add(entry)
+            if (entry.doorSelect == 0) break
+            pc += 16
+            safety++
+        }
+        return entries
+    }
+
+    // ─── Scroll data parsing ──────────────────────────────────────────
+
+    /**
+     * Parse per-screen scroll data for a room.
+     * Each byte = scroll color: 0x00=Red, 0x01=Blue, 0x02=Green.
+     * Special pointers: 0x0000 = all blue, 0x0001 = all green.
+     */
+    fun parseScrollData(scrollsPtr: Int, width: Int, height: Int): IntArray {
+        val totalScreens = width * height
+        if (totalScreens <= 0) return IntArray(0)
+
+        when (scrollsPtr) {
+            0x0000 -> return IntArray(totalScreens) { 0x01 }
+            0x0001 -> return IntArray(totalScreens) { 0x02 }
+        }
+
+        val snesAddr = 0x8F0000 or scrollsPtr
+        val pc = snesToPc(snesAddr)
+        if (pc + totalScreens > romData.size) return IntArray(totalScreens) { 0x01 }
+
+        return IntArray(totalScreens) { i -> romData[pc + i].toInt() and 0xFF }
+    }
+
+    // ─── Room state info ──────────────────────────────────────────────
+
+    /**
+     * Parsed info about a room state condition.
+     */
+    data class RoomStateInfo(
+        val conditionCode: Int,    // E5E6=default, E612=event, E629=boss, etc.
+        val conditionArg: Int,     // event/boss flag byte (0 for no-arg conditions)
+        val stateDataPcOffset: Int,
+        val conditionName: String
+    ) {
+        companion object {
+            val STATE_CONDITION_NAMES = mapOf(
+                0xE5E6 to "Standard (default)",
+                0xE5EB to "Door Event",
+                0xE5FF to "Event Check",
+                0xE612 to "Boss Check",
+                0xE629 to "Morph Ball Check",
+                0xE640 to "Power Bombs",
+                0xE652 to "Speed Booster",
+                0xE669 to "Landing Site Wake",
+                0xE678 to "Tourian Access",
+            )
+
+            val EVENT_NAMES = mapOf(
+                0x00 to "Zebes is awake",
+                0x01 to "Giant metroid ate sidehopper",
+                0x02 to "Mother Brain glass broken",
+                0x03 to "Zebetite 1 destroyed",
+                0x04 to "Zebetite 2 destroyed",
+                0x05 to "Zebetite 3 destroyed",
+                0x06 to "Phantoon statue grey",
+                0x07 to "Ridley statue grey",
+                0x08 to "Draygon statue grey",
+                0x09 to "Kraid statue grey",
+                0x0A to "Path to Tourian open",
+                0x0B to "Maridia tube broken",
+                0x0C to "LN Chozo lowered acid",
+                0x0D to "Shaktool cleared path",
+                0x0E to "Zebes timebomb set",
+                0x0F to "Animals saved",
+            )
+        }
+    }
+
+    /**
+     * Parse all room states with descriptive info.
+     */
+    fun parseRoomStates(roomId: Int): List<RoomStateInfo> {
+        val pcOffset = roomIdToPc(roomId)
+        if (pcOffset < 0 || pcOffset + 11 > romData.size) return emptyList()
+
+        val stateListOffset = pcOffset + 11
+        val results = mutableListOf<RoomStateInfo>()
+        var pos = stateListOffset
+        val maxPos = minOf(stateListOffset + 200, romData.size - 1)
+
+        while (pos + 1 < maxPos) {
+            val code = readUInt16At(pos)
+            when (code) {
+                0xE5E6 -> {
+                    val statePc = pos + 2
+                    if (statePc + 26 <= romData.size) {
+                        results.add(RoomStateInfo(code, 0, statePc,
+                            RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Default"))
+                    }
+                    return results
+                }
+                0xE5EB, 0xE5FF -> {
+                    if (pos + 5 < romData.size) {
+                        val arg = readUInt16At(pos + 2)
+                        val statePtr = readUInt16At(pos + 4)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        val argName = RoomStateInfo.EVENT_NAMES[arg] ?: "Event 0x${arg.toString(16).uppercase()}"
+                        if (statePc + 26 <= romData.size) {
+                            results.add(RoomStateInfo(code, arg, statePc,
+                                "${RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Event"}: $argName"))
+                        }
+                    }
+                    pos += 6
+                }
+                0xE612, 0xE629 -> {
+                    if (pos + 4 < romData.size) {
+                        val arg = romData[pos + 2].toInt() and 0xFF
+                        val statePtr = readUInt16At(pos + 3)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        val argName = RoomStateInfo.EVENT_NAMES[arg] ?: "Flag 0x${arg.toString(16).uppercase()}"
+                        if (statePc + 26 <= romData.size) {
+                            results.add(RoomStateInfo(code, arg, statePc,
+                                "${RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Check"}: $argName"))
+                        }
+                    }
+                    pos += 5
+                }
+                0xE640, 0xE652, 0xE669, 0xE678 -> {
+                    if (pos + 3 < romData.size) {
+                        val statePtr = readUInt16At(pos + 2)
+                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        if (statePc + 26 <= romData.size) {
+                            results.add(RoomStateInfo(code, 0, statePc,
+                                RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Check"))
+                        }
+                    }
+                    pos += 4
+                }
+                else -> return results
+            }
+        }
+        return results
+    }
+
+    /**
+     * Read a 26-byte state data block from a given PC offset.
+     * Returns a map of field names to values for display/editing.
+     */
+    fun readStateData(stateDataPcOffset: Int): Map<String, Int> {
+        if (stateDataPcOffset + 26 > romData.size) return emptyMap()
+        return mapOf(
+            "levelDataPtr" to readUInt24At(stateDataPcOffset),
+            "tileset" to (romData[stateDataPcOffset + 3].toInt() and 0xFF),
+            "musicData" to (romData[stateDataPcOffset + 4].toInt() and 0xFF),
+            "musicTrack" to (romData[stateDataPcOffset + 5].toInt() and 0xFF),
+            "fxPtr" to readUInt16At(stateDataPcOffset + 6),
+            "enemySetPtr" to readUInt16At(stateDataPcOffset + 8),
+            "enemyGfxPtr" to readUInt16At(stateDataPcOffset + 10),
+            "bgScrolling" to readUInt16At(stateDataPcOffset + 12),
+            "roomScrollsPtr" to readUInt16At(stateDataPcOffset + 14),
+            "mainAsmPtr" to readUInt16At(stateDataPcOffset + 18),
+            "plmSetPtr" to readUInt16At(stateDataPcOffset + 20),
+            "bgDataPtr" to readUInt16At(stateDataPcOffset + 22),
+            "setupAsmPtr" to readUInt16At(stateDataPcOffset + 24),
+        )
+    }
+
     // ─── Utility ──────────────────────────────────────────────────────
     
     private fun readUInt16At(offset: Int): Int {
