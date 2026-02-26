@@ -1,0 +1,28 @@
+---
+description: Super Metroid ROM data conventions and common pitfalls
+alwaysApply: true
+---
+
+# ROM Data Conventions
+
+## Reference Documentation
+
+`docs/rom_data_format.md` is the verified technical reference for all ROM byte layouts, PLM IDs, and state data offsets. Consult it before modifying ROM parsing or export code. Do not rely on memory for addresses or offsets.
+
+## Address Mapping
+
+All ROM addresses use LoROM mapping: `PC = ((bank & 0x7F) * 0x8000) + (offset - 0x8000)`. Use `RomParser.snesToPc()` and `pcToSnes()` -- never hand-calculate.
+
+## Common Pitfalls
+
+- **Door PLMs have 6-byte headers** (setup + open + close pointers). Consecutive directions (Left/Right/Up/Down) are spaced **+6 apart**, not +4. Standard PLMs use 4-byte headers.
+- **PLM set terminator is 0x0000** (2 bytes), not 0xFF.
+- **State condition E5E6** means "default" -- the 26-byte state data follows inline. Other conditions point to state data elsewhere in bank $8F.
+- **Patches must be applied before free space scanning** in export, to prevent relocated room data from overwriting patch code.
+- **Enemy data lives in bank $A1**, PLM sets in bank $8F**, level data in banks $C0-$CE.
+
+## PLM ID Quick Reference
+
+- Gates: `0xC836` (single ID, param selects color/direction)
+- Blue door caps: `0xC8A2` (Left), `0xC8A8` (Right), `0xC8AE` (Up), `0xC8B4` (Down)
+- Save station: `0xB76F`, Energy refill: `0xB6DF`, Missile refill: `0xB6EB`

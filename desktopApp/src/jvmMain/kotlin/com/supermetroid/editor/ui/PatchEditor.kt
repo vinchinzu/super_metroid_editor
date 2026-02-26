@@ -28,6 +28,11 @@ import java.io.File
 
 // ─── Left column: patch list panel ──────────────────────────────────────
 
+private val SYSTEM_PATCH_PREFIXES = listOf("hex_", "config_", "bundled_")
+
+fun isSystemPatch(id: String): Boolean =
+    SYSTEM_PATCH_PREFIXES.any { id.startsWith(it) }
+
 @Composable
 fun PatchListPanel(
     editorState: EditorState,
@@ -36,6 +41,7 @@ fun PatchListPanel(
     @Suppress("UNUSED_VARIABLE") val pv = editorState.patchVersion
     val patches = editorState.project.patches
     val selectedId = editorState.selectedPatchId
+    var searchQuery by remember { mutableStateOf("") }
 
     Column(modifier = modifier) {
         Row(
@@ -85,29 +91,57 @@ fun PatchListPanel(
             }
         }
 
+        // Search field
+        BasicTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            singleLine = true,
+            textStyle = TextStyle(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            decorationBox = { inner ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    if (searchQuery.isEmpty()) {
+                        Text("Search patches...", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                    }
+                    inner()
+                }
+            }
+        )
+
         Divider()
 
-        // Patch list
+        val filtered = if (searchQuery.isBlank()) patches
+            else patches.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-            if (patches.isEmpty()) {
+            if (filtered.isEmpty()) {
                 Text(
-                    "No patches yet.\nClick + Add to create one.",
+                    if (searchQuery.isNotBlank()) "No patches match \"$searchQuery\"."
+                    else "No patches yet.\nClick + Add to create one.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
                 )
             }
-            for (patch in patches) {
+            for (patch in filtered) {
                 PatchListItem(
                     patch = patch,
                     isSelected = patch.id == selectedId,
                     onSelect = { editorState.selectPatch(patch.id) },
                     onToggle = { editorState.togglePatch(patch.id) },
-                    onDelete = { editorState.removePatch(patch.id) }
+                    onDelete = if (isSystemPatch(patch.id)) null
+                               else {{ editorState.removePatch(patch.id) }}
                 )
             }
         }
@@ -120,7 +154,7 @@ private fun PatchListItem(
     isSelected: Boolean,
     onSelect: () -> Unit,
     onToggle: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: (() -> Unit)?
 ) {
     val bg = if (isSelected) MaterialTheme.colorScheme.primaryContainer
              else Color.Transparent
@@ -162,14 +196,16 @@ private fun PatchListItem(
                 )
             }
 
-            Text(
-                "✕",
-                fontSize = 10.sp,
-                color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .clickable { onDelete() }
-                    .padding(2.dp)
-            )
+            if (onDelete != null) {
+                Text(
+                    "✕",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .clickable { onDelete() }
+                        .padding(2.dp)
+                )
+            }
         }
     }
 }

@@ -257,6 +257,7 @@ class EditorState {
     }
 
     fun removePatch(id: String) {
+        if (isSystemPatch(id)) return
         project.patches.removeAll { it.id == id }
         if (selectedPatchId == id) selectedPatchId = null
         dirty = true; patchVersion++
@@ -626,8 +627,33 @@ class EditorState {
             "builtin_left_gate", "builtin_right_gate",
             "builtin_save_station", "builtin_energy_refill",
             "builtin_missile_refill", "builtin_chozo_statue",
-            "builtin_ship"
+            "builtin_ship",
+            "builtin_gate_blue_left", "builtin_gate_blue_right",
+            "builtin_gate_pink_left", "builtin_gate_pink_right",
+            "builtin_gate_green_left", "builtin_gate_green_right",
+            "builtin_gate_yellow_left", "builtin_gate_yellow_right",
+            "builtin_door_blue_left", "builtin_door_blue_right",
+            "builtin_door_red_left", "builtin_door_red_right",
+            "builtin_door_green_left", "builtin_door_green_right",
+            "builtin_door_yellow_left", "builtin_door_yellow_right"
         )
+        // Migrate old incorrect patterns: remove broken ones so they get re-seeded.
+        // - Gate/save patterns had wrong block types and missing PLMs.
+        // - Right-facing door patterns had wrong PLM IDs (offset +4 instead of +6).
+        val brokenPatternIds = setOf("builtin_left_gate", "builtin_right_gate", "builtin_save_station")
+        val wrongDoorRightIds = setOf(
+            "builtin_door_blue_right", "builtin_door_red_right",
+            "builtin_door_green_right", "builtin_door_yellow_right"
+        )
+        val wrongPlmIds = setOf(0xC8A6, 0xC88E, 0xC876, 0xC85E)
+        project.patterns.removeAll { pat ->
+            (pat.id in brokenPatternIds && pat.builtIn &&
+                (pat.cells.any { it.blockType == 0x9 && it.bts == 0x40 } ||
+                 (pat.id == "builtin_save_station" && pat.cells.none { it.plmId != 0 }))) ||
+            (pat.id in wrongDoorRightIds && pat.builtIn &&
+                pat.cells.any { it.plmId in wrongPlmIds })
+        }
+
         val existing = project.patterns.map { it.id }.toSet()
         if (builtInIds.all { it in existing }) return
 
@@ -664,42 +690,91 @@ class EditorState {
         }
 
         fun addBuiltIn(id: String, name: String, cols: Int, rows: Int, cells: List<PatternCell>,
-                       tilesetId: Int? = null) {
+                       tilesetId: Int? = null, noFlip: Boolean = false) {
             if (id in existing) return
-            val pat = TilePattern(id, name, cols, rows, tilesetId, cells.toMutableList(), builtIn = true)
+            val pat = TilePattern(id, name, cols, rows, tilesetId, cells.toMutableList(),
+                builtIn = true, noFlip = noFlip)
             project.patterns.add(pat)
         }
 
+        // Gate helper: 1x4 gate cap with PLM on top cell.
+        // The gate PLM (0xC836) extends 4 tiles down from placement and
+        // handles all visuals/interaction. Tiles are solid CRE gate caps
+        // so the gate blocks passage in the editor preview.
+        fun gatePatternCells(plmParam: Int, hFlip: Boolean): List<PatternCell> = listOf(
+            PatternCell(0x342, blockType = 0x8, hFlip = hFlip, plmId = 0xC836, plmParam = plmParam),
+            PatternCell(0x343, blockType = 0x8, hFlip = hFlip),
+            PatternCell(0x343, blockType = 0x8, hFlip = hFlip),
+            PatternCell(0x342, blockType = 0x8, hFlip = hFlip, vFlip = true)
+        )
+
+        // Door helper: 1x4 door transition tiles with door cap PLM on top cell.
+        // CRE tiles 0x040 (top/bottom) and 0x060 (middle), block type 0x9,
+        // BTS defaults to 0x00 (user must set correct door index per room).
+        // Left-side doors have hFlip=true, right-side have hFlip=false.
+        fun doorPatternCells(capPlmId: Int, hFlip: Boolean): List<PatternCell> = listOf(
+            PatternCell(0x040, blockType = 0x9, bts = 0x00, hFlip = hFlip, plmId = capPlmId, plmParam = 0x0000),
+            PatternCell(0x060, blockType = 0x9, bts = 0x00, hFlip = hFlip),
+            PatternCell(0x060, blockType = 0x9, bts = 0x00, hFlip = hFlip, vFlip = true),
+            PatternCell(0x040, blockType = 0x9, bts = 0x00, hFlip = hFlip, vFlip = true)
+        )
+
         try {
-            // Left Gate: from Crateria room 0x91F8 (Landing Site) - gates are 1x4 CRE
-            // Standard left-facing gate cap at a known gate position
-            val leftGateCells = listOf(
-                PatternCell(0x342, blockType = 0x9, bts = 0x40),
-                PatternCell(0x343, blockType = 0x9, bts = 0x40),
-                PatternCell(0x343, blockType = 0x9, bts = 0x40),
-                PatternCell(0x342, blockType = 0x9, bts = 0x40, vFlip = true)
-            )
-            addBuiltIn("builtin_left_gate", "Left Gate", 1, 4, leftGateCells)
+            // ── Gates: all colors, left and right facing (noFlip: directional PLMs) ──
+            addBuiltIn("builtin_gate_blue_left",   "Gate: Blue (Left)",   1, 4, gatePatternCells(0x00, false), noFlip = true)
+            addBuiltIn("builtin_gate_blue_right",  "Gate: Blue (Right)",  1, 4, gatePatternCells(0x02, true), noFlip = true)
+            addBuiltIn("builtin_gate_pink_left",   "Gate: Pink (Left)",   1, 4, gatePatternCells(0x04, false), noFlip = true)
+            addBuiltIn("builtin_gate_pink_right",  "Gate: Pink (Right)",  1, 4, gatePatternCells(0x06, true), noFlip = true)
+            addBuiltIn("builtin_gate_green_left",  "Gate: Green (Left)",  1, 4, gatePatternCells(0x08, false), noFlip = true)
+            addBuiltIn("builtin_gate_green_right", "Gate: Green (Right)", 1, 4, gatePatternCells(0x0A, true), noFlip = true)
+            addBuiltIn("builtin_gate_yellow_left", "Gate: Yellow (Left)", 1, 4, gatePatternCells(0x0C, false), noFlip = true)
+            addBuiltIn("builtin_gate_yellow_right","Gate: Yellow (Right)", 1, 4, gatePatternCells(0x0E, true), noFlip = true)
 
-            val rightGateCells = leftGateCells.map { it.copy(hFlip = !it.hFlip) }
-            addBuiltIn("builtin_right_gate", "Right Gate", 1, 4, rightGateCells)
+            // Legacy generic gate patterns (kept for backward compat)
+            addBuiltIn("builtin_left_gate", "Left Gate (Blue)", 1, 4, gatePatternCells(0x00, false), noFlip = true)
+            addBuiltIn("builtin_right_gate", "Right Gate (Blue)", 1, 4, gatePatternCells(0x02, true), noFlip = true)
 
-            // Save Station: Crateria Save Room (0x93D5), floor platform at y=12
-            val saveCells = extractRegion(0x93D5, 3, 12, 5, 2)
-            if (saveCells.isNotEmpty()) {
-                addBuiltIn("builtin_save_station", "Save Station", 5, 2, saveCells)
+            // ── Doors: all colors, left and right facing ──
+            // Door PLM headers are 6 bytes (3 pointers: setup, open, close),
+            // so Left→Right offset is +6, NOT +4.
+            // Left (on left wall): Blue 0xC8A2, Red 0xC88A, Green 0xC872, Yellow 0xC85A
+            // Right (on right wall): Blue 0xC8A8, Red 0xC890, Green 0xC878, Yellow 0xC860
+            addBuiltIn("builtin_door_blue_left",   "Door: Blue (Left)",   1, 4, doorPatternCells(0xC8A2, true), noFlip = true)
+            addBuiltIn("builtin_door_blue_right",  "Door: Blue (Right)",  1, 4, doorPatternCells(0xC8A8, false), noFlip = true)
+            addBuiltIn("builtin_door_red_left",    "Door: Red (Left)",    1, 4, doorPatternCells(0xC88A, true), noFlip = true)
+            addBuiltIn("builtin_door_red_right",   "Door: Red (Right)",   1, 4, doorPatternCells(0xC890, false), noFlip = true)
+            addBuiltIn("builtin_door_green_left",  "Door: Green (Left)",  1, 4, doorPatternCells(0xC872, true), noFlip = true)
+            addBuiltIn("builtin_door_green_right", "Door: Green (Right)", 1, 4, doorPatternCells(0xC878, false), noFlip = true)
+            addBuiltIn("builtin_door_yellow_left", "Door: Yellow (Left)", 1, 4, doorPatternCells(0xC85A, true), noFlip = true)
+            addBuiltIn("builtin_door_yellow_right","Door: Yellow (Right)", 1, 4, doorPatternCells(0xC860, false), noFlip = true)
+
+            // Save Station: Crateria Save Room (0x93D5)
+            // PLM 0xB76F ("Save Point") is at tile position (5,11).
+            // Extract 5x3 starting at (3,10) to capture the full station area,
+            // then overlay the save PLM at relative position (2,1).
+            val saveCells = extractRegion(0x93D5, 3, 10, 5, 3).toMutableList()
+            if (saveCells.size >= 8) {
+                val plmIdx = 1 * 5 + 2  // row=1, col=2 → PLM at (5,11) relative to extraction (3,10)
+                saveCells[plmIdx] = saveCells[plmIdx].copy(plmId = 0xB76F, plmParam = 0x0001)
+                addBuiltIn("builtin_save_station", "Save Station", 5, 3, saveCells)
             }
 
-            // Energy Refill: Tourian Recharge Room (0xDD2E), station alcove at y=9
-            val energyCells = extractRegion(0xDD2E, 5, 9, 5, 3)
-            if (energyCells.isNotEmpty()) {
+            // Energy Refill: Tourian Recharge Room (0xDD2E)
+            // PLM 0xB6DF at tile (6,10) → extract 5x3 from (4,9), PLM at relative (2,1)
+            val energyCells = extractRegion(0xDD2E, 4, 9, 5, 3).toMutableList()
+            if (energyCells.size > 7) {
+                val ePlmIdx = 1 * 5 + 2
+                energyCells[ePlmIdx] = energyCells[ePlmIdx].copy(plmId = 0xB6DF, plmParam = 0x009D)
                 addBuiltIn("builtin_energy_refill", "Energy Refill", 5, 3, energyCells)
             }
 
-            // Missile Refill: Kraid Recharge Stations (0xA641), floor area
-            val missileCells = extractRegion(0xA641, 3, 12, 5, 2)
-            if (missileCells.isNotEmpty()) {
-                addBuiltIn("builtin_missile_refill", "Missile Refill", 5, 2, missileCells)
+            // Missile Refill: Tourian Recharge Room (0xDD2E)
+            // PLM 0xB6EB at tile (8,10) → extract 5x3 from (6,9), PLM at relative (2,1)
+            val missileCells = extractRegion(0xDD2E, 6, 9, 5, 3).toMutableList()
+            if (missileCells.size > 7) {
+                val mPlmIdx = 1 * 5 + 2
+                missileCells[mPlmIdx] = missileCells[mPlmIdx].copy(plmId = 0xB6EB, plmParam = 0x009C)
+                addBuiltIn("builtin_missile_refill", "Missile Refill", 5, 3, missileCells)
             }
 
             // Chozo Statue: Brinstar chozo room (0x9E11), CRE statue tiles at y=3
@@ -736,29 +811,22 @@ class EditorState {
         val existingIds = project.patches.map { it.id }.toSet()
         var added = 0
 
-        // Load bundled IPS patches from resources/patches/
-        try {
-            for (patch in PatchRepository.loadBundledPatches()) {
-                if (patch.id !in existingIds) {
-                    project.patches.add(patch)
-                    added++
-                }
-            }
-        } catch (e: Exception) {
-            println("Failed to load bundled patches: ${e.message}")
-        }
+        // Collect patches in desired display order: config → hardcoded → bundled IPS
+        val ordered = mutableListOf<SmPatch>()
 
-        // Add hardcoded hex-tweak demos
-        for (def in HARDCODED_PATCHES) {
-            if (def.id !in existingIds) {
-                project.patches.add(def.copy(writes = def.writes.toMutableList()))
-                added++
-            }
+        // 1. GUI config patches (featured at top)
+        if (BEAM_DAMAGE_PATCH.id !in existingIds) {
+            ordered.add(SmPatch(
+                id = BEAM_DAMAGE_PATCH.id,
+                name = BEAM_DAMAGE_PATCH.name,
+                description = BEAM_DAMAGE_PATCH.description,
+                enabled = BEAM_DAMAGE_PATCH.enabled,
+                writes = mutableListOf(),
+                configType = BEAM_DAMAGE_PATCH.configType
+            ))
         }
-
-        // Add GUI config patches
         if (CERES_ESCAPE_PATCH.id !in existingIds) {
-            project.patches.add(SmPatch(
+            ordered.add(SmPatch(
                 id = CERES_ESCAPE_PATCH.id,
                 name = CERES_ESCAPE_PATCH.name,
                 description = CERES_ESCAPE_PATCH.description,
@@ -767,18 +835,30 @@ class EditorState {
                 configType = CERES_ESCAPE_PATCH.configType,
                 configValue = CERES_ESCAPE_PATCH.configValue
             ))
-            added++
         }
-        if (BEAM_DAMAGE_PATCH.id !in existingIds) {
-            project.patches.add(SmPatch(
-                id = BEAM_DAMAGE_PATCH.id,
-                name = BEAM_DAMAGE_PATCH.name,
-                description = BEAM_DAMAGE_PATCH.description,
-                enabled = BEAM_DAMAGE_PATCH.enabled,
-                writes = mutableListOf(),
-                configType = BEAM_DAMAGE_PATCH.configType
-            ))
-            added++
+
+        // 2. Hardcoded hex-tweak patches (popular ones first via list order)
+        for (def in HARDCODED_PATCHES) {
+            if (def.id !in existingIds) {
+                ordered.add(def.copy(writes = def.writes.toMutableList()))
+            }
+        }
+
+        // 3. Bundled IPS patches
+        try {
+            for (patch in PatchRepository.loadBundledPatches()) {
+                if (patch.id !in existingIds) {
+                    ordered.add(patch)
+                }
+            }
+        } catch (e: Exception) {
+            println("Failed to load bundled patches: ${e.message}")
+        }
+
+        // Insert new patches at position 0 so they appear before any user patches
+        if (ordered.isNotEmpty()) {
+            project.patches.addAll(0, ordered)
+            added = ordered.size
         }
 
         if (added > 0) { dirty = true; patchVersion++ }
@@ -840,8 +920,14 @@ class EditorState {
         )
     }
 
-    fun toggleHFlip() { brush = brush?.copy(hFlip = !brush!!.hFlip) }
-    fun toggleVFlip() { brush = brush?.copy(vFlip = !brush!!.vFlip) }
+    fun toggleHFlip() {
+        if (activePattern?.noFlip == true) return
+        brush = brush?.copy(hFlip = !brush!!.hFlip)
+    }
+    fun toggleVFlip() {
+        if (activePattern?.noFlip == true) return
+        brush = brush?.copy(vFlip = !brush!!.vFlip)
+    }
 
     fun flipOrCaptureH() {
         if (activeTool == EditorTool.SELECT && mapSelStart != null && mapSelEnd != null) captureMapSelection()
@@ -857,6 +943,7 @@ class EditorState {
     }
 
     fun rotateClockwise() {
+        if (activePattern?.noFlip == true) return
         val b = brush ?: return
         val oldTiles = b.tiles
         val oldRowCount = oldTiles.size
@@ -1514,9 +1601,54 @@ class EditorState {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
         val romData = romParser.getRomData().copyOf()
-        var patchedRooms = 0
+        val roomsPatched = mutableSetOf<String>()
+
+        // Apply patches FIRST so free-space scanners see any code/data
+        // that patches write into otherwise-empty banks (e.g. skip_intro
+        // writes custom ASM into bank $A1 free space).
+        var patchesApplied = 0
+        for (patch in project.patches) {
+            if (!patch.enabled) continue
+            if (patch.configType == "ceres_escape_seconds") {
+                val totalSecs = (patch.configValue ?: 60).coerceIn(15, 600)
+                val mins = totalSecs / 60
+                val secs = totalSecs % 60
+                val secsBcd = ((secs / 10) shl 4) or (secs % 10)
+                val minsBcd = ((mins / 10) shl 4) or (mins % 10)
+                val off = romParser.snesToPc(CERES_TIMER_OPERAND_SNES)
+                if (off + 1 < romData.size) {
+                    romData[off] = secsBcd.toByte()
+                    romData[off + 1] = minsBcd.toByte()
+                }
+            } else if (patch.configType == "beam_damage") {
+                val data = patch.configData ?: continue
+                for (beam in ALL_BEAMS) {
+                    val dmg = data[beam.key] ?: continue
+                    val charged = dmg * 3
+                    val pcUncharged = romParser.snesToPc(beam.snesAddress)
+                    if (pcUncharged + 1 < romData.size) {
+                        romData[pcUncharged] = (dmg and 0xFF).toByte()
+                        romData[pcUncharged + 1] = ((dmg shr 8) and 0xFF).toByte()
+                    }
+                    val pcCharged = romParser.snesToPc(beam.chargedSnesAddress)
+                    if (pcCharged + 1 < romData.size) {
+                        romData[pcCharged] = (charged and 0xFF).toByte()
+                        romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
+                    }
+                }
+            } else {
+                for (write in patch.writes) {
+                    val off = write.offset.toInt()
+                    for ((i, b) in write.bytes.withIndex()) {
+                        if (off + i < romData.size) romData[off + i] = b.toByte()
+                    }
+                }
+            }
+            patchesApplied++
+        }
 
         // Free space allocator for bank $8F (PLM sets live here).
+        // Scanned AFTER patches so we don't hand out space a patch already uses.
         val bank8FEnd = romParser.snesToPc(0x8FFFFF) + 1
         val bank8FStart = romParser.snesToPc(0x8F8000)
         var freePtr = bank8FEnd
@@ -1579,7 +1711,7 @@ class EditorState {
                 if (compressed.size <= origSize) {
                     System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
                     for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
-                    patchedRooms++
+                    roomsPatched.add(roomKey)
                 } else {
                     // Relocate: find free space, trying same bank first, then $CE-$C0
                     val origBank = (room.levelDataPtr shr 16) and 0xFF
@@ -1609,7 +1741,7 @@ class EditorState {
                             }
                             for (i in pcOff until pcOff + origSize) romData[i] = 0xFF.toByte()
                             println("Room 0x$roomKey: relocated level data to \$${tryBank.toString(16).uppercase()}:${(newSnes and 0xFFFF).toString(16).uppercase()} (${compressed.size} bytes, updated $updatedStates/${allStateOffsets.size} states)")
-                            patchedRooms++
+                            roomsPatched.add(roomKey)
                             relocated = true
                             break
                         }
@@ -1692,7 +1824,7 @@ class EditorState {
                 if (writePc == plmPc) {
                     for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
                 }
-                patchedRooms++
+                roomsPatched.add(roomKey)
             }
 
             // Patch door entries (last change per index wins)
@@ -1715,7 +1847,7 @@ class EditorState {
                     romData[entryPc + 10] = (dc.entryCode and 0xFF).toByte()
                     romData[entryPc + 11] = ((dc.entryCode shr 8) and 0xFF).toByte()
                 }
-                patchedRooms++
+                roomsPatched.add(roomKey)
             }
 
             // Patch enemy population
@@ -1794,51 +1926,9 @@ class EditorState {
                 if (writePc == enemyPc) {
                     while (off < enemyPc + originalSize) { romData[off] = 0; off++ }
                 }
-                patchedRooms++
+                roomsPatched.add(roomKey)
             }
         }
-        // Apply enabled patches (hex write operations + config patches)
-        var patchesApplied = 0
-        for (patch in project.patches) {
-            if (!patch.enabled) continue
-            if (patch.configType == "ceres_escape_seconds") {
-                val totalSecs = (patch.configValue ?: 60).coerceIn(15, 600)
-                val mins = totalSecs / 60
-                val secs = totalSecs % 60
-                val secsBcd = ((secs / 10) shl 4) or (secs % 10)
-                val minsBcd = ((mins / 10) shl 4) or (mins % 10)
-                val off = romParser.snesToPc(CERES_TIMER_OPERAND_SNES)
-                if (off + 1 < romData.size) {
-                    romData[off] = secsBcd.toByte()
-                    romData[off + 1] = minsBcd.toByte()
-                }
-            } else if (patch.configType == "beam_damage") {
-                val data = patch.configData ?: continue
-                for (beam in ALL_BEAMS) {
-                    val dmg = data[beam.key] ?: continue
-                    val charged = dmg * 3
-                    val pcUncharged = romParser.snesToPc(beam.snesAddress)
-                    if (pcUncharged + 1 < romData.size) {
-                        romData[pcUncharged] = (dmg and 0xFF).toByte()
-                        romData[pcUncharged + 1] = ((dmg shr 8) and 0xFF).toByte()
-                    }
-                    val pcCharged = romParser.snesToPc(beam.chargedSnesAddress)
-                    if (pcCharged + 1 < romData.size) {
-                        romData[pcCharged] = (charged and 0xFF).toByte()
-                        romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
-                    }
-                }
-            } else {
-                for (write in patch.writes) {
-                    val off = write.offset.toInt()
-                    for ((i, b) in write.bytes.withIndex()) {
-                        if (off + i < romData.size) romData[off + i] = b.toByte()
-                    }
-                }
-            }
-            patchesApplied++
-        }
-
         // Apply custom tileset graphics
         var gfxPatched = 0
         val gfxData = project.customGfx
@@ -1886,11 +1976,11 @@ class EditorState {
             } catch (e: Exception) { println("WARN: Tileset $tsId gfx patch failed: ${e.message}") }
         }
 
-        if (patchedRooms == 0 && patchesApplied == 0 && gfxPatched == 0) return null
+        if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) return null
         val orig = File(romPath)
         val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
         out.writeBytes(romData)
-        println("Exported: ${out.absolutePath} ($patchedRooms rooms, $patchesApplied patches, $gfxPatched gfx)")
+        println("Exported: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)")
         return out.absolutePath
     }
 

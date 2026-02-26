@@ -1,0 +1,54 @@
+---
+description: Testing practices for ROM data, editor state, and export logic
+globs: "**/*.kt"
+alwaysApply: false
+---
+
+# Testing Practices
+
+## Test ROM
+
+A vanilla Super Metroid ROM lives at `test-resources/Super Metroid (JU) [!].smc`. Use it to verify ROM parsing, address calculations, and data format assumptions against known values.
+
+## When to Write Tests
+
+- **ROM format assumptions**: Any hardcoded offset, PLM ID, state condition code, or byte layout must have a test that reads the actual ROM and asserts the expected value. See `docs/rom_data_format.md` for the verified reference.
+- **New patterns/PLMs**: When adding built-in patterns (gates, doors, stations), add a test that validates the PLM IDs exist as valid headers in the ROM.
+- **Export logic changes**: When modifying `exportToRom()`, add or update tests that verify pointer updates, free space allocation, and data integrity.
+- **Compression changes**: LZ5 compress/decompress must always have round-trip tests on real room data.
+
+## Test Structure
+
+- Framework: JUnit 5 (`org.junit.jupiter`)
+- ROM parser tests: `shared/src/jvmTest/kotlin/com/supermetroid/editor/rom/`
+- Editor state tests: `desktopApp/src/jvmTest/kotlin/com/supermetroid/editor/ui/`
+- Use `loadTestRom()` helper pattern to gracefully skip when ROM is absent
+
+```kotlin
+private fun loadTestRom(): RomParser? {
+    val paths = listOf(
+        "test-resources/Super Metroid (JU) [!].smc",
+        "../../../test-resources/Super Metroid (JU) [!].smc"
+    )
+    for (p in paths) {
+        val f = File(p)
+        if (f.exists()) return RomParser.loadRom(f.absolutePath)
+    }
+    println("Test ROM not found, skipping"); return null
+}
+```
+
+## Key Invariants to Test Against ROM
+
+- Room state data is 26 bytes; PLM pointer at offset +20, enemy pop at +8, level data at +0
+- Door PLM headers are 6 bytes (3 pointers); Left→Right→Up→Down spaced +6 apart
+- Gate PLM C836 param selects color/direction (0x00-0x0E)
+- PLM set entries are 6 bytes (ID + X + Y + param), terminated by 0x0000
+- State condition sizes: E5E6=default, E612/E629=5 bytes, E652/E669=4 bytes
+
+## Running Tests
+
+```bash
+./gradlew :shared:jvmTest
+./gradlew :desktopApp:jvmTest
+```

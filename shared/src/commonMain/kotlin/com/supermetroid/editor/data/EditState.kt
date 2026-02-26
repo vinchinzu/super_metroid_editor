@@ -162,7 +162,8 @@ data class TilePattern(
     val rows: Int,
     val tilesetId: Int? = null,  // null = CRE (shared), otherwise tileset-specific
     val cells: MutableList<PatternCell> = mutableListOf(),  // row-major: cells[row * cols + col]
-    var builtIn: Boolean = false
+    var builtIn: Boolean = false,
+    val noFlip: Boolean = false   // directional patterns (gates, doors) can't be flipped/rotated
 ) {
     fun getCell(r: Int, c: Int): PatternCell? {
         val idx = r * cols + c
