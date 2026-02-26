@@ -61,4 +61,4 @@ data class TileBrush(
     }
 }
 
-enum class EditorTool { PAINT, FILL, SAMPLE, SELECT }
+enum class EditorTool { PAINT, FILL, SAMPLE, SELECT, ERASE }

@@ -50,6 +50,7 @@ compose.desktop {
             
             macOS {
                 bundleID = "com.supermetroid.editor"
+                iconFile.set(project.file("src/jvmMain/resources/macos/app_icon.icns"))
             }
         }
     }

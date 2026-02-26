@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -308,6 +309,16 @@ fun PatternEditorCanvas(
                 label = { Icon(Icons.Default.Colorize, null, Modifier.size(14.dp)) },
                 modifier = Modifier.height(24.dp)
             )
+            FilterChip(
+                selected = editorState.activeTool == EditorTool.ERASE,
+                onClick = { editorState.activeTool = EditorTool.ERASE; focusReq.requestFocus() },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                    }
+                },
+                modifier = Modifier.height(24.dp)
+            )
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -494,6 +505,11 @@ fun PatternEditorCanvas(
                                         editorState.patBeginStroke()
                                         editorState.patPaintAt(bx, by)
                                     }
+                                    EditorTool.ERASE -> {
+                                        isPainting = true
+                                        editorState.patBeginStroke()
+                                        editorState.patEraseAt(bx, by)
+                                    }
                                     EditorTool.FILL -> {
                                         editorState.patFloodFill(bx, by)
                                     }
@@ -509,8 +525,12 @@ fun PatternEditorCanvas(
                                 editorState.patHoverX = bx; editorState.patHoverY = by
                                 val btns = (event.nativeEvent as? MouseEvent)?.modifiersEx ?: 0
                                 val lmb = (btns and java.awt.event.InputEvent.BUTTON1_DOWN_MASK) != 0
-                                if (isPainting && lmb && editorState.activeTool == EditorTool.PAINT) {
-                                    editorState.patPaintAt(bx, by)
+                                if (isPainting && lmb) {
+                                    when (editorState.activeTool) {
+                                        EditorTool.PAINT -> editorState.patPaintAt(bx, by)
+                                        EditorTool.ERASE -> editorState.patEraseAt(bx, by)
+                                        else -> {}
+                                    }
                                 }
                             }
                             .onPointerEvent(PointerEventType.Release) {
@@ -523,6 +543,32 @@ fun PatternEditorCanvas(
                                 editorState.patHoverX = -1; editorState.patHoverY = -1
                             }
                     )
+
+                    // Eraser cursor preview
+                    if (editorState.patHoverX >= 0 && editorState.activeTool == EditorTool.ERASE) {
+                        val hx = editorState.patHoverX
+                        val hy = editorState.patHoverY
+                        val tileSize = tilePx / density
+                        val left = hx * tileSize
+                        val top = hy * tileSize
+                        androidx.compose.foundation.Canvas(
+                            modifier = Modifier
+                                .offset(x = left.dp, y = top.dp)
+                                .requiredSize(tileSize.dp)
+                        ) {
+                            drawRect(Color.Red.copy(alpha = 0.25f), size = size)
+                            drawRect(Color.Red.copy(alpha = 0.8f), size = size,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f))
+                            drawLine(Color.Red.copy(alpha = 0.8f),
+                                start = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                end = androidx.compose.ui.geometry.Offset(size.width - 2f, size.height - 2f),
+                                strokeWidth = 2f)
+                            drawLine(Color.Red.copy(alpha = 0.8f),
+                                start = androidx.compose.ui.geometry.Offset(size.width - 2f, 2f),
+                                end = androidx.compose.ui.geometry.Offset(2f, size.height - 2f),
+                                strokeWidth = 2f)
+                        }
+                    }
 
                     // Brush preview ghost
                     if (editorState.patHoverX >= 0 && editorState.brush != null &&

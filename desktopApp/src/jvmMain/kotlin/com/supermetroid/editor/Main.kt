@@ -14,6 +14,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import androidx.compose.ui.res.painterResource
 import java.awt.FileDialog
 import java.awt.Frame
 import com.supermetroid.editor.data.AppConfig
@@ -112,6 +113,7 @@ fun main() = application {
         },
         state = windowState,
         title = "Super Metroid Editor",
+        icon = painterResource("app_icon.png"),
         onPreviewKeyEvent = { keyEvent ->
             if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.S &&
                 (keyEvent.isCtrlPressed || keyEvent.isMetaPressed)) {

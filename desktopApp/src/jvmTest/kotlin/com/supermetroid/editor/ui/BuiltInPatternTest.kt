@@ -48,9 +48,16 @@ class BuiltInPatternTest {
             "builtin_door_red_left", "builtin_door_red_right",
             "builtin_door_green_left", "builtin_door_green_right",
             "builtin_door_yellow_left", "builtin_door_yellow_right",
-            "builtin_save_station",
-            "builtin_energy_refill", "builtin_missile_refill",
         )
+
+        // PLM-only items should NOT have tile patterns
+        val plmOnlyIds = listOf(
+            "builtin_save_station", "builtin_energy_refill",
+            "builtin_missile_refill", "builtin_chozo_statue", "builtin_ship"
+        )
+        for (id in plmOnlyIds) {
+            assertFalse(id in patternIds, "PLM-only pattern should not exist: $id")
+        }
         for (id in expectedIds) {
             assertTrue(id in patternIds, "Missing built-in pattern: $id")
         }
@@ -149,15 +156,43 @@ class BuiltInPatternTest {
     }
 
     @Test
-    fun `save station pattern has PLM B76F`() {
+    fun `migration removes PLM-only patterns from existing projects`() {
         val parser = loadTestRom() ?: return
         val state = EditorState()
+
+        // Simulate old project with PLM-only patterns that shouldn't exist
+        val oldSave = com.supermetroid.editor.data.TilePattern(
+            id = "builtin_save_station", name = "Save Station",
+            cols = 5, rows = 3, builtIn = true,
+            cells = mutableListOf(
+                com.supermetroid.editor.data.PatternCell(0, plmId = 0xB76F, plmParam = 0x0001),
+                com.supermetroid.editor.data.PatternCell(0),
+                com.supermetroid.editor.data.PatternCell(0),
+            )
+        )
+        val oldEnergy = com.supermetroid.editor.data.TilePattern(
+            id = "builtin_energy_refill", name = "Energy Refill",
+            cols = 5, rows = 3, builtIn = true,
+            cells = mutableListOf(
+                com.supermetroid.editor.data.PatternCell(0, plmId = 0xB6DF),
+                com.supermetroid.editor.data.PatternCell(0),
+            )
+        )
+        val oldShip = com.supermetroid.editor.data.TilePattern(
+            id = "builtin_ship", name = "Ship",
+            cols = 8, rows = 3, builtIn = true,
+            cells = mutableListOf(com.supermetroid.editor.data.PatternCell(0))
+        )
+        state.project.patterns.addAll(listOf(oldSave, oldEnergy, oldShip))
+
         state.seedBuiltInPatterns(parser)
 
-        val save = state.project.patterns.find { it.id == "builtin_save_station" }
-        assertNotNull(save, "Save station pattern should exist")
-        assertTrue(save!!.cells.any { it.plmId == 0xB76F },
-            "Save station pattern should contain PLM 0xB76F")
+        assertNull(state.project.patterns.find { it.id == "builtin_save_station" },
+            "Save station pattern should be removed")
+        assertNull(state.project.patterns.find { it.id == "builtin_energy_refill" },
+            "Energy refill pattern should be removed")
+        assertNull(state.project.patterns.find { it.id == "builtin_ship" },
+            "Ship pattern should be removed")
     }
 
     @Test

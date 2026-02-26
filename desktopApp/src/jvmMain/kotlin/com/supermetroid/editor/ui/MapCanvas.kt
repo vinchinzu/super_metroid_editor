@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -277,6 +278,7 @@ fun MapCanvas(
                             }; true
                         }
                         Key.F -> { editorState.activeTool = EditorTool.FILL; true }
+                        Key.E -> { editorState.activeTool = EditorTool.ERASE; true }
                         Key.I -> { editorState.activeTool = EditorTool.SAMPLE; true }
                         Key.Enter -> {
                             if (editorState.activeTool == EditorTool.SELECT && editorState.mapSelStart != null) {
@@ -451,6 +453,16 @@ fun MapCanvas(
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Icon(Icons.Default.FormatColorFill, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                            },
+                            modifier = Modifier.height(24.dp)
+                        )
+                        FilterChip(
+                            selected = editorState.activeTool == EditorTool.ERASE,
+                            onClick = { editorState.activeTool = EditorTool.ERASE; mapFocusReq.requestFocus() },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
                                 }
                             },
                             modifier = Modifier.height(24.dp)
@@ -691,6 +703,9 @@ fun MapCanvas(
                                                 EditorTool.FILL -> if (editorState.brush != null) {
                                                     editorState.beginStroke(); editorState.floodFill(bx, by); editorState.endStroke()
                                                 }
+                                                EditorTool.ERASE -> {
+                                                    isPainting = true; editorState.beginStroke(); editorState.eraseAt(bx, by)
+                                                }
                                                 EditorTool.SAMPLE -> {
                                                     editorState.sampleTile(bx, by)
                                                 }
@@ -737,6 +752,7 @@ fun MapCanvas(
                                             when (editorState.activeTool) {
                                                 EditorTool.SELECT -> editorState.mapSelEnd = Pair(bx, by)
                                                 EditorTool.PAINT -> editorState.paintAt(bx, by)
+                                                EditorTool.ERASE -> editorState.eraseAt(bx, by)
                                                 else -> {}
                                             }
                                         }
@@ -828,6 +844,33 @@ fun MapCanvas(
                                                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f, 3f))
                                                 )
                                             )
+                                        }
+                                    }
+                                    // Erase cursor: red X
+                                    if (editorState != null && editorState.hoverBlockX >= 0 && editorState.activeTool == EditorTool.ERASE) {
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val tileW = size.width / data.blocksWide
+                                            val tileH = size.height / data.blocksTall
+                                            val x0 = editorState.hoverBlockX * tileW
+                                            val y0 = editorState.hoverBlockY * tileH
+                                            drawRect(
+                                                color = Color.Red.copy(alpha = 0.15f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(x0, y0),
+                                                size = androidx.compose.ui.geometry.Size(tileW, tileH),
+                                            )
+                                            drawRect(
+                                                color = Color.Red.copy(alpha = 0.6f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(x0, y0),
+                                                size = androidx.compose.ui.geometry.Size(tileW, tileH),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
+                                            )
+                                            val pad = tileW * 0.25f
+                                            drawLine(Color.Red.copy(alpha = 0.6f), androidx.compose.ui.geometry.Offset(x0 + pad, y0 + pad), androidx.compose.ui.geometry.Offset(x0 + tileW - pad, y0 + tileH - pad), strokeWidth = 1.5f)
+                                            drawLine(Color.Red.copy(alpha = 0.6f), androidx.compose.ui.geometry.Offset(x0 + tileW - pad, y0 + pad), androidx.compose.ui.geometry.Offset(x0 + pad, y0 + tileH - pad), strokeWidth = 1.5f)
                                         }
                                     }
                                     // Sample cursor: outline

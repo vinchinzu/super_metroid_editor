@@ -55,6 +55,8 @@ class EditorState {
 
     var workingLevelData: ByteArray? = null
         private set
+    var originalLevelData: ByteArray? = null
+        private set
     var workingBlocksWide: Int = 0
         private set
     var workingBlocksTall: Int = 0
@@ -450,6 +452,21 @@ class EditorState {
         return changed
     }
 
+    fun patEraseAt(bx: Int, by: Int): Boolean {
+        val pat = activePattern ?: return false
+        if (bx < 0 || by < 0 || bx >= pat.cols || by >= pat.rows) return false
+        val key = (bx.toLong() shl 32) or (by.toLong() and 0xFFFFFFFFL)
+        if (pendingPatPositions.contains(key)) return false
+        val oldCell = pat.getCell(by, bx) ?: PatternCell(0)
+        val emptyCell = PatternCell(0)
+        if (oldCell == emptyCell) return false
+        pat.setCell(by, bx, emptyCell)
+        pendingPatEdits.add(PatternEdit(by, bx, oldCell, emptyCell))
+        pendingPatPositions.add(key)
+        patternEditVersion++
+        return true
+    }
+
     fun patEndStroke() {
         if (pendingPatEdits.isEmpty()) return
         val op = PatternOperation(pendingPatEdits.toList())
@@ -625,9 +642,6 @@ class EditorState {
     fun seedBuiltInPatterns(romParser: RomParser?) {
         val builtInIds = listOf(
             "builtin_left_gate", "builtin_right_gate",
-            "builtin_save_station", "builtin_energy_refill",
-            "builtin_missile_refill", "builtin_chozo_statue",
-            "builtin_ship",
             "builtin_gate_blue_left", "builtin_gate_blue_right",
             "builtin_gate_pink_left", "builtin_gate_pink_right",
             "builtin_gate_green_left", "builtin_gate_green_right",
@@ -637,10 +651,18 @@ class EditorState {
             "builtin_door_green_left", "builtin_door_green_right",
             "builtin_door_yellow_left", "builtin_door_yellow_right"
         )
-        // Migrate old incorrect patterns: remove broken ones so they get re-seeded.
-        // - Gate/save patterns had wrong block types and missing PLMs.
-        // - Right-facing door patterns had wrong PLM IDs (offset +4 instead of +6).
-        val brokenPatternIds = setOf("builtin_left_gate", "builtin_right_gate", "builtin_save_station")
+
+        // Remove PLM-only patterns that don't need tile data.
+        // Save stations, refill stations, chozo statues, and the ship are all
+        // rendered at runtime by their PLMs — no tile pattern required.
+        val plmOnlyIds = setOf(
+            "builtin_save_station", "builtin_energy_refill",
+            "builtin_missile_refill", "builtin_chozo_statue", "builtin_ship"
+        )
+        project.patterns.removeAll { it.id in plmOnlyIds && it.builtIn }
+
+        // Migrate old incorrect gate/door patterns so they get re-seeded correctly.
+        val brokenPatternIds = setOf("builtin_left_gate", "builtin_right_gate")
         val wrongDoorRightIds = setOf(
             "builtin_door_blue_right", "builtin_door_red_right",
             "builtin_door_green_right", "builtin_door_yellow_right"
@@ -648,8 +670,7 @@ class EditorState {
         val wrongPlmIds = setOf(0xC8A6, 0xC88E, 0xC876, 0xC85E)
         project.patterns.removeAll { pat ->
             (pat.id in brokenPatternIds && pat.builtIn &&
-                (pat.cells.any { it.blockType == 0x9 && it.bts == 0x40 } ||
-                 (pat.id == "builtin_save_station" && pat.cells.none { it.plmId != 0 }))) ||
+                pat.cells.any { it.blockType == 0x9 && it.bts == 0x40 }) ||
             (pat.id in wrongDoorRightIds && pat.builtIn &&
                 pat.cells.any { it.plmId in wrongPlmIds })
         }
@@ -658,36 +679,6 @@ class EditorState {
         if (builtInIds.all { it in existing }) return
 
         if (romParser == null) return
-
-        fun extractRegion(roomId: Int, startX: Int, startY: Int, cols: Int, rows: Int): List<PatternCell> {
-            val header = romParser.readRoomHeader(roomId) ?: return emptyList()
-            val levelData = romParser.decompressLZ2(header.levelDataPtr)
-            val blocksWide = header.width * 16
-            val layer1Size = ((levelData[0].toInt() and 0xFF) or
-                ((levelData[1].toInt() and 0xFF) shl 8))
-            val cells = mutableListOf<PatternCell>()
-            for (r in 0 until rows) {
-                for (c in 0 until cols) {
-                    val bx = startX + c
-                    val by = startY + r
-                    val off = 2 + (by * blocksWide + bx) * 2
-                    if (off + 1 < 2 + layer1Size) {
-                        val word = (levelData[off].toInt() and 0xFF) or
-                            ((levelData[off + 1].toInt() and 0xFF) shl 8)
-                        val metatile = word and 0x3FF
-                        val hFlip = (word shr 10) and 1 != 0
-                        val vFlip = (word shr 11) and 1 != 0
-                        val blockType = (word shr 12) and 0xF
-                        val btsOff = 2 + layer1Size + (by * blocksWide + bx)
-                        val bts = if (btsOff < levelData.size) levelData[btsOff].toInt() and 0xFF else 0
-                        cells.add(PatternCell(metatile, blockType, bts, hFlip, vFlip))
-                    } else {
-                        cells.add(PatternCell(0))
-                    }
-                }
-            }
-            return cells
-        }
 
         fun addBuiltIn(id: String, name: String, cols: Int, rows: Int, cells: List<PatternCell>,
                        tilesetId: Int? = null, noFlip: Boolean = false) {
@@ -747,47 +738,6 @@ class EditorState {
             addBuiltIn("builtin_door_green_right", "Door: Green (Right)", 1, 4, doorPatternCells(0xC878, false), noFlip = true)
             addBuiltIn("builtin_door_yellow_left", "Door: Yellow (Left)", 1, 4, doorPatternCells(0xC85A, true), noFlip = true)
             addBuiltIn("builtin_door_yellow_right","Door: Yellow (Right)", 1, 4, doorPatternCells(0xC860, false), noFlip = true)
-
-            // Save Station: Crateria Save Room (0x93D5)
-            // PLM 0xB76F ("Save Point") is at tile position (5,11).
-            // Extract 5x3 starting at (3,10) to capture the full station area,
-            // then overlay the save PLM at relative position (2,1).
-            val saveCells = extractRegion(0x93D5, 3, 10, 5, 3).toMutableList()
-            if (saveCells.size >= 8) {
-                val plmIdx = 1 * 5 + 2  // row=1, col=2 → PLM at (5,11) relative to extraction (3,10)
-                saveCells[plmIdx] = saveCells[plmIdx].copy(plmId = 0xB76F, plmParam = 0x0001)
-                addBuiltIn("builtin_save_station", "Save Station", 5, 3, saveCells)
-            }
-
-            // Energy Refill: Tourian Recharge Room (0xDD2E)
-            // PLM 0xB6DF at tile (6,10) → extract 5x3 from (4,9), PLM at relative (2,1)
-            val energyCells = extractRegion(0xDD2E, 4, 9, 5, 3).toMutableList()
-            if (energyCells.size > 7) {
-                val ePlmIdx = 1 * 5 + 2
-                energyCells[ePlmIdx] = energyCells[ePlmIdx].copy(plmId = 0xB6DF, plmParam = 0x009D)
-                addBuiltIn("builtin_energy_refill", "Energy Refill", 5, 3, energyCells)
-            }
-
-            // Missile Refill: Tourian Recharge Room (0xDD2E)
-            // PLM 0xB6EB at tile (8,10) → extract 5x3 from (6,9), PLM at relative (2,1)
-            val missileCells = extractRegion(0xDD2E, 6, 9, 5, 3).toMutableList()
-            if (missileCells.size > 7) {
-                val mPlmIdx = 1 * 5 + 2
-                missileCells[mPlmIdx] = missileCells[mPlmIdx].copy(plmId = 0xB6EB, plmParam = 0x009C)
-                addBuiltIn("builtin_missile_refill", "Missile Refill", 5, 3, missileCells)
-            }
-
-            // Chozo Statue: Brinstar chozo room (0x9E11), CRE statue tiles at y=3
-            val chozoCells = extractRegion(0x9E11, 2, 3, 5, 3)
-            if (chozoCells.isNotEmpty()) {
-                addBuiltIn("builtin_chozo_statue", "Chozo Statue", 5, 3, chozoCells)
-            }
-
-            // Ship: extract from Landing Site (0x91F8), ship is around (39,3) 8x3
-            val shipCells = extractRegion(0x91F8, 39, 3, 8, 3)
-            if (shipCells.isNotEmpty()) {
-                addBuiltIn("builtin_ship", "Ship", 8, 3, shipCells)
-            }
         } catch (e: Exception) {
             println("Failed to seed some built-in patterns: ${e.message}")
         }
@@ -1080,10 +1030,12 @@ class EditorState {
     internal fun initTestLevel(blocksWide: Int, blocksTall: Int) {
         val totalTiles = blocksWide * blocksTall
         val layer1Bytes = totalTiles * 2
-        workingLevelData = ByteArray(2 + layer1Bytes + totalTiles).also {
+        val data = ByteArray(2 + layer1Bytes + totalTiles).also {
             it[0] = (layer1Bytes and 0xFF).toByte()
             it[1] = ((layer1Bytes shr 8) and 0xFF).toByte()
         }
+        originalLevelData = data.copyOf()
+        workingLevelData = data
         workingBlocksWide = blocksWide
         workingBlocksTall = blocksTall
         undoStack.clear()
@@ -1104,6 +1056,7 @@ class EditorState {
             tileGraphics = tg
         }
         val levelData = romParser.decompressLZ2(room.levelDataPtr)
+        originalLevelData = levelData.copyOf()
         workingLevelData = levelData.copyOf()
         workingBlocksWide = room.width * 16
         workingBlocksTall = room.height * 16
@@ -1235,6 +1188,23 @@ class EditorState {
         return data[btsOffset].toInt() and 0xFF
     }
 
+    private fun readOriginalBlockWord(bx: Int, by: Int): Int {
+        val data = originalLevelData ?: return 0
+        val idx = by * workingBlocksWide + bx
+        val offset = 2 + idx * 2
+        if (offset + 1 >= data.size) return 0
+        return ((data[offset + 1].toInt() and 0xFF) shl 8) or (data[offset].toInt() and 0xFF)
+    }
+
+    private fun readOriginalBts(bx: Int, by: Int): Int {
+        val data = originalLevelData ?: return 0
+        val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
+        val idx = by * workingBlocksWide + bx
+        val btsOffset = 2 + layer1Size + idx
+        if (btsOffset >= data.size) return 0
+        return data[btsOffset].toInt() and 0xFF
+    }
+
     private fun writeBts(bx: Int, by: Int, bts: Int) {
         val data = workingLevelData ?: return
         val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
@@ -1289,6 +1259,23 @@ class EditorState {
         }
         if (changed) editVersion++
         return changed
+    }
+
+    fun eraseAt(bx: Int, by: Int): Boolean {
+        if (bx < 0 || by < 0 || bx >= workingBlocksWide || by >= workingBlocksTall) return false
+        val key = (bx.toLong() shl 32) or (by.toLong() and 0xFFFFFFFFL)
+        if (pendingPositions.contains(key)) return false
+        val oldWord = readBlockWord(bx, by)
+        val oldBts = readBts(bx, by)
+        val origWord = readOriginalBlockWord(bx, by)
+        val origBts = readOriginalBts(bx, by)
+        if (oldWord == origWord && oldBts == origBts) return false
+        writeBlockWord(bx, by, origWord)
+        writeBts(bx, by, origBts)
+        pendingEdits.add(TileEdit(bx, by, oldWord, origWord, oldBts, origBts))
+        pendingPositions.add(key)
+        editVersion++
+        return true
     }
 
     /** Set block type and BTS for a single tile (used by right-click properties).
@@ -1490,6 +1477,7 @@ class EditorState {
         val desc = when (activeTool) {
             EditorTool.PAINT -> "Paint ${pendingEdits.size} tile(s)"
             EditorTool.FILL -> "Fill ${pendingEdits.size} tile(s)"
+            EditorTool.ERASE -> "Erase ${pendingEdits.size} tile(s)"
             EditorTool.SAMPLE -> "Sample"
             EditorTool.SELECT -> "Select"
         }
