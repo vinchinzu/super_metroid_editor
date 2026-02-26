@@ -44,13 +44,34 @@ compose.desktop {
             "--add-opens", "java.desktop/com.apple.eawt.event=ALL-UNNAMED"
         )
         nativeDistributions {
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg)
+            includeAllModules = true
+
+            targetFormats(
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb
+            )
             packageName = "Super Metroid Editor"
             packageVersion = "1.0.0"
-            
+            description = "Super Metroid ROM editor — tile, PLM, enemy, and patch editing"
+            copyright = "© 2025 Super Metroid Editor"
+
             macOS {
                 bundleID = "com.supermetroid.editor"
                 iconFile.set(project.file("src/jvmMain/resources/macos/app_icon.icns"))
+            }
+
+            windows {
+                iconFile.set(project.file("src/jvmMain/resources/windows/app_icon.ico"))
+                menuGroup = "Super Metroid Editor"
+                upgradeUuid = "b3a7f2c1-8d4e-4a9f-b6c5-1e3d7f8a2b9c"
+            }
+
+            linux {
+                packageName = "supermetroideditor"
+                iconFile.set(project.file("src/jvmMain/resources/linux/app_icon.png"))
+                shortcut = true
+                menuGroup = "Games"
             }
         }
     }
