@@ -1,14 +1,13 @@
-# Super Metroid Editor (SMEDIT)
+# <img src="AppIcon.png" width="64" alt="App Icon" /> Super Metroid Editor (SMEDIT)
 
 The MS Paint of Super Metroid ROM hacking. A native cross-platform desktop editor built with Kotlin/Compose.
 
 <p>
-  <img src="screenshots/smedit_01.png" width="49%" alt="Room Editor" />
-  <img src="screenshots/smedit_02.png" width="49%" alt="Tileset Editor" />
+  <img src="screenshots/smedit_01.png" width="54%" alt="Room Editor" />
+  <img src="screenshots/smedit_03.png" width="44%" alt="Tileset Editor" />
 </p>
 <p>
-  <img src="screenshots/smedit_03.png" width="49%" alt="Sound Editor" />
-  <img src="AppIcon.png" width="120" alt="App Icon" />
+  <img src="screenshots/smedit_02.png" width="60%" alt="Sound Editor" />
 </p>
 
 ## Features
