@@ -88,8 +88,9 @@ Planned:
 - Room creation, resizing, and state management
 - Custom tileset importing and tile swapping
 - FX / scrolling / background layer editing
-- Sprite viewer and palette editor
-- IPS/BPS patch export
+- Palette editor
+- Sound Editing / Synth
+- ASM support
 - Free space management and bank expansion
 
 ## Contributing
