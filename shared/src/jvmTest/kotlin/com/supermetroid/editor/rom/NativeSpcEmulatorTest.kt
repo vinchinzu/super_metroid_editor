@@ -1,5 +1,6 @@
 package com.supermetroid.editor.rom
 
+import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.math.abs
@@ -22,16 +23,15 @@ class NativeSpcEmulatorTest {
     fun `JNA library loads successfully`() {
         val available = NativeSpcEmulator.isAvailable()
         println("libspc available via JNA: $available")
-        assert(available) { "libspc should be loadable" }
+        Assumptions.assumeTrue(available, "libspc not available (submodule not built?)")
     }
 
     @Test
     fun `render title screen via JNA`() {
-        if (!NativeSpcEmulator.isAvailable()) {
-            println("SKIP: libspc not available")
-            return
-        }
-        val parser = loadTestRom() ?: run { println("SKIP: ROM not found"); return }
+        Assumptions.assumeTrue(NativeSpcEmulator.isAvailable(), "libspc not available")
+        val parser = loadTestRom()
+        Assumptions.assumeTrue(parser != null, "Test ROM not found")
+        parser!!
 
         val baseRam = SpcData.buildInitialSpcRam(parser)
         val blocks = SpcData.findSongSetTransferData(parser, 0x03)
@@ -53,11 +53,10 @@ class NativeSpcEmulatorTest {
 
     @Test
     fun `render multiple songs and compare`() {
-        if (!NativeSpcEmulator.isAvailable()) {
-            println("SKIP: libspc not available")
-            return
-        }
-        val parser = loadTestRom() ?: run { println("SKIP: ROM not found"); return }
+        Assumptions.assumeTrue(NativeSpcEmulator.isAvailable(), "libspc not available")
+        val parser = loadTestRom()
+        Assumptions.assumeTrue(parser != null, "Test ROM not found")
+        parser!!
         val baseRam = SpcData.buildInitialSpcRam(parser)
 
         data class TestSong(val songSet: Int, val playIndex: Int, val name: String)
