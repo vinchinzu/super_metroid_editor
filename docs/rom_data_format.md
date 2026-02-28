@@ -334,6 +334,58 @@ After the terminator: 1 byte for "required kill count" (usually 0x00).
 
 ---
 
+## Station PLM Placement Rules
+
+Station PLMs (Energy Refill `$B6DF`, Missile Refill `$B6EB`, etc.) have specific
+requirements derived from the game engine (verified via `snesrev/sm` decompilation):
+
+### Runtime behavior (`PlmSetup_PlmB6DF_EnergyStation` at `$84:B21D`)
+
+When a station PLM spawns, its setup function modifies three blocks:
+- **Center** (PLM position): block type set to `0x8` (solid)
+- **Left** (x-1, same y): block type `0xB`, BTS `0x4A` (left-access trigger)
+- **Right** (x+1, same y): block type `0xB`, BTS `0x49` (right-access trigger)
+
+The PLM's draw instruction renders the station tiles (the animated sprite).
+
+### Activation conditions (`PlmSetup_B6E3_EnergyStationRightAccess`)
+
+When Samus collides with a BTS trigger block, an access PLM spawns and checks:
+1. Samus is **facing the station** (ran-into-wall pose)
+2. Samus is **NOT at full health** (`samus_health != samus_max_health`)
+3. **Pixel-exact Y alignment**: `samus_y_pos == trigger_block_y * 16 + 11`
+
+If Samus is at full health, the station silently acts as a solid wall. No error.
+
+### Y alignment requirement
+
+The Y check means the **floor must be exactly 2 blocks below the PLM center**.
+Standing Samus has a Y radius of ~20 pixels. The math works out to:
+
+```
+samus_y_pos = floor_top_pixel - 1 - y_radius
+            = (plm_y + 2) * 16 - 1 - 20
+            = plm_y * 16 + 11  ✓
+```
+
+### Pattern layout (3×3)
+
+```
+Row 0 (plm_y-1): decorative top tiles     (blockType 0x0, air)
+Row 1 (plm_y):   station center + sides   (blockType 0x8, solid — overridden by PLM)
+Row 2 (plm_y+1): bottom-center tile       (blockType 0x8, solid)
+                  floor at plm_y+2         (must be solid — existing room data)
+```
+
+Bottom-left and bottom-right pattern cells are `null` (skip painting, preserve room data).
+
+### Missile station (`$B6EB`)
+
+Same rules apply. Setup writes BTS `0x4B`/`0x4C` instead. Activation checks
+`samus_missiles != samus_max_missiles` instead of health.
+
+---
+
 ## Export Process Summary
 
 Our `EditorState.exportToRom()` follows this order:

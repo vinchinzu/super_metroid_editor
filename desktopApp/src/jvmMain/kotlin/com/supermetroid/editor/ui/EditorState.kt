@@ -694,12 +694,14 @@ class EditorState {
             pat.id in stationChozoIds && pat.builtIn && (pat.rows != 3 || pat.cols != 3)
         }
 
-        // Migrate energy/missile refill patterns: wrong PLM param or non-null bottom corners
+        // Migrate energy/missile refill patterns: wrong PLM param, non-null bottom corners,
+        // or wrong block types (middle/bottom rows must be solid 0x8 to match vanilla)
         val refillIds = setOf("builtin_energy_refill", "builtin_missile_refill")
         project.patterns.removeAll { pat ->
             pat.id in refillIds && pat.builtIn && (
                 pat.cells.any { it != null && it.plmParam == 0x8000 } ||
-                (pat.cells.size == 9 && pat.cells[6] != null)
+                (pat.cells.size == 9 && pat.cells[6] != null) ||
+                (pat.cells.size == 9 && pat.cells[4]?.blockType == 0x0)
             )
         }
 
@@ -780,15 +782,21 @@ class EditorState {
             // ── Energy Refill: 3x3, CRE tiles matching vanilla station layout ──
             // Bottom corners are null: the PLM draws its own CRE tiles at runtime,
             // and null cells let the room's background show through.
+            // Station PLM placement rules (from snesrev/sm decompilation):
+            //  - PLM center block gets type 0x8, left/right get type 0xB + BTS at runtime
+            //  - Activation requires: Samus NOT at full health, facing station, ran-into-wall pose
+            //  - Pixel-exact Y check: samus_y_pos == plm_block_y * 16 + 11
+            //    → floor must be EXACTLY 2 blocks below the PLM center
+            //  - Middle + bottom rows use blockType 0x8 (solid) to match vanilla layout
             addBuiltIn("builtin_energy_refill", "Energy Refill", 3, 3, listOf(
                 PatternCell(0x0A3, blockType = 0x0),
                 PatternCell(0x0A4, blockType = 0x0),
                 PatternCell(0x0A3, blockType = 0x0, hFlip = true),
-                PatternCell(0x0C3, blockType = 0x0),
-                PatternCell(0x0C4, blockType = 0x0, plmId = 0xB6DF, plmParam = 0x0000),
-                PatternCell(0x0C3, blockType = 0x0, hFlip = true),
+                PatternCell(0x0C3, blockType = 0x8),
+                PatternCell(0x0C4, blockType = 0x8, plmId = 0xB6DF, plmParam = 0x0000),
+                PatternCell(0x0C3, blockType = 0x8, hFlip = true),
                 null,
-                PatternCell(0x0C2, blockType = 0x0),
+                PatternCell(0x0C2, blockType = 0x8),
                 null,
             ))
 
@@ -797,11 +805,11 @@ class EditorState {
                 PatternCell(0x0A3, blockType = 0x0),
                 PatternCell(0x0A7, blockType = 0x0),
                 PatternCell(0x0A3, blockType = 0x0, hFlip = true),
-                PatternCell(0x0C3, blockType = 0x0),
-                PatternCell(0x0C7, blockType = 0x0, plmId = 0xB6EB, plmParam = 0x0000),
-                PatternCell(0x0C3, blockType = 0x0, hFlip = true),
+                PatternCell(0x0C3, blockType = 0x8),
+                PatternCell(0x0C7, blockType = 0x8, plmId = 0xB6EB, plmParam = 0x0000),
+                PatternCell(0x0C3, blockType = 0x8, hFlip = true),
                 null,
-                PatternCell(0x0C2, blockType = 0x0),
+                PatternCell(0x0C2, blockType = 0x8),
                 null,
             ))
 
@@ -2077,6 +2085,8 @@ class EditorState {
                         romData[offset + 4] = (plm.param and 0xFF).toByte()
                         romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
                         offset += 6
+                        val name = RomParser.plmDisplayName(plm.id, plm.param)
+                        println("  PLM: $name (0x${plm.id.toString(16)}) at (${plm.x},${plm.y}) param=0x${plm.param.toString(16)}")
                     }
                     romData[offset] = 0; romData[offset + 1] = 0
                     if (writePc == plmPc) {
