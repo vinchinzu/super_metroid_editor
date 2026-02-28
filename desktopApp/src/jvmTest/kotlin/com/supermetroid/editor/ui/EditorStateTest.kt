@@ -602,7 +602,7 @@ class EditorStateTest {
             assertEquals(3, resized.cols)
             assertEquals(3, resized.rows)
             assertEquals(99, resized.getCell(0, 1)?.metatile)
-            assertEquals(0, resized.getCell(2, 2)?.metatile)
+            assertNull(resized.getCell(2, 2), "New cells should be null")
         }
 
         @Test
@@ -760,7 +760,7 @@ class EditorStateTest {
 
             assertEquals(42, pat.getCell(0, 0)?.metatile)
             state.patUndo()
-            assertEquals(0, pat.getCell(0, 0)?.metatile)
+            assertNull(pat.getCell(0, 0), "Cell should be null after undo on fresh pattern")
         }
 
         @Test
@@ -801,7 +801,7 @@ class EditorStateTest {
             assertEquals(5, pat.getCell(0, 0)?.metatile)
             assertEquals(5, pat.getCell(0, 1)?.metatile)
             assertEquals(99, pat.getCell(1, 0)?.metatile, "Wall should be untouched")
-            assertEquals(0, pat.getCell(2, 0)?.metatile, "Below wall should be untouched")
+            assertNull(pat.getCell(2, 0), "Below wall should be untouched (null)")
         }
 
         @Test

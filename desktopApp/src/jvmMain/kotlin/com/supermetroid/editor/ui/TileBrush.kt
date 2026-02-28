@@ -15,7 +15,8 @@ data class TileBrush(
     val blockTypeOverrides: Map<Long, Int> = emptyMap(),
     val btsOverrides: Map<Long, Int> = emptyMap(),
     val flipOverrides: Map<Long, Int> = emptyMap(),  // per-tile: bit0=hflip, bit1=vflip
-    val plmOverrides: Map<Long, Pair<Int, Int>> = emptyMap()  // per-tile: (plmId, plmParam)
+    val plmOverrides: Map<Long, Pair<Int, Int>> = emptyMap(),  // per-tile: (plmId, plmParam)
+    val skipCells: Set<Long> = emptySet()  // cells to skip when painting (null/empty pattern cells)
 ) {
     val cols get() = tiles.firstOrNull()?.size ?: 0
     val rows get() = tiles.size

@@ -61,15 +61,19 @@ private object EnemySpriteCache {
 
 /**
  * Shot block (type 0xC) BTS classification.
- * BTS is an index into the PLM table at $94:9EA6. The PLM determines break behavior.
- * Grouped by PLM setup routine (the actual discriminator):
- *   Setup $CE6B (BTS 0x00-0x03): Beam/missile/bomb breakable (visible, various respawn modes)
- *   Setup $B3C1 (BTS 0x04-0x07): Hidden shot blocks (look solid, beam-breakable when revealed)
- *   Setup $CF2E (BTS 0x08-0x09): Power bomb breakable
- *   Setup $CF67 (BTS 0x0A-0x0B): Super missile required
- *   BTS 0x40-0x4F: door cap PLMs (managed by door PLMs, not user-editable)
+ * BTS is an index into the PLM table at $94:9EA6. Each entry selects a PLM
+ * whose setup routine determines which weapons can break the block.
+ *
+ * Vanilla SM supports BTS 0x00-0x0B only:
+ *   BTS 0x00-0x03: Any weapon breakable (beam/missile/bomb), visible, various sizes
+ *   BTS 0x04-0x07: Hidden shot blocks (look solid, any-weapon-breakable when revealed)
+ *   BTS 0x08-0x09: Power bomb only (reform / permanent)
+ *   BTS 0x0A-0x0B: Super missile only (reform / permanent)
+ *   BTS 0x0C-0x0F: Map to PLM $B62F (no-op stub) — NOT functional in vanilla SM.
+ *                   Some ROM hacks patch the table to add missile-only blocks here.
+ *   BTS 0x40-0x4F: Door cap PLMs (managed by door PLMs, not user-editable)
  */
-private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
+internal fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
     0x00, 0x01, 0x02, 0x03 -> ShotCategory.BEAM
     0x04, 0x05, 0x06, 0x07 -> ShotCategory.HIDDEN
     0x08, 0x09 -> ShotCategory.PB
@@ -78,13 +82,48 @@ private fun shotBlockCategory(bts: Int): ShotCategory = when (bts) {
     else -> ShotCategory.BEAM
 }
 
-private enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
+internal enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
 
 /**
  * Named BTS options for block types that have well-known sub-types.
  * Values from SMILE RF documentation / Super Metroid Mod Manual.
  */
 internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
+    0x1 -> listOf(
+        0x00 to "Half solid: bottom (flat platform)",
+        0x01 to "Half solid: right",
+        0x02 to "Quarter solid: bottom-right",
+        0x03 to "Three-quarter solid (no top-left)",
+        0x04 to "Fully solid (same as solid block)",
+        0x05 to "45° floor ◢ (right-low, 1 of 2)",
+        0x06 to "45° floor ◢ (right-low, 2 of 2)",
+        0x07 to "45° floor ◣ (left-low, 1 of 2)",
+        0x08 to "45° floor ◣ (left-low, 2 of 2)",
+        0x09 to "Gentle floor ◢ (right-low, 1 of 4)",
+        0x0A to "Gentle floor ◢ (right-low, 2 of 4)",
+        0x0B to "Gentle floor ◢ (right-low, 3 of 4)",
+        0x0C to "Gentle floor ◢ (right-low, 4 of 4)",
+        0x0D to "Gentle floor ◣ (left-low, 1 of 4)",
+        0x0E to "Gentle floor ◣ (left-low, 2 of 4)",
+        0x0F to "Gentle floor ◣ (left-low, 3 of 4)",
+        0x10 to "Gentle floor ◣ (left-low, 4 of 4)",
+        0x11 to "Steep floor ◢ (right-low, 1 of 1)",
+        0x12 to "Steep floor ◣ (left-low, 1 of 1)",
+        0x85 to "45° ceiling ◥ (right-high, 1 of 2)",
+        0x86 to "45° ceiling ◥ (right-high, 2 of 2)",
+        0x87 to "45° ceiling ◤ (left-high, 1 of 2)",
+        0x88 to "45° ceiling ◤ (left-high, 2 of 2)",
+        0x89 to "Gentle ceiling ◥ (1 of 4)",
+        0x8A to "Gentle ceiling ◥ (2 of 4)",
+        0x8B to "Gentle ceiling ◥ (3 of 4)",
+        0x8C to "Gentle ceiling ◥ (4 of 4)",
+        0x8D to "Gentle ceiling ◤ (1 of 4)",
+        0x8E to "Gentle ceiling ◤ (2 of 4)",
+        0x8F to "Gentle ceiling ◤ (3 of 4)",
+        0x90 to "Gentle ceiling ◤ (4 of 4)",
+        0x91 to "Steep ceiling ◥ (1 of 1)",
+        0x92 to "Steep ceiling ◤ (1 of 1)",
+    )
     0x2 -> listOf(
         0x00 to "Air (X-Ray safe)",
         0x02 to "Spike (low damage, passthrough)",
@@ -139,10 +178,10 @@ internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = w
         0x10 to "Enemy-Solid (no X-Ray)",
     )
     0xC -> listOf(
-        0x00 to "Beam/Bomb (reform, 1x1)",
-        0x01 to "Beam/Bomb (reform, 2x1)",
-        0x02 to "Beam/Bomb (reform, 1x2)",
-        0x03 to "Beam/Bomb (reform, 2x2)",
+        0x00 to "Any Weapon (reform, 1x1)",
+        0x01 to "Any Weapon (reform, 2x1)",
+        0x02 to "Any Weapon (reform, 1x2)",
+        0x03 to "Any Weapon (reform, 2x2)",
         0x04 to "Hidden (reform, 1x1)",
         0x05 to "Hidden (reform, 2x1)",
         0x06 to "Hidden (reform, 1x2)",
@@ -193,6 +232,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     SHOT_BEAM("Shot (Beam)", "Xb", 0xCCFFDD00),    // yellow: beam/missile/bomb
     SHOT_SUPER("Shot (Super)", "Xs", 0xCC00CC44),   // green: super missile required
     SHOT_PB("Shot (PB)", "Xp", 0xCCCC44AA),         // magenta: power bomb
+    @Deprecated("BTS 0x0C-0x0D are non-functional in vanilla SM", level = DeprecationLevel.HIDDEN)
+    SHOT_MISSILE("Shot (Missile)", "Xm", 0xCCFF8844), // NOT functional in vanilla SM
     // Items/powerups (from PLM data; drawn when we have item positions)
     ITEMS("Items", "I", 0xCCFFCC00),       // gold/yellow
     // Enemies (from enemy population data in bank $A1)
@@ -296,11 +337,12 @@ fun MapCanvas(
             }
         ) {
             if (room != null && romParser != null) {
-                var isLoading by remember(room.id, romParser) { mutableStateOf(true) }
-                var errorMessage by remember(room.id, romParser) { mutableStateOf<String?>(null) }
-                var renderData by remember(room.id, romParser) { mutableStateOf<RoomRenderData?>(null) }
+                val rv = editorState?.romVersion ?: 0
+                var isLoading by remember(room.id, romParser, rv) { mutableStateOf(true) }
+                var errorMessage by remember(room.id, romParser, rv) { mutableStateOf<String?>(null) }
+                var renderData by remember(room.id, romParser, rv) { mutableStateOf<RoomRenderData?>(null) }
                 
-                LaunchedEffect(room.id, romParser) {
+                LaunchedEffect(room.id, romParser, rv) {
                     isLoading = true
                     errorMessage = null
                     renderData = null
@@ -788,6 +830,8 @@ fun MapCanvas(
                                                 val img = BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB)
                                                 for (r in 0 until b.rows) {
                                                     for (c in 0 until b.cols) {
+                                                        val ck = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+                                                        if (ck in b.skipCells) continue
                                                         val idx = b.tiles.getOrNull(r)?.getOrNull(c) ?: continue
                                                         val pixels = tg.renderMetatile(idx) ?: continue
                                                         val dc = if (b.hFlip) (b.cols - 1 - c) else c
@@ -1083,7 +1127,8 @@ fun MapCanvas(
                                                             btExpanded = false
                                                             if (typeVal != propsBlockType) {
                                                                 propsBlockType = typeVal
-                                                                editorState.setTileProperties(propsBlockX, propsBlockY, typeVal, propsBts)
+                                                                propsBts = 0
+                                                                editorState.setTileProperties(propsBlockX, propsBlockY, typeVal, 0)
                                                             }
                                                         },
                                                         modifier = Modifier.height(28.dp)
@@ -1473,7 +1518,7 @@ fun MapCanvas(
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Text(pName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                if (RomParser.isStationPlm(plm.id) || RomParser.isGatePlm(plm.id)) {
+                                                if (RomParser.isStationPlm(plm.id) || RomParser.isGatePlm(plm.id) || RomParser.doorCapColor(plm.id) != null) {
                                                     Text(
                                                         "✕",
                                                         modifier = Modifier
@@ -1869,6 +1914,95 @@ fun MapCanvas(
     }
 }
 
+/**
+ * Per-column solid heights from the ROM slope table at $94:8B2B.
+ * 32 shapes × 16 columns, indexed right-to-left (col 0 = right edge).
+ * Values clamped to 0-16 for rendering (originals >16 extend into adjacent tiles).
+ */
+private val SLOPE_HEIGHTS = arrayOf(
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x00
+    intArrayOf(16,16,16,16,16,16,16,16, 0, 0, 0, 0, 0, 0, 0, 0), // 0x01
+    intArrayOf(16,16,16,16,16,16,16,16, 8, 8, 8, 8, 8, 8, 8, 8), // 0x02
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0), // 0x03
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x04
+    intArrayOf(16,15,14,13,12,11,10, 9, 9,10,11,12,13,14,15,16), // 0x05
+    intArrayOf(16,14,12,10, 8, 6, 4, 2, 2, 4, 6, 8,10,12,14,16), // 0x06
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x07
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x08
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x09
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0A
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0B
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0C
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0D
+    intArrayOf(12,12,12,12, 8, 8, 8, 8, 4, 4, 4, 4, 0, 0, 0, 0), // 0x0E
+    intArrayOf(14,14,12,12,10,10, 8, 8, 6, 6, 4, 4, 2, 2, 0, 0), // 0x0F
+    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x10
+    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x11
+    intArrayOf(16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1), // 0x12
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x13
+    intArrayOf(16,16,16,16,16,16,16,16,16,15,14,13,12,11,10, 9), // 0x14
+    intArrayOf( 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0), // 0x15
+    intArrayOf(16,16,15,15,14,14,13,13,12,12,11,11,10,10, 9, 9), // 0x16
+    intArrayOf( 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1), // 0x17
+    intArrayOf(16,16,16,15,15,15,14,14,14,13,13,13,12,12,12,11), // 0x18
+    intArrayOf(11,11,10,10,10, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6), // 0x19
+    intArrayOf( 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 1), // 0x1A
+    intArrayOf(16,16,16,16,16,16,16,16,16,14,12,10, 8, 6, 4, 2), // 0x1B
+    intArrayOf(16,14,12,10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1C
+    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,15,12, 9, 6, 3), // 0x1D
+    intArrayOf(16,16,16,16,16,16,14,11, 8, 5, 2, 0, 0, 0, 0, 0), // 0x1E
+    intArrayOf(16,13,10, 7, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1F
+)
+
+/**
+ * Draw the actual collision profile for a slope tile, matching SMILE's overlay style.
+ *
+ * Uses the ROM height table to draw the exact solid area polygon per tile.
+ * BTS bit 6 (0x40) is the collision engine's X-flip flag ($94:87C0).
+ * BTS bit 7 (0x80) selects ceiling vs floor.
+ * Shapes with all-zero heights are skipped (no visible collision).
+ */
+private fun drawSlopeOverlay(g2: java.awt.Graphics2D, px: Int, py: Int, bts: Int, color: java.awt.Color) {
+    val s = 16
+    val shape = bts and 0x1F
+    val isCeiling = (bts and 0x80) != 0
+    val xFlip = (bts and 0x40) != 0
+
+    val heights = SLOPE_HEIGHTS[shape]
+    if (heights.all { it == 0 }) return
+
+    val bg = java.awt.Color(color.red, color.green, color.blue, 80)
+    val border = java.awt.Color(color.red, color.green, color.blue, 200)
+
+    val xPts = mutableListOf<Int>()
+    val yPts = mutableListOf<Int>()
+
+    if (!isCeiling) {
+        xPts.add(px); yPts.add(py + s)
+        for (screenX in 0 until s) {
+            val col = if (xFlip) screenX else (s - 1 - screenX)
+            val h = heights[col].coerceIn(0, s)
+            xPts.add(px + screenX); yPts.add(py + s - h)
+        }
+        xPts.add(px + s); yPts.add(py + s)
+    } else {
+        xPts.add(px); yPts.add(py)
+        for (screenX in 0 until s) {
+            val col = if (xFlip) screenX else (s - 1 - screenX)
+            val h = heights[col].coerceIn(0, s)
+            xPts.add(px + screenX); yPts.add(py + h)
+        }
+        xPts.add(px + s); yPts.add(py)
+    }
+
+    g2.color = bg
+    g2.fillPolygon(xPts.toIntArray(), yPts.toIntArray(), xPts.size)
+    g2.color = border
+    g2.stroke = java.awt.BasicStroke(1.5f)
+    g2.drawPolygon(xPts.toIntArray(), yPts.toIntArray(), xPts.size)
+    g2.stroke = java.awt.BasicStroke(1f)
+}
+
 private const val SCREEN_PX = 16 * 16  // 256 — one screen in pixels
 
 private fun buildCompositeImage(
@@ -1999,18 +2133,23 @@ private fun buildCompositeImage(
                     (overlay.color and 0xFF).toInt(),
                     ((overlay.color shr 24) and 0xFF).toInt()
                 )
-                g2.color = java.awt.Color(0, 0, 0, 200)
-                g2.fillRect(iconX, iconY, iconSize, iconSize)
-                g2.color = color
-                g2.stroke = java.awt.BasicStroke(2f)
-                g2.drawRect(iconX + 1, iconY + 1, iconSize - 3, iconSize - 3)
-                g2.stroke = java.awt.BasicStroke(1f)
-                g2.color = java.awt.Color.WHITE
-                val fm = g2.fontMetrics
-                val label = overlay.shortLabel
-                val tw = fm.stringWidth(label)
-                g2.drawString(label, iconX + (iconSize - tw) / 2, iconY + (iconSize + fm.ascent - fm.descent) / 2)
-                iconX -= (iconSize + 1)
+
+                if (overlay == TileOverlay.SLOPE) {
+                    drawSlopeOverlay(g2, px, py, bts, color)
+                } else {
+                    g2.color = java.awt.Color(0, 0, 0, 200)
+                    g2.fillRect(iconX, iconY, iconSize, iconSize)
+                    g2.color = color
+                    g2.stroke = java.awt.BasicStroke(2f)
+                    g2.drawRect(iconX + 1, iconY + 1, iconSize - 3, iconSize - 3)
+                    g2.stroke = java.awt.BasicStroke(1f)
+                    g2.color = java.awt.Color.WHITE
+                    val fm = g2.fontMetrics
+                    val label = overlay.shortLabel
+                    val tw = fm.stringWidth(label)
+                    g2.drawString(label, iconX + (iconSize - tw) / 2, iconY + (iconSize + fm.ascent - fm.descent) / 2)
+                    iconX -= (iconSize + 1)
+                }
             }
         }
     }

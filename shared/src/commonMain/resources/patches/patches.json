@@ -133,30 +133,5 @@
     "file": "complementary_suits.ips",
     "name": "Complementary Suits",
     "description": "Alternate suit color schemes (Varia, Gravity) with complementary colors."
-  },
-  {
-    "file": "boss_kraid_defeated.ips",
-    "name": "Boss: Kraid Defeated",
-    "description": "New game starts with Kraid already defeated. Allows Tourian access when combined with other boss patches."
-  },
-  {
-    "file": "boss_phantoon_defeated.ips",
-    "name": "Boss: Phantoon Defeated",
-    "description": "New game starts with Phantoon already defeated. Allows Tourian access when combined with other boss patches."
-  },
-  {
-    "file": "boss_draygon_defeated.ips",
-    "name": "Boss: Draygon Defeated",
-    "description": "New game starts with Draygon already defeated. Allows Tourian access when combined with other boss patches."
-  },
-  {
-    "file": "boss_ridley_defeated.ips",
-    "name": "Boss: Ridley Defeated",
-    "description": "New game starts with Ridley already defeated. Allows Tourian access when combined with other boss patches."
-  },
-  {
-    "file": "boss_all_defeated.ips",
-    "name": "All Bosses Defeated (Tourian Unlocked)",
-    "description": "New game starts with all four bosses (Kraid, Phantoon, Draygon, Ridley) defeated. Tourian gate opens immediately. Combine with Skip Intro for quick Tourian access."
   }
 ]

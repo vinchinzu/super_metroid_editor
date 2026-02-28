@@ -294,9 +294,18 @@ One byte per tile. Meaning depends on block type:
 |------------|-------------|
 | 0x9 (Door) | Door index into room's door-out table |
 | 0x1 (Slope) | Slope angle/shape index |
-| 0xB (Crumble) | 0x00=reform, 0x04=permanent, 0x0E/0x0F=speed booster |
-| 0xC (Shot) | Sub-type (0x08=PB, 0x09=super, 0x0A=PB+super, 0x0C=shot+PB) |
-| 0xF (Bomb) | 0x00=reform, 0x04=permanent |
+| 0xB (Crumble) | 0x00-0x03=reform (sizes), 0x04-0x07=permanent, 0x0E/0x0F=speed booster |
+| 0xC (Shot) | 0x00-0x03=any weapon (sizes), 0x04-0x07=hidden, 0x08/0x09=PB, 0x0A/0x0B=super |
+| 0xF (Bomb) | 0x00-0x03=reform (sizes), 0x04-0x07=permanent |
+
+**Shot block BTS detail** (verified against PLM table at `$94:9EA6`):
+- 0x00-0x03: Any weapon breakable (beam, missile, bomb, super, PB) — reform, sizes 1×1 to 2×2
+- 0x04-0x07: Hidden (invisible until X-Ray/revealed) — same breakability, sizes 1×1 to 2×2
+- 0x08: Power bomb only, reform
+- 0x09: Power bomb only, permanent
+- 0x0A: Super missile only, reform
+- 0x0B: Super missile only, permanent
+- 0x0C-0x0F: Map to PLM `$B62F` (no-op) — **non-functional in vanilla SM**
 
 ### Implementation: `RomParser.decompressLZ2WithSize()`, `LZ5Compressor.compress()`
 

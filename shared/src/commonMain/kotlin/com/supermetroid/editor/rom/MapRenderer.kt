@@ -159,16 +159,19 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
             }
         }
         
-        // Parse block types and BTS data for overlay system.
+        // Parse block types, BTS data, and H-flip flags for overlay system.
         val blockTypes = IntArray(totalBlocks)
         val btsBytes = ByteArray(totalBlocks)
+        val hFlipFlags = BooleanArray(totalBlocks)
         
         for (i in 0 until totalBlocks) {
             val offset = tileDataStart + i * 2
             if (offset + 1 < levelData.size) {
                 val lo = levelData[offset].toInt() and 0xFF
                 val hi = levelData[offset + 1].toInt() and 0xFF
-                blockTypes[i] = ((hi shl 8) or lo shr 12) and 0x0F
+                val word = (hi shl 8) or lo
+                blockTypes[i] = (word shr 12) and 0x0F
+                hFlipFlags[i] = (word and (1 shl 10)) != 0
             }
             val btsOffset = btsDataStart + i
             if (btsOffset < levelData.size) {
@@ -189,7 +192,7 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
         val enemies = enemyOverrides ?: romParser.parseEnemyPopulation(room.enemySetPtr)
 
         return RoomRenderData(pixelWidth, pixelHeight, pixels, blocksWide, blocksTall, blockTypes, btsBytes,
-            itemBlocks = itemBlockSet, plmEntries = plms, enemyEntries = enemies)
+            hFlipFlags = hFlipFlags, itemBlocks = itemBlockSet, plmEntries = plms, enemyEntries = enemies)
     }
     
     /** Pack two ints into a Long key for map lookup. */
@@ -282,6 +285,7 @@ data class RoomRenderData(
     val blocksTall: Int = 0,  // Height in 16x16 blocks
     val blockTypes: IntArray = IntArray(0),  // Block type per tile (0-15)
     val btsData: ByteArray = ByteArray(0),   // BTS byte per tile
+    val hFlipFlags: BooleanArray = BooleanArray(0), // H-flip per tile from block word bit 10
     val itemBlocks: Set<Int> = emptySet(),   // Block indices that have items (from PLM; empty until we parse PLM set)
     val plmEntries: List<RomParser.PlmEntry> = emptyList(),
     val enemyEntries: List<RomParser.EnemyEntry> = emptyList(),

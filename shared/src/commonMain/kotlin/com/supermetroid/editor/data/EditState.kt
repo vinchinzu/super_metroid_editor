@@ -76,6 +76,49 @@ data class EnemyChange(
 )
 
 /**
+ * A room scroll change: set a single screen's scroll value.
+ * Values: 0x00=Red (hidden), 0x01=Blue (explorable), 0x02=Green (show floor).
+ */
+@Serializable
+data class ScrollChange(
+    val screenX: Int,
+    val screenY: Int,
+    val oldValue: Int,
+    val newValue: Int
+)
+
+/**
+ * An FX field change: modify one or more fields of the default FX entry.
+ * Only non-null fields are applied on export.
+ */
+@Serializable
+data class FxChange(
+    val fxType: Int? = null,
+    val liquidSurfaceStart: Int? = null,
+    val liquidSurfaceNew: Int? = null,
+    val liquidSpeed: Int? = null,
+    val liquidDelay: Int? = null,
+    val fxBitA: Int? = null,
+    val fxBitB: Int? = null,
+    val fxBitC: Int? = null,
+    val paletteFxBitflags: Int? = null,
+    val tileAnimBitflags: Int? = null,
+    val paletteBlend: Int? = null
+)
+
+/**
+ * A state data field change: modify header-level room properties.
+ * Only non-null fields are applied on export.
+ */
+@Serializable
+data class StateDataChange(
+    val tileset: Int? = null,
+    val musicData: Int? = null,
+    val musicTrack: Int? = null,
+    val bgScrolling: Int? = null
+)
+
+/**
  * Per-room edit state: all operations applied to a specific room.
  */
 @Serializable
@@ -84,7 +127,10 @@ data class RoomEdits(
     val operations: MutableList<EditOperation> = mutableListOf(),
     val plmChanges: MutableList<PlmChange> = mutableListOf(),
     val doorChanges: MutableList<DoorChange> = mutableListOf(),
-    val enemyChanges: MutableList<EnemyChange> = mutableListOf()
+    val enemyChanges: MutableList<EnemyChange> = mutableListOf(),
+    val scrollChanges: MutableList<ScrollChange> = mutableListOf(),
+    var fxChange: FxChange? = null,
+    var stateDataChange: StateDataChange? = null
 )
 
 /**
@@ -161,7 +207,7 @@ data class TilePattern(
     val cols: Int,
     val rows: Int,
     val tilesetId: Int? = null,  // null = CRE (shared), otherwise tileset-specific
-    val cells: MutableList<PatternCell> = mutableListOf(),  // row-major: cells[row * cols + col]
+    val cells: MutableList<PatternCell?> = mutableListOf(),  // row-major: cells[row * cols + col]; null = empty
     var builtIn: Boolean = false,
     val noFlip: Boolean = false   // directional patterns (gates, doors) can't be flipped/rotated
 ) {
@@ -170,9 +216,9 @@ data class TilePattern(
         return if (idx in cells.indices) cells[idx] else null
     }
 
-    fun setCell(r: Int, c: Int, cell: PatternCell) {
+    fun setCell(r: Int, c: Int, cell: PatternCell?) {
         val idx = r * cols + c
-        while (cells.size <= idx) cells.add(PatternCell(0))
+        while (cells.size <= idx) cells.add(null)
         cells[idx] = cell
     }
 }
