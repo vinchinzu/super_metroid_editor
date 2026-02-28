@@ -290,6 +290,7 @@ fun main() = application {
                                                         RoomPropertiesPanel(
                                                             room = roomHeader,
                                                             romParser = rp,
+                                                            editorState = editorState,
                                                             modifier = Modifier.fillMaxSize()
                                                         )
                                                     } else {

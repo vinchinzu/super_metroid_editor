@@ -16,8 +16,12 @@ data class TileDefault(val blockType: Int, val bts: Int = 0)
  *   0x9=Door, 0xA=Spike, 0xB=Crumble, 0xC=Shot(reform), 0xD=V-Extend,
  *   0xE=Grapple, 0xF=Bomb(reform)
  *
- * Type 0xC BTS: 0x00=beam/bomb(reform), 0x01=beam/bomb(no reform),
- *   0x04-0x07=hidden, 0x08-0x09=power bomb, 0x0A-0x0B=super missile
+ * Type 0xC BTS (verified against PLM table at $94:9EA6):
+ *   0x00-0x03=any weapon breakable (sizes 1×1..2×2)
+ *   0x04-0x07=hidden (same breakability, invisible)
+ *   0x08-0x09=power bomb only (reform/permanent)
+ *   0x0A-0x0B=super missile only (reform/permanent)
+ *   0x0C-0x0F=NON-FUNCTIONAL in vanilla SM (map to no-op PLM $B62F)
  * Type 0x3: speed booster breakable (solid, immune to shots/bombs, breaks on speed boost)
  */
 object TilesetDefaults {
@@ -86,6 +90,45 @@ data class SmPatchWrite(val offset: Long, val bytes: List<Int>)
  * All other patches load from bundled IPS in resources/patches/.
  */
 val HARDCODED_PATCHES: List<SmPatch> = listOf(
+    // ── Instant Respawn on Death ──
+    // Hooks the game-over state transition at $82:DCF4 (vanilla: JSL $88829E).
+    // Based on sm_practice_hack cutscenes.asm: load save, set game mode $06,
+    // then PLA×3 to pop the JSL return and JML $82896E to skip the rest of
+    // the death handler. Returning via RTL would continue executing the death
+    // handler with WRAM corrupted by the save load, causing a freeze.
+    SmPatch(id = "hex_instant_respawn", name = "Instant Respawn on Death",
+        description = "Skip Game Over screen — instantly reload last save point on death. Great for Kaizo hack testing.",
+        enabled = false, writes = mutableListOf(
+            // Payload at PC $2FF000 (SNES $DF:F000) — 36 bytes
+            PatchWrite(0x2FF000, listOf(
+                0xC2, 0x20,             // REP #$20       ; 16-bit A
+                0xAD, 0x52, 0x09,       // LDA $0952      ; current save file
+                0x22, 0x85, 0x80, 0x81, // JSL $818085    ; load save from SRAM
+                0xB0, 0x13,             // BCS +19        ; if corrupt → fallback
+                0x22, 0x17, 0xBE, 0x82, // JSL $82BE17    ; cancel sound effects
+                0xA9, 0x06, 0x00,       // LDA #$0006     ; game mode = load from save
+                0x8D, 0x98, 0x09,       // STA $0998      ; set game mode
+                0xE2, 0x20,             // SEP #$20       ; 8-bit A
+                0x68,                   // PLA             ; pop JSL return (low)
+                0x68,                   // PLA             ; pop JSL return (high)
+                0x68,                   // PLA             ; pop JSL return (bank)
+                0x5C, 0x6E, 0x89, 0x82, // JML $82896E   ; skip to end of frame
+                // fallback: resume vanilla game-over screen
+                0xE2, 0x20,             // SEP #$20       ; 8-bit A
+                0x5C, 0x9E, 0x82, 0x88  // JML $88829E   ; vanilla game-over handler
+            )),
+            // Hook at $82:DCF4 (PC 0x15CF4): JSL $DFF000
+            PatchWrite(0x15CF4, listOf(0x22, 0x00, 0xF0, 0xDF))
+        )),
+
+    // ── Hyper Beam ──
+    // Handled at export time via the per-frame hook at $82:896E.
+    // Sets WRAM $7E:0A76 bit 15 ($8000) every frame to enable the rainbow beam.
+    SmPatch(id = "hex_hyper_beam", name = "Hyper Beam",
+        description = "Start with Hyper Beam enabled (the rainbow beam from the Mother Brain fight).",
+        enabled = false, writes = mutableListOf(),
+        configType = "hyper_beam"),
+
     // ── Popular / featured patches (sorted to top) ──
     SmPatch(id = "hex_higher_jump", name = "Higher Jump",
         description = "Increases standard jump height (0x81EB9: 04 → 05).",
@@ -215,10 +258,99 @@ val BEAM_DAMAGE_PATCH = SmPatch(
     configType = "beam_damage"
 )
 
+/** Config patch: Boss Stats overrides. Stores per-boss HP/damage in configData. */
+val BOSS_STATS_PATCH = SmPatch(
+    id = "config_boss_stats",
+    name = "Boss Stats Override",
+    description = "Override HP and damage values for all major bosses and mini-bosses.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "boss_stats"
+)
+
+/** Config patch: Enemy Stats overrides. Stores per-enemy HP/damage in configData. */
+val ENEMY_STATS_PATCH = SmPatch(
+    id = "config_enemy_stats",
+    name = "Enemy Stats Override",
+    description = "Override HP and contact damage for common enemies.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "enemy_stats"
+)
+
 /** Legacy/superseded patch IDs — removed on seed to avoid duplicates from old configs. */
 internal val LEGACY_PATCH_IDS = setOf(
     "respin", "fast_doors", "no_fanfare", "blue_speed_air", "no_walljump_kick", "instant_stop",
     "no_beeping", "energy_free_shinesparks", "fast_saves", "enable_moonwalk", "skip_ceres", "fast_mb_cutscene",
     "hex_no_spin_speed_loss", "hex_keep_blue_speed", "hex_no_walljump_kick", "hex_no_skid",
     "hex_faster_charged_shots_demo",
+    // Old broken IPS-based boss defeated patches (wrote to unused ROM space)
+    "bundled_boss_kraid_defeated", "bundled_boss_phantoon_defeated",
+    "bundled_boss_ridley_defeated", "bundled_boss_draygon_defeated",
+    "bundled_boss_all_defeated",
 )
+
+/** Config patch: Boss Defeated Flags. Toggleable per-boss defeat flags via configData. */
+val BOSS_DEFEATED_PATCH = SmPatch(
+    id = "config_boss_defeated",
+    name = "Boss Defeated Flags",
+    description = "Mark bosses as already defeated. Rooms load in post-boss state and Tourian unlocks when all four main bosses are defeated.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "boss_defeated"
+)
+
+/**
+ * Boss flag definitions verified against vanilla ROM E629 conditions.
+ * Each boss flag is a bit in a per-area byte at WRAM $7E:D828+area.
+ */
+data class BossFlagDef(val key: String, val name: String, val wramAddr: Int, val bit: Int)
+
+val BOSS_FLAG_DEFS = listOf(
+    BossFlagDef("kraid",    "Kraid",              0xD829, 0x01),
+    BossFlagDef("phantoon", "Phantoon",           0xD82B, 0x01),
+    BossFlagDef("ridley",   "Ridley",             0xD82A, 0x02),
+    BossFlagDef("draygon",  "Draygon",            0xD82C, 0x02),
+    BossFlagDef("spore",    "Spore Spawn",        0xD829, 0x02),
+    BossFlagDef("croc",     "Crocomire",          0xD82A, 0x04),
+    BossFlagDef("botwoon",  "Botwoon",            0xD82C, 0x01),
+)
+
+/**
+ * Build the ASM payload + hook for boss-defeated flags at export time.
+ * Routine lives at $DF:F040 (PC $2FF040). Hooks the per-frame main loop
+ * dispatch at $82:896E (JSL $8289EF) to chain through our code.
+ *
+ * Generated code: JSL $8289EF, then ORA each enabled boss flag into WRAM, RTL.
+ */
+fun buildBossDefeatedPayload(enabledBosses: Set<String>): Pair<List<Int>, List<Int>> {
+    if (enabledBosses.isEmpty()) return emptyList<Int>() to emptyList()
+
+    val code = mutableListOf<Int>()
+    // Chain to original: JSL $8289EF
+    code.addAll(listOf(0x22, 0xEF, 0x89, 0x82))
+    code.add(0x08)        // PHP
+    code.addAll(listOf(0xC2, 0x20)) // REP #$20
+
+    // Group flags by WRAM address to minimize writes
+    val byAddr = mutableMapOf<Int, Int>()
+    for (flag in BOSS_FLAG_DEFS) {
+        if (flag.key in enabledBosses) {
+            byAddr[flag.wramAddr] = (byAddr[flag.wramAddr] ?: 0) or flag.bit
+        }
+    }
+
+    for ((addr, bits) in byAddr) {
+        code.addAll(listOf(0xAF, addr and 0xFF, (addr shr 8) and 0xFF, 0x7E))  // LDA $7E:xxxx
+        code.addAll(listOf(0x09, bits and 0xFF, 0x00))                          // ORA #$00xx
+        code.addAll(listOf(0x8F, addr and 0xFF, (addr shr 8) and 0xFF, 0x7E))   // STA $7E:xxxx
+    }
+
+    code.add(0x28)  // PLP
+    code.add(0x6B)  // RTL
+
+    // Hook: replace JSL $8289EF at $82:896E (PC $1096E) with JSL $DFF040
+    val hook = listOf(0x22, 0x40, 0xF0, 0xDF)
+
+    return code to hook
+}

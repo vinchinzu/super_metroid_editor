@@ -238,12 +238,13 @@ fun PatchEditorCanvas(
         PatchToolbar(patch, editorState)
         Divider()
         // Config panel for GUI patches, hex editor for manual patches
-        if (patch.configType == "ceres_escape_seconds") {
-            CeresEscapeTimeConfig(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
-        } else if (patch.configType == "beam_damage") {
-            BeamDamageEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
-        } else {
-            PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
+        when (patch.configType) {
+            "ceres_escape_seconds" -> CeresEscapeTimeConfig(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+            "beam_damage" -> BeamDamageEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+            "boss_stats" -> BossStatsEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+            "enemy_stats" -> EnemyStatsEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
+            "boss_defeated" -> BossDefeatedEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
+            else -> PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
         }
     }
 }

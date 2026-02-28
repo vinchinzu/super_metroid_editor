@@ -312,11 +312,7 @@ fun PatternEditorCanvas(
             FilterChip(
                 selected = editorState.activeTool == EditorTool.ERASE,
                 onClick = { editorState.activeTool = EditorTool.ERASE; focusReq.requestFocus() },
-                label = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
-                    }
-                },
+                label = { Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(14.dp)) },
                 modifier = Modifier.height(24.dp)
             )
 
@@ -427,6 +423,7 @@ fun PatternEditorCanvas(
                     when (event.key) {
                         Key.S -> { editorState.activeTool = EditorTool.SELECT; true }
                         Key.P -> { editorState.activeTool = EditorTool.PAINT; true }
+                        Key.E -> { editorState.activeTool = EditorTool.ERASE; true }
                         Key.F -> { editorState.activeTool = EditorTool.FILL; true }
                         Key.I -> { editorState.activeTool = EditorTool.SAMPLE; true }
                         Key.Z -> if (event.isCtrlPressed || event.isMetaPressed) {
@@ -491,7 +488,7 @@ fun PatternEditorCanvas(
                                 if (button == MouseEvent.BUTTON3 || (button == MouseEvent.BUTTON1 &&
                                     ((event.nativeEvent as? MouseEvent)?.modifiersEx
                                         ?: 0) and java.awt.event.InputEvent.CTRL_DOWN_MASK != 0)) {
-                                    val cell = editorState.patReadCell(bx, by)
+                                    val cell = editorState.patReadCell(bx, by) ?: PatternCell(0, blockType = 0)
                                     propsBlockX = bx; propsBlockY = by
                                     propsMetatile = cell.metatile
                                     propsBlockType = cell.blockType
@@ -580,6 +577,8 @@ fun PatternEditorCanvas(
                             val pw = b.cols * 16; val ph = b.rows * 16
                             val img = BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB)
                             for (r in 0 until b.rows) for (c in 0 until b.cols) {
+                                val ck = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+                                if (ck in b.skipCells) continue
                                 val idx = b.tiles.getOrNull(r)?.getOrNull(c) ?: continue
                                 val pixels = tg.renderMetatile(idx) ?: continue
                                 val dc = if (b.hFlip) (b.cols - 1 - c) else c
@@ -779,7 +778,7 @@ fun PatternEditorCanvas(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                         val cell = editorState.patReadCell(propsBlockX, propsBlockY)
-                        if (cell.plmId != 0) {
+                        if (cell != null && cell.plmId != 0) {
                             val plmName = when {
                                 RomParser.isItemPlm(cell.plmId) ->
                                     RomParser.itemNameForPlm(cell.plmId) ?: "Item 0x${cell.plmId.toString(16)}"
@@ -1141,10 +1140,19 @@ internal fun renderPatternImage(
     g.fillRect(0, 0, w, h)
     val scale = tilePx / 16
 
+    val g2 = g as java.awt.Graphics2D
     for (r in 0 until pattern.rows) for (c in 0 until pattern.cols) {
-        val cell = pattern.getCell(r, c) ?: continue
-        val pixels = tg.renderMetatile(cell.metatile) ?: continue
+        val cell = pattern.getCell(r, c)
         val dx = c * tilePx; val dy = r * tilePx
+        if (cell == null) {
+            g2.color = java.awt.Color(0x22, 0x22, 0x30)
+            g2.stroke = java.awt.BasicStroke(maxOf(1f, scale * 0.5f))
+            val pad = maxOf(2, tilePx / 5)
+            g2.drawLine(dx + pad, dy + pad, dx + tilePx - pad, dy + tilePx - pad)
+            g2.drawLine(dx + tilePx - pad, dy + pad, dx + pad, dy + tilePx - pad)
+            continue
+        }
+        val pixels = tg.renderMetatile(cell.metatile) ?: continue
         for (py in 0 until 16) for (px in 0 until 16) {
             val srcX = if (cell.hFlip) 15 - px else px
             val srcY = if (cell.vFlip) 15 - py else py
@@ -1164,7 +1172,6 @@ internal fun renderPatternImage(
 
     // Tile meta overlays
     if (showTileMeta) {
-        val g2 = g as java.awt.Graphics2D
         val iconSize = maxOf(tilePx / 2, 8)
         val fontSize = maxOf(iconSize - 3, 6)
         g2.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize)
@@ -1210,7 +1217,11 @@ private fun blockTypeToOverlay(blockType: Int, bts: Int): TileOverlay? = when (b
     0xF -> TileOverlay.BOMB
     0xE -> TileOverlay.GRAPPLE
     0x3 -> TileOverlay.TREADMILL
-    0xC -> TileOverlay.SHOT_BEAM
+    0xC -> when (shotBlockCategory(bts)) {
+        ShotCategory.SUPER -> TileOverlay.SHOT_SUPER
+        ShotCategory.PB -> TileOverlay.SHOT_PB
+        else -> TileOverlay.SHOT_BEAM
+    }
     0xB -> if (bts == 0x0E || bts == 0x0F) TileOverlay.SPEED else TileOverlay.CRUMBLE
     else -> null
 }

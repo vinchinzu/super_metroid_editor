@@ -50,13 +50,13 @@ class BuiltInPatternTest {
             "builtin_door_yellow_left", "builtin_door_yellow_right",
         )
 
-        // PLM-only items should NOT have tile patterns
-        val plmOnlyIds = listOf(
+        // Station / structure patterns should exist as tile templates
+        val stationPatternIds = listOf(
             "builtin_save_station", "builtin_energy_refill",
-            "builtin_missile_refill", "builtin_chozo_statue", "builtin_ship"
+            "builtin_missile_refill", "builtin_chozo_statue"
         )
-        for (id in plmOnlyIds) {
-            assertFalse(id in patternIds, "PLM-only pattern should not exist: $id")
+        for (id in stationPatternIds) {
+            assertTrue(id in patternIds, "Station pattern should exist: $id")
         }
         for (id in expectedIds) {
             assertTrue(id in patternIds, "Missing built-in pattern: $id")
@@ -76,7 +76,7 @@ class BuiltInPatternTest {
         assertTrue(doorPatterns.size >= 8, "Should have at least 8 door patterns")
 
         for (pattern in doorPatterns) {
-            val plmCells = pattern.cells.filter { it.plmId != 0 }
+            val plmCells = pattern.cells.filterNotNull().filter { it.plmId != 0 }
             assertTrue(plmCells.isNotEmpty(), "${pattern.id} should have at least one PLM cell")
 
             for (cell in plmCells) {
@@ -102,7 +102,7 @@ class BuiltInPatternTest {
         assertTrue(gatePatterns.size >= 8, "Should have at least 8 gate patterns")
 
         for (pattern in gatePatterns) {
-            val plmCells = pattern.cells.filter { it.plmId != 0 }
+            val plmCells = pattern.cells.filterNotNull().filter { it.plmId != 0 }
             assertTrue(plmCells.isNotEmpty(), "${pattern.id} should have a PLM cell")
             for (cell in plmCells) {
                 assertEquals(0xC836, cell.plmId,
@@ -123,7 +123,7 @@ class BuiltInPatternTest {
             assertEquals(1, pattern.cols, "${pattern.id} should be 1 column wide")
             assertEquals(4, pattern.rows, "${pattern.id} should be 4 rows tall")
 
-            for (cell in pattern.cells) {
+            for (cell in pattern.cells.filterNotNull()) {
                 assertEquals(0x9, cell.blockType,
                     "${pattern.id}: all cells should be block type 0x9 (door)")
             }
@@ -146,7 +146,7 @@ class BuiltInPatternTest {
             assertEquals(1, pattern.cols, "${pattern.id} should be 1 column wide")
             assertEquals(4, pattern.rows, "${pattern.id} should be 4 rows tall")
 
-            for (cell in pattern.cells) {
+            for (cell in pattern.cells.filterNotNull()) {
                 assertEquals(0x8, cell.blockType,
                     "${pattern.id}: all cells should be block type 0x8 (solid)")
             }
@@ -156,43 +156,35 @@ class BuiltInPatternTest {
     }
 
     @Test
-    fun `migration removes PLM-only patterns from existing projects`() {
+    fun `migration re-seeds station patterns with tile templates`() {
         val parser = loadTestRom() ?: return
         val state = EditorState()
 
-        // Simulate old project with PLM-only patterns that shouldn't exist
+        // Simulate old project with old-style station patterns (different dimensions)
         val oldSave = com.supermetroid.editor.data.TilePattern(
             id = "builtin_save_station", name = "Save Station",
             cols = 5, rows = 3, builtIn = true,
-            cells = mutableListOf(
+            cells = mutableListOf<com.supermetroid.editor.data.PatternCell?>(
                 com.supermetroid.editor.data.PatternCell(0, plmId = 0xB76F, plmParam = 0x0001),
                 com.supermetroid.editor.data.PatternCell(0),
                 com.supermetroid.editor.data.PatternCell(0),
             )
         )
-        val oldEnergy = com.supermetroid.editor.data.TilePattern(
-            id = "builtin_energy_refill", name = "Energy Refill",
-            cols = 5, rows = 3, builtIn = true,
-            cells = mutableListOf(
-                com.supermetroid.editor.data.PatternCell(0, plmId = 0xB6DF),
-                com.supermetroid.editor.data.PatternCell(0),
-            )
-        )
-        val oldShip = com.supermetroid.editor.data.TilePattern(
-            id = "builtin_ship", name = "Ship",
-            cols = 8, rows = 3, builtIn = true,
-            cells = mutableListOf(com.supermetroid.editor.data.PatternCell(0))
-        )
-        state.project.patterns.addAll(listOf(oldSave, oldEnergy, oldShip))
+        state.project.patterns.add(oldSave)
 
         state.seedBuiltInPatterns(parser)
 
-        assertNull(state.project.patterns.find { it.id == "builtin_save_station" },
-            "Save station pattern should be removed")
-        assertNull(state.project.patterns.find { it.id == "builtin_energy_refill" },
-            "Energy refill pattern should be removed")
-        assertNull(state.project.patterns.find { it.id == "builtin_ship" },
-            "Ship pattern should be removed")
+        // Save station should exist (kept from old project or re-seeded)
+        val saveStation = state.project.patterns.find { it.id == "builtin_save_station" }
+        assertNotNull(saveStation, "Save station pattern should exist")
+
+        // Energy refill, missile refill, chozo statue should be seeded fresh
+        assertNotNull(state.project.patterns.find { it.id == "builtin_energy_refill" },
+            "Energy refill should be seeded")
+        assertNotNull(state.project.patterns.find { it.id == "builtin_missile_refill" },
+            "Missile refill should be seeded")
+        assertNotNull(state.project.patterns.find { it.id == "builtin_chozo_statue" },
+            "Chozo statue should be seeded")
     }
 
     @Test
@@ -206,7 +198,7 @@ class BuiltInPatternTest {
             name = "Door: Blue (Right)",
             cols = 1, rows = 4,
             builtIn = true,
-            cells = mutableListOf(
+            cells = mutableListOf<com.supermetroid.editor.data.PatternCell?>(
                 com.supermetroid.editor.data.PatternCell(0x040, blockType = 0x9, plmId = 0xC8A6),
                 com.supermetroid.editor.data.PatternCell(0x060, blockType = 0x9),
                 com.supermetroid.editor.data.PatternCell(0x060, blockType = 0x9),
@@ -220,7 +212,7 @@ class BuiltInPatternTest {
         val blueRight = state.project.patterns.find { it.id == "builtin_door_blue_right" }
         assertNotNull(blueRight, "Blue right door pattern should exist after migration")
 
-        val plmCell = blueRight!!.cells.find { it.plmId != 0 }
+        val plmCell = blueRight!!.cells.filterNotNull().find { it.plmId != 0 }
         assertNotNull(plmCell, "Should have a PLM cell")
         assertEquals(0xC8A8, plmCell!!.plmId,
             "After migration, blue right door should use 0xC8A8, not 0xC8A6")

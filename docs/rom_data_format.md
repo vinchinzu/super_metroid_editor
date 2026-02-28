@@ -294,9 +294,18 @@ One byte per tile. Meaning depends on block type:
 |------------|-------------|
 | 0x9 (Door) | Door index into room's door-out table |
 | 0x1 (Slope) | Slope angle/shape index |
-| 0xB (Crumble) | 0x00=reform, 0x04=permanent, 0x0E/0x0F=speed booster |
-| 0xC (Shot) | Sub-type (0x08=PB, 0x09=super, 0x0A=PB+super, 0x0C=shot+PB) |
-| 0xF (Bomb) | 0x00=reform, 0x04=permanent |
+| 0xB (Crumble) | 0x00-0x03=reform (sizes), 0x04-0x07=permanent, 0x0E/0x0F=speed booster |
+| 0xC (Shot) | 0x00-0x03=any weapon (sizes), 0x04-0x07=hidden, 0x08/0x09=PB, 0x0A/0x0B=super |
+| 0xF (Bomb) | 0x00-0x03=reform (sizes), 0x04-0x07=permanent |
+
+**Shot block BTS detail** (verified against PLM table at `$94:9EA6`):
+- 0x00-0x03: Any weapon breakable (beam, missile, bomb, super, PB) — reform, sizes 1×1 to 2×2
+- 0x04-0x07: Hidden (invisible until X-Ray/revealed) — same breakability, sizes 1×1 to 2×2
+- 0x08: Power bomb only, reform
+- 0x09: Power bomb only, permanent
+- 0x0A: Super missile only, reform
+- 0x0B: Super missile only, permanent
+- 0x0C-0x0F: Map to PLM `$B62F` (no-op) — **non-functional in vanilla SM**
 
 ### Implementation: `RomParser.decompressLZ2WithSize()`, `LZ5Compressor.compress()`
 
@@ -322,6 +331,58 @@ Offset  Size  Field
 **Terminator:** `FFFF` (2 bytes, at the enemy ID position)
 
 After the terminator: 1 byte for "required kill count" (usually 0x00).
+
+---
+
+## Station PLM Placement Rules
+
+Station PLMs (Energy Refill `$B6DF`, Missile Refill `$B6EB`, etc.) have specific
+requirements derived from the game engine (verified via `snesrev/sm` decompilation):
+
+### Runtime behavior (`PlmSetup_PlmB6DF_EnergyStation` at `$84:B21D`)
+
+When a station PLM spawns, its setup function modifies three blocks:
+- **Center** (PLM position): block type set to `0x8` (solid)
+- **Left** (x-1, same y): block type `0xB`, BTS `0x4A` (left-access trigger)
+- **Right** (x+1, same y): block type `0xB`, BTS `0x49` (right-access trigger)
+
+The PLM's draw instruction renders the station tiles (the animated sprite).
+
+### Activation conditions (`PlmSetup_B6E3_EnergyStationRightAccess`)
+
+When Samus collides with a BTS trigger block, an access PLM spawns and checks:
+1. Samus is **facing the station** (ran-into-wall pose)
+2. Samus is **NOT at full health** (`samus_health != samus_max_health`)
+3. **Pixel-exact Y alignment**: `samus_y_pos == trigger_block_y * 16 + 11`
+
+If Samus is at full health, the station silently acts as a solid wall. No error.
+
+### Y alignment requirement
+
+The Y check means the **floor must be exactly 2 blocks below the PLM center**.
+Standing Samus has a Y radius of ~20 pixels. The math works out to:
+
+```
+samus_y_pos = floor_top_pixel - 1 - y_radius
+            = (plm_y + 2) * 16 - 1 - 20
+            = plm_y * 16 + 11  ✓
+```
+
+### Pattern layout (3×3)
+
+```
+Row 0 (plm_y-1): decorative top tiles     (blockType 0x0, air)
+Row 1 (plm_y):   station center + sides   (blockType 0x8, solid — overridden by PLM)
+Row 2 (plm_y+1): bottom-center tile       (blockType 0x8, solid)
+                  floor at plm_y+2         (must be solid — existing room data)
+```
+
+Bottom-left and bottom-right pattern cells are `null` (skip painting, preserve room data).
+
+### Missile station (`$B6EB`)
+
+Same rules apply. Setup writes BTS `0x4B`/`0x4C` instead. Activation checks
+`samus_missiles != samus_max_missiles` instead of health.
 
 ---
 

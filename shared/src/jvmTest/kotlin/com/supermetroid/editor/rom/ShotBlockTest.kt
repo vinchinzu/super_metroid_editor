@@ -162,4 +162,158 @@ class ShotBlockTest {
             dumpShotBlocks(parser, id, name)
         }
     }
+
+    @Test
+    fun `BTS 0x0C-0x0F map to no-op PLM B62F in vanilla ROM`() {
+        val parser = loadTestRom() ?: return
+        val romData = parser.getRomData()
+        val tableAddr = parser.snesToPc(0x949EA6)
+
+        for (bts in 0x0C..0x0F) {
+            val offset = tableAddr + bts * 2
+            val plmId = (romData[offset].toInt() and 0xFF) or
+                    ((romData[offset + 1].toInt() and 0xFF) shl 8)
+            assertEquals(0xB62F, plmId,
+                "BTS 0x${bts.toString(16)} should map to no-op PLM \$B62F, got \$${plmId.toString(16)}")
+        }
+    }
+
+    @Test
+    fun `BTS 0x00-0x0B map to valid D0xx shot block PLMs`() {
+        val parser = loadTestRom() ?: return
+        val romData = parser.getRomData()
+        val tableAddr = parser.snesToPc(0x949EA6)
+
+        for (bts in 0x00..0x0B) {
+            val offset = tableAddr + bts * 2
+            val plmId = (romData[offset].toInt() and 0xFF) or
+                    ((romData[offset + 1].toInt() and 0xFF) shl 8)
+            assertTrue(plmId in 0xD064..0xD090,
+                "BTS 0x${bts.toString(16)} should map to a D0xx PLM, got \$${plmId.toString(16)}")
+        }
+    }
+
+    @Test
+    fun `each valid BTS has a unique PLM ID`() {
+        val parser = loadTestRom() ?: return
+        val romData = parser.getRomData()
+        val tableAddr = parser.snesToPc(0x949EA6)
+
+        val plmIds = mutableSetOf<Int>()
+        for (bts in 0x00..0x0B) {
+            val offset = tableAddr + bts * 2
+            val plmId = (romData[offset].toInt() and 0xFF) or
+                    ((romData[offset + 1].toInt() and 0xFF) shl 8)
+            assertTrue(plmIds.add(plmId),
+                "BTS 0x${bts.toString(16)} PLM \$${plmId.toString(16)} is a duplicate")
+        }
+        assertEquals(12, plmIds.size, "Should have 12 unique shot block PLMs")
+    }
+
+    @Test
+    fun `vanilla ROM has no shot blocks with BTS above 0x0B`() {
+        val parser = loadTestRom() ?: return
+        val repo = com.supermetroid.editor.data.RoomRepository()
+        val roomIds = repo.getAllRooms().map { it.getRoomIdAsInt() }
+
+        var found = 0
+        for (rid in roomIds) {
+            val room = parser.readRoomHeader(rid) ?: continue
+            if (room.levelDataPtr == 0) continue
+            val data = parser.decompressLZ2(room.levelDataPtr)
+            val bw = room.width * 16
+            val bh = room.height * 16
+            val layer1Size = (data[0].toInt() and 0xFF) or ((data[1].toInt() and 0xFF) shl 8)
+            for (i in 0 until bw * bh) {
+                val off = 2 + i * 2
+                if (off + 1 >= data.size) break
+                val word = (data[off].toInt() and 0xFF) or ((data[off + 1].toInt() and 0xFF) shl 8)
+                val blockType = (word shr 12) and 0xF
+                if (blockType == 0xC) {
+                    val btsOff = 2 + layer1Size + i
+                    if (btsOff < data.size) {
+                        val bts = data[btsOff].toInt() and 0xFF
+                        if (bts in 0x0C..0x3F) {
+                            found++
+                            println("WARN: Room 0x${rid.toString(16)} has shot block with BTS 0x${bts.toString(16)}")
+                        }
+                    }
+                }
+            }
+        }
+        assertEquals(0, found, "Vanilla ROM should have no shot blocks with BTS 0x0C-0x3F")
+    }
+
+    @Test
+    fun `item PLM IDs match SMILE reference`() {
+        val smileDefs = mapOf(
+            "Energy Tank"   to Triple(0xEF2B, 0xEED7, 0xEF7F),
+            "Missile"       to Triple(0xEF2F, 0xEEDB, 0xEF83),
+            "Super Missile" to Triple(0xEF33, 0xEEDF, 0xEF87),
+            "Power Bomb"    to Triple(0xEF37, 0xEEE3, 0xEF8B),
+            "Bomb"          to Triple(0xEF3B, 0xEEE7, 0xEF8F),
+            "Charge Beam"   to Triple(0xEF3F, 0xEEEB, 0xEF93),
+            "Ice Beam"      to Triple(0xEF43, 0xEEEF, 0xEF97),
+            "Hi-Jump Boots" to Triple(0xEF47, 0xEEF3, 0xEF9B),
+            "Speed Booster" to Triple(0xEF4B, 0xEEF7, 0xEF9F),
+            "Wave Beam"     to Triple(0xEF4F, 0xEEFB, 0xEFA3),
+            "Spazer"        to Triple(0xEF53, 0xEEFF, 0xEFA7),
+            "Spring Ball"   to Triple(0xEF57, 0xEF03, 0xEFAB),
+            "Varia Suit"    to Triple(0xEF5B, 0xEF07, 0xEFAF),
+            "Gravity Suit"  to Triple(0xEF5F, 0xEF0B, 0xEFB3),
+            "X-Ray Scope"   to Triple(0xEF63, 0xEF0F, 0xEFB7),
+            "Plasma Beam"   to Triple(0xEF67, 0xEF13, 0xEFBB),
+            "Grapple Beam"  to Triple(0xEF6B, 0xEF17, 0xEFBF),
+            "Space Jump"    to Triple(0xEF6F, 0xEF1B, 0xEFC3),
+            "Screw Attack"  to Triple(0xEF73, 0xEF1F, 0xEFC7),
+            "Morph Ball"    to Triple(0xEF77, 0xEF23, 0xEFCB),
+            "Reserve Tank"  to Triple(0xEF7B, 0xEF27, 0xEFCF),
+        )
+
+        for (def in RomParser.ITEM_DEFS) {
+            val expected = smileDefs[def.name]
+                ?: fail("Item '${def.name}' not found in SMILE reference")
+            assertEquals(expected.first, def.chozoId,
+                "${def.name} chozo ID mismatch")
+            assertEquals(expected.second, def.visibleId,
+                "${def.name} visible ID mismatch")
+            assertEquals(expected.third, def.hiddenId,
+                "${def.name} hidden ID mismatch")
+        }
+        assertEquals(smileDefs.size, RomParser.ITEM_DEFS.size,
+            "ITEM_DEFS should have ${smileDefs.size} entries")
+    }
+
+    @Test
+    fun `gate PLM params match SMILE reference`() {
+        val expectedGates = mapOf(
+            0x00 to "Blue (left)",
+            0x02 to "Blue (right)",
+            0x04 to "Pink (left)",
+            0x06 to "Pink (right)",
+            0x08 to "Green (left)",
+            0x0A to "Green (right)",
+            0x0C to "Yellow (left)",
+            0x0E to "Yellow (right)",
+        )
+        for (gate in RomParser.GATE_PLMS) {
+            if (gate.plmId == 0xC836) {
+                assertTrue(gate.param in expectedGates,
+                    "Gate param 0x${gate.param.toString(16)} not in SMILE reference")
+            }
+        }
+    }
+
+    @Test
+    fun `station PLM params use correct format`() {
+        val saveStation = RomParser.STATION_PLMS.find { it.plmId == 0xB76F }
+        assertNotNull(saveStation, "Save station PLM should be in catalog")
+        assertEquals(0x8000, saveStation!!.defaultParam,
+            "Save station high byte should be 0x80")
+
+        val energyRefill = RomParser.STATION_PLMS.find { it.plmId == 0xB6DF }
+        assertNotNull(energyRefill, "Energy refill PLM should be in catalog")
+        assertEquals(0x0000, energyRefill!!.defaultParam,
+            "Energy/missile refill default param should be 0x0000 (not save-station format)")
+    }
 }

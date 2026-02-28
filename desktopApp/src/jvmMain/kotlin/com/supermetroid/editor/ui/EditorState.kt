@@ -7,13 +7,17 @@ import com.supermetroid.editor.data.DoorChange
 import com.supermetroid.editor.data.EditOperation
 import com.supermetroid.editor.data.PatchRepository
 import com.supermetroid.editor.data.EnemyChange
+import com.supermetroid.editor.data.FxChange
 import com.supermetroid.editor.data.PatchWrite
 import com.supermetroid.editor.data.PlmChange
+import com.supermetroid.editor.data.ScrollChange
 import com.supermetroid.editor.data.SmEditProject
 import com.supermetroid.editor.data.SmPatch
+import com.supermetroid.editor.data.StateDataChange
 import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.data.TilePattern
 import com.supermetroid.editor.data.PatternCell
+import com.supermetroid.editor.data.PatternLibrary
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
@@ -74,6 +78,10 @@ class EditorState {
     var editVersion by mutableStateOf(0)
         private set
 
+    /** Incremented when a new ROM is loaded to force full UI refresh. */
+    var romVersion by mutableStateOf(0)
+        private set
+
     /** Mouse position on the map in block coordinates (for cursor preview). -1 = off map. */
     var hoverBlockX by mutableStateOf(-1)
     var hoverBlockY by mutableStateOf(-1)
@@ -104,6 +112,13 @@ class EditorState {
     /** Working enemy population for the current room (includes edits). */
     private val _workingEnemies = mutableListOf<RomParser.EnemyEntry>()
     val workingEnemies: List<RomParser.EnemyEntry> get() = _workingEnemies
+
+    /** Working scroll data for the current room. One byte per screen (R/B/G). */
+    private var _workingScrolls = IntArray(0)
+    val workingScrolls: IntArray get() = _workingScrolls
+    private var _originalScrolls = IntArray(0)
+    var scrollVersion by mutableStateOf(0)
+        private set
 
     // ─── Tileset editor ─────────────────────────────────────────
 
@@ -314,10 +329,11 @@ class EditorState {
 
     fun addPattern(name: String, cols: Int, rows: Int, tilesetId: Int? = null): TilePattern {
         val id = "pattern_${System.currentTimeMillis()}"
-        val cells = MutableList(rows * cols) { PatternCell(0) }
+        val cells = MutableList<PatternCell?>(rows * cols) { null }
         val pattern = TilePattern(id, name, cols, rows, tilesetId, cells)
         project.patterns.add(pattern)
         dirty = true; patternVersion++
+        PatternLibrary.saveAll(project.patterns)
         return pattern
     }
 
@@ -325,6 +341,7 @@ class EditorState {
         project.patterns.removeAll { it.id == id }
         if (selectedPatternId == id) selectPattern(null)
         dirty = true; patternVersion++
+        PatternLibrary.saveAll(project.patterns)
     }
 
     fun updatePatternCell(patternId: String, r: Int, c: Int, cell: PatternCell) {
@@ -339,9 +356,14 @@ class EditorState {
 
     /** Convert a pattern to a TileBrush for placement on the map. */
     fun patternToBrush(pattern: TilePattern, hFlip: Boolean = false, vFlip: Boolean = false): TileBrush {
+        val skip = mutableSetOf<Long>()
         val tiles = List(pattern.rows) { r ->
             List(pattern.cols) { c ->
-                pattern.getCell(r, c)?.metatile ?: 0
+                val cell = pattern.getCell(r, c)
+                if (cell == null) {
+                    skip.add((r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL))
+                    0
+                } else cell.metatile
             }
         }
         val btOverrides = mutableMapOf<Long, Int>()
@@ -359,7 +381,8 @@ class EditorState {
         }
         return TileBrush(tiles, blockType = 0x8, hFlip = hFlip, vFlip = vFlip,
             blockTypeOverrides = btOverrides, btsOverrides = btsOverrides,
-            flipOverrides = flipOverrides, plmOverrides = plmOverrides)
+            flipOverrides = flipOverrides, plmOverrides = plmOverrides,
+            skipCells = skip)
     }
 
     fun selectAndApplyPattern(id: String) {
@@ -377,7 +400,7 @@ class EditorState {
 
     // ─── Pattern editing (mini room editor for patterns) ────────────
 
-    data class PatternEdit(val r: Int, val c: Int, val old: PatternCell, val new: PatternCell)
+    data class PatternEdit(val r: Int, val c: Int, val old: PatternCell?, val new: PatternCell?)
     data class PatternOperation(val edits: List<PatternEdit>)
 
     val patternUndoStack = mutableListOf<PatternOperation>()
@@ -404,10 +427,9 @@ class EditorState {
     fun resizePattern(patternId: String, newCols: Int, newRows: Int) {
         val pat = project.patterns.find { it.id == patternId } ?: return
         if (newCols == pat.cols && newRows == pat.rows) return
-        val newCells = MutableList(newRows * newCols) { idx ->
+        val newCells = MutableList<PatternCell?>(newRows * newCols) { idx ->
             val r = idx / newCols; val c = idx % newCols
-            if (r < pat.rows && c < pat.cols) pat.getCell(r, c) ?: PatternCell(0)
-            else PatternCell(0)
+            if (r < pat.rows && c < pat.cols) pat.getCell(r, c) else null
         }
         val idx = project.patterns.indexOfFirst { it.id == patternId }
         if (idx >= 0) {
@@ -433,7 +455,7 @@ class EditorState {
                 if (tx < 0 || ty < 0 || tx >= pat.cols || ty >= pat.rows) continue
                 val key = (tx.toLong() shl 32) or (ty.toLong() and 0xFFFFFFFFL)
                 if (pendingPatPositions.contains(key)) continue
-                val oldCell = pat.getCell(ty, tx) ?: PatternCell(0)
+                val oldCell = pat.getCell(ty, tx)
                 val word = b.blockWordAt(r, c)
                 val mt = word and 0x3FF
                 val hf = (word shr 10) and 1 != 0
@@ -457,11 +479,9 @@ class EditorState {
         if (bx < 0 || by < 0 || bx >= pat.cols || by >= pat.rows) return false
         val key = (bx.toLong() shl 32) or (by.toLong() and 0xFFFFFFFFL)
         if (pendingPatPositions.contains(key)) return false
-        val oldCell = pat.getCell(by, bx) ?: PatternCell(0)
-        val emptyCell = PatternCell(0)
-        if (oldCell == emptyCell) return false
-        pat.setCell(by, bx, emptyCell)
-        pendingPatEdits.add(PatternEdit(by, bx, oldCell, emptyCell))
+        val oldCell = pat.getCell(by, bx) ?: return false
+        pat.setCell(by, bx, null)
+        pendingPatEdits.add(PatternEdit(by, bx, oldCell, null))
         pendingPatPositions.add(key)
         patternEditVersion++
         return true
@@ -481,7 +501,7 @@ class EditorState {
         val b = brush ?: return
         if (b.rows != 1 || b.cols != 1) return
         if (bx < 0 || by < 0 || bx >= pat.cols || by >= pat.rows) return
-        val targetCell = pat.getCell(by, bx) ?: PatternCell(0)
+        val targetCell = pat.getCell(by, bx)
         val word = b.blockWordAt(0, 0)
         val mt = word and 0x3FF; val hf = (word shr 10) and 1 != 0
         val vf = (word shr 11) and 1 != 0; val bt = (word shr 12) and 0xF
@@ -497,7 +517,7 @@ class EditorState {
             val k = (cx.toLong() shl 32) or (cy.toLong() and 0xFFFFFFFFL)
             if (k in visited) continue
             if (cx < 0 || cy < 0 || cx >= pat.cols || cy >= pat.rows) continue
-            val cell = pat.getCell(cy, cx) ?: PatternCell(0)
+            val cell = pat.getCell(cy, cx)
             if (cell != targetCell) continue
             visited.add(k)
             edits.add(PatternEdit(cy, cx, cell, fillCell))
@@ -553,13 +573,13 @@ class EditorState {
         return true
     }
 
-    fun patReadCell(bx: Int, by: Int): PatternCell {
-        val pat = activePattern ?: return PatternCell(0)
-        return pat.getCell(by, bx) ?: PatternCell(0)
+    fun patReadCell(bx: Int, by: Int): PatternCell? {
+        val pat = activePattern ?: return null
+        return pat.getCell(by, bx)
     }
 
     fun patCellWord(bx: Int, by: Int): Int {
-        val cell = patReadCell(bx, by)
+        val cell = patReadCell(bx, by) ?: return 0
         var w = cell.metatile and 0x3FF
         if (cell.hFlip) w = w or (1 shl 10)
         if (cell.vFlip) w = w or (1 shl 11)
@@ -569,7 +589,7 @@ class EditorState {
 
     fun patSetCellProperties(bx: Int, by: Int, blockType: Int, bts: Int) {
         val pat = activePattern ?: return
-        val old = pat.getCell(by, bx) ?: PatternCell(0)
+        val old = pat.getCell(by, bx) ?: PatternCell(0, blockType = 0)
         val newCell = old.copy(blockType = blockType, bts = bts)
         if (old == newCell) return
         pat.setCell(by, bx, newCell)
@@ -584,7 +604,7 @@ class EditorState {
 
     fun patSetCellPlm(bx: Int, by: Int, plmId: Int, plmParam: Int) {
         val pat = activePattern ?: return
-        val old = pat.getCell(by, bx) ?: PatternCell(0)
+        val old = pat.getCell(by, bx) ?: PatternCell(0, blockType = 0)
         val newCell = old.copy(plmId = plmId, plmParam = plmParam)
         if (old == newCell) return
         pat.setCell(by, bx, newCell)
@@ -611,7 +631,7 @@ class EditorState {
         val maxY = maxOf(s.second, e.second).coerceIn(0, workingBlocksTall - 1)
         val cols = maxX - minX + 1
         val rows = maxY - minY + 1
-        val cells = mutableListOf<PatternCell>()
+        val cells = mutableListOf<PatternCell?>()
         for (by in minY..maxY) {
             for (bx in minX..maxX) {
                 val word = readBlockWord(bx, by)
@@ -649,17 +669,10 @@ class EditorState {
             "builtin_door_blue_left", "builtin_door_blue_right",
             "builtin_door_red_left", "builtin_door_red_right",
             "builtin_door_green_left", "builtin_door_green_right",
-            "builtin_door_yellow_left", "builtin_door_yellow_right"
-        )
-
-        // Remove PLM-only patterns that don't need tile data.
-        // Save stations, refill stations, chozo statues, and the ship are all
-        // rendered at runtime by their PLMs — no tile pattern required.
-        val plmOnlyIds = setOf(
+            "builtin_door_yellow_left", "builtin_door_yellow_right",
             "builtin_save_station", "builtin_energy_refill",
-            "builtin_missile_refill", "builtin_chozo_statue", "builtin_ship"
+            "builtin_missile_refill", "builtin_chozo_statue"
         )
-        project.patterns.removeAll { it.id in plmOnlyIds && it.builtIn }
 
         // Migrate old incorrect gate/door patterns so they get re-seeded correctly.
         val brokenPatternIds = setOf("builtin_left_gate", "builtin_right_gate")
@@ -670,9 +683,26 @@ class EditorState {
         val wrongPlmIds = setOf(0xC8A6, 0xC88E, 0xC876, 0xC85E)
         project.patterns.removeAll { pat ->
             (pat.id in brokenPatternIds && pat.builtIn &&
-                pat.cells.any { it.blockType == 0x9 && it.bts == 0x40 }) ||
+                pat.cells.any { it != null && it.blockType == 0x9 && it.bts == 0x40 }) ||
             (pat.id in wrongDoorRightIds && pat.builtIn &&
-                pat.cells.any { it.plmId in wrongPlmIds })
+                pat.cells.any { it != null && it.plmId in wrongPlmIds })
+        }
+
+        // Migrate old placeholder station/chozo patterns (wrong dimensions or generic tiles)
+        val stationChozoIds = setOf("builtin_energy_refill", "builtin_missile_refill", "builtin_chozo_statue")
+        project.patterns.removeAll { pat ->
+            pat.id in stationChozoIds && pat.builtIn && (pat.rows != 3 || pat.cols != 3)
+        }
+
+        // Migrate energy/missile refill patterns: wrong PLM param, non-null bottom corners,
+        // or wrong block types (middle/bottom rows must be solid 0x8 to match vanilla)
+        val refillIds = setOf("builtin_energy_refill", "builtin_missile_refill")
+        project.patterns.removeAll { pat ->
+            pat.id in refillIds && pat.builtIn && (
+                pat.cells.any { it != null && it.plmParam == 0x8000 } ||
+                (pat.cells.size == 9 && pat.cells[6] != null) ||
+                (pat.cells.size == 9 && pat.cells[4]?.blockType == 0x0)
+            )
         }
 
         val existing = project.patterns.map { it.id }.toSet()
@@ -680,7 +710,7 @@ class EditorState {
 
         if (romParser == null) return
 
-        fun addBuiltIn(id: String, name: String, cols: Int, rows: Int, cells: List<PatternCell>,
+        fun addBuiltIn(id: String, name: String, cols: Int, rows: Int, cells: List<PatternCell?>,
                        tilesetId: Int? = null, noFlip: Boolean = false) {
             if (id in existing) return
             val pat = TilePattern(id, name, cols, rows, tilesetId, cells.toMutableList(),
@@ -738,6 +768,63 @@ class EditorState {
             addBuiltIn("builtin_door_green_right", "Door: Green (Right)", 1, 4, doorPatternCells(0xC878, false), noFlip = true)
             addBuiltIn("builtin_door_yellow_left", "Door: Yellow (Left)", 1, 4, doorPatternCells(0xC85A, true), noFlip = true)
             addBuiltIn("builtin_door_yellow_right","Door: Yellow (Right)", 1, 4, doorPatternCells(0xC860, false), noFlip = true)
+
+            // ── Save Station: 3x2, PLM renders graphic at runtime ──
+            addBuiltIn("builtin_save_station", "Save Station", 3, 2, listOf(
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8, plmId = 0xB76F, plmParam = 0x8000),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+            ))
+
+            // ── Energy Refill: 3x3, CRE tiles matching vanilla station layout ──
+            // Bottom corners are null: the PLM draws its own CRE tiles at runtime,
+            // and null cells let the room's background show through.
+            // Station PLM placement rules (from snesrev/sm decompilation):
+            //  - PLM center block gets type 0x8, left/right get type 0xB + BTS at runtime
+            //  - Activation requires: Samus NOT at full health, facing station, ran-into-wall pose
+            //  - Pixel-exact Y check: samus_y_pos == plm_block_y * 16 + 11
+            //    → floor must be EXACTLY 2 blocks below the PLM center
+            //  - Middle + bottom rows use blockType 0x8 (solid) to match vanilla layout
+            addBuiltIn("builtin_energy_refill", "Energy Refill", 3, 3, listOf(
+                PatternCell(0x0A3, blockType = 0x0),
+                PatternCell(0x0A4, blockType = 0x0),
+                PatternCell(0x0A3, blockType = 0x0, hFlip = true),
+                PatternCell(0x0C3, blockType = 0x8),
+                PatternCell(0x0C4, blockType = 0x8, plmId = 0xB6DF, plmParam = 0x0000),
+                PatternCell(0x0C3, blockType = 0x8, hFlip = true),
+                null,
+                PatternCell(0x0C2, blockType = 0x8),
+                null,
+            ))
+
+            // ── Missile Refill: 3x3, CRE tiles matching vanilla station layout ──
+            addBuiltIn("builtin_missile_refill", "Missile Refill", 3, 3, listOf(
+                PatternCell(0x0A3, blockType = 0x0),
+                PatternCell(0x0A7, blockType = 0x0),
+                PatternCell(0x0A3, blockType = 0x0, hFlip = true),
+                PatternCell(0x0C3, blockType = 0x8),
+                PatternCell(0x0C7, blockType = 0x8, plmId = 0xB6EB, plmParam = 0x0000),
+                PatternCell(0x0C3, blockType = 0x8, hFlip = true),
+                null,
+                PatternCell(0x0C2, blockType = 0x8),
+                null,
+            ))
+
+            // ── Chozo Statue: 3x3, CRE chozo statue tiles ──
+            addBuiltIn("builtin_chozo_statue", "Chozo Statue", 3, 3, listOf(
+                PatternCell(0x044, blockType = 0x0),
+                PatternCell(0x045),
+                PatternCell(0x046),
+                PatternCell(0x064),
+                PatternCell(0x065),
+                PatternCell(0x066),
+                PatternCell(0x047),
+                PatternCell(0x048),
+                PatternCell(0x049),
+            ))
         } catch (e: Exception) {
             println("Failed to seed some built-in patterns: ${e.message}")
         }
@@ -765,26 +852,18 @@ class EditorState {
         val ordered = mutableListOf<SmPatch>()
 
         // 1. GUI config patches (featured at top)
-        if (BEAM_DAMAGE_PATCH.id !in existingIds) {
-            ordered.add(SmPatch(
-                id = BEAM_DAMAGE_PATCH.id,
-                name = BEAM_DAMAGE_PATCH.name,
-                description = BEAM_DAMAGE_PATCH.description,
-                enabled = BEAM_DAMAGE_PATCH.enabled,
-                writes = mutableListOf(),
-                configType = BEAM_DAMAGE_PATCH.configType
-            ))
-        }
-        if (CERES_ESCAPE_PATCH.id !in existingIds) {
-            ordered.add(SmPatch(
-                id = CERES_ESCAPE_PATCH.id,
-                name = CERES_ESCAPE_PATCH.name,
-                description = CERES_ESCAPE_PATCH.description,
-                enabled = CERES_ESCAPE_PATCH.enabled,
-                writes = mutableListOf(),
-                configType = CERES_ESCAPE_PATCH.configType,
-                configValue = CERES_ESCAPE_PATCH.configValue
-            ))
+        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CERES_ESCAPE_PATCH)) {
+            if (guiPatch.id !in existingIds) {
+                ordered.add(SmPatch(
+                    id = guiPatch.id,
+                    name = guiPatch.name,
+                    description = guiPatch.description,
+                    enabled = guiPatch.enabled,
+                    writes = mutableListOf(),
+                    configType = guiPatch.configType,
+                    configValue = guiPatch.configValue
+                ))
+            }
         }
 
         // 2. Hardcoded hex-tweak patches (popular ones first via list order)
@@ -1025,6 +1104,20 @@ class EditorState {
             project = SmEditProject(romPath = romPath)
         }
         dirty = false
+        tileGraphics = null
+        workingLevelData = null
+        originalLevelData = null
+        romVersion++
+
+        // Merge in library patterns that aren't already in the project
+        val existingIds = project.patterns.map { it.id }.toSet()
+        val libraryPatterns = PatternLibrary.loadAllPatterns()
+        for (pat in libraryPatterns) {
+            if (pat.id !in existingIds) {
+                project.patterns.add(pat)
+            }
+        }
+        patternVersion++
     }
 
     internal fun initTestLevel(blocksWide: Int, blocksTall: Int) {
@@ -1092,6 +1185,11 @@ class EditorState {
         pendingEdits.clear()
         pendingPositions.clear()
 
+        // Load scroll data for this room
+        _originalScrolls = romParser.parseScrollData(room.roomScrollsPtr, room.width, room.height)
+        _workingScrolls = _originalScrolls.copyOf()
+        scrollVersion++
+
         // Load PLMs for this room
         _workingPlms.clear()
         val plms = romParser.parsePlmSet(room.plmSetPtr)
@@ -1114,7 +1212,7 @@ class EditorState {
                 for (op in savedRoom.operations) {
                     for (edit in op.edits) {
                         writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
-                        if (edit.newBts != edit.oldBts) writeBts(edit.blockX, edit.blockY, edit.newBts)
+                        writeBts(edit.blockX, edit.blockY, edit.newBts)
                         count++
                     }
                     undoStack.add(op)
@@ -1143,6 +1241,13 @@ class EditorState {
                     )
                 }
             }
+            // Replay saved scroll changes
+            for (sc in savedRoom.scrollChanges) {
+                val idx = sc.screenY * room.width + sc.screenX
+                if (idx in _workingScrolls.indices) _workingScrolls[idx] = sc.newValue
+            }
+            if (savedRoom.scrollChanges.isNotEmpty()) scrollVersion++
+
             // Replay saved enemy changes (including extra fields)
             for (ec in savedRoom.enemyChanges) {
                 when (ec.action) {
@@ -1235,6 +1340,8 @@ class EditorState {
         var changed = false
         for (r in 0 until b.rows) {
             for (c in 0 until b.cols) {
+                val cellKey = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
+                if (cellKey in b.skipCells) continue
                 val tx = bx + if (b.hFlip) (b.cols - 1 - c) else c
                 val ty = by + if (b.vFlip) (b.rows - 1 - r) else r
                 if (tx < 0 || ty < 0 || tx >= workingBlocksWide || ty >= workingBlocksTall) continue
@@ -1327,41 +1434,61 @@ class EditorState {
         _workingPlms.filter { it.x == x && it.y == y }
 
     fun addPlm(plmId: Int, x: Int, y: Int, param: Int) {
-        // Remove any existing item PLM at the same position to avoid duplicates
-        if (RomParser.isItemPlm(plmId)) {
-            val existing = _workingPlms.filter { it.x == x && it.y == y && RomParser.isItemPlm(it.id) }
-            for (old in existing) {
-                _workingPlms.remove(old)
-                project.getOrCreateRoom(currentRoomId).plmChanges.add(
-                    PlmChange("remove", old.id, old.x, old.y, 0)
-                )
-            }
+        // Remove any existing PLM of the same type at the same position to avoid duplicates.
+        // Applies to items, stations, and gates -- two identical PLMs at one tile break the engine.
+        val existing = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
+        for (old in existing) {
+            _workingPlms.remove(old)
+            project.getOrCreateRoom(currentRoomId).plmChanges.add(
+                PlmChange("remove", old.id, old.x, old.y, 0)
+            )
         }
 
-        // Auto-assign collection index for items when param is 0.
-        // SM uses sequential indices stored in a ~20-byte collection bit array.
-        // Original items use: Crateria 0x00-0x0B, Brinstar 0x0D-0x30,
-        // Norfair 0x31-0x50, Wrecked Ship 0x80-0x87, Maridia 0x88-0x9A.
-        // The gap 0x51-0x7F (47 slots) is unused and safe for new items.
-        // WARNING: 0xA0+ overflows the collection array and corrupts save data!
-        val actualParam = if (param == 0 && RomParser.isItemPlm(plmId)) {
-            val usedIndices = mutableSetOf<Int>()
-            for ((_, roomEdits) in project.rooms) {
-                for (change in roomEdits.plmChanges) {
-                    if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+        val actualParam = when {
+            // Auto-assign collection index for items when param is 0.
+            // SM uses sequential indices stored in a ~20-byte collection bit array.
+            // Original items use: Crateria 0x00-0x0B, Brinstar 0x0D-0x30,
+            // Norfair 0x31-0x50, Wrecked Ship 0x80-0x87, Maridia 0x88-0x9A.
+            // The gap 0x51-0x7F (47 slots) is unused and safe for new items.
+            // WARNING: 0xA0+ overflows the collection array and corrupts save data!
+            param == 0 && RomParser.isItemPlm(plmId) -> {
+                val usedIndices = mutableSetOf<Int>()
+                for ((_, roomEdits) in project.rooms) {
+                    for (change in roomEdits.plmChanges) {
+                        if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+                    }
                 }
+                for (plm in _workingPlms) {
+                    if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
+                }
+                var idx = 0x51
+                while (idx in usedIndices && idx <= 0x7F) idx++
+                if (idx > 0x7F) {
+                    idx = 0x9B
+                    while (idx in usedIndices && idx <= 0x9F) idx++
+                }
+                if (idx > 0x9F) 0x06 else idx
             }
-            for (plm in _workingPlms) {
-                if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
+            // Auto-assign save station index: High byte 0x80, Low byte = next unused index.
+            // Each area has its own save station list; indices must be unique within the area.
+            plmId == 0xB76F && param == 0x8000 -> {
+                val usedSaveIndices = mutableSetOf<Int>()
+                for (plm in _workingPlms) {
+                    if (plm.id == 0xB76F) usedSaveIndices.add(plm.param and 0xFF)
+                }
+                for ((_, roomEdits) in project.rooms) {
+                    for (change in roomEdits.plmChanges) {
+                        if (change.action == "add" && change.plmId == 0xB76F) {
+                            usedSaveIndices.add(change.param and 0xFF)
+                        }
+                    }
+                }
+                var idx = 0
+                while (idx in usedSaveIndices && idx <= 0x0F) idx++
+                0x8000 or idx
             }
-            var idx = 0x51
-            while (idx in usedIndices && idx <= 0x7F) idx++
-            if (idx > 0x7F) {
-                idx = 0x9B
-                while (idx in usedIndices && idx <= 0x9F) idx++
-            }
-            if (idx > 0x9F) 0x06 else idx
-        } else param
+            else -> param
+        }
         _workingPlms.add(RomParser.PlmEntry(plmId, x, y, actualParam))
         project.getOrCreateRoom(currentRoomId).plmChanges.add(
             PlmChange("add", plmId, x, y, actualParam)
@@ -1434,6 +1561,41 @@ class EditorState {
         )
         roomEdits.doorChanges.removeAll { it.doorIndex == index }
         roomEdits.doorChanges.add(dc)
+        dirty = true
+        editVersion++
+    }
+
+    // ─── Scroll editing ─────────────────────────────────────────
+
+    fun setScroll(screenX: Int, screenY: Int, newValue: Int, roomWidth: Int) {
+        val idx = screenY * roomWidth + screenX
+        if (idx !in _workingScrolls.indices) return
+        val oldValue = _workingScrolls[idx]
+        if (oldValue == newValue) return
+        _workingScrolls[idx] = newValue
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+        roomEdits.scrollChanges.removeAll { it.screenX == screenX && it.screenY == screenY }
+        if (newValue != _originalScrolls[idx]) {
+            roomEdits.scrollChanges.add(ScrollChange(screenX, screenY, _originalScrolls[idx], newValue))
+        }
+        scrollVersion++
+        dirty = true
+    }
+
+    // ─── FX editing ─────────────────────────────────────────────
+
+    fun setFxChange(change: FxChange) {
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+        roomEdits.fxChange = change
+        dirty = true
+        editVersion++
+    }
+
+    // ─── State data editing (tileset, music, BG scrolling) ──────
+
+    fun setStateDataChange(change: StateDataChange) {
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+        roomEdits.stateDataChange = change
         dirty = true
         editVersion++
     }
@@ -1542,6 +1704,7 @@ class EditorState {
             dirty = false
             println("Project saved: $projectFilePath")
             romParser?.let { exportCustomGfxPngs(it) }
+            PatternLibrary.saveAll(project.patterns)
             true
         } catch (e: Exception) { println("Save failed: ${e.message}"); false }
     }
@@ -1624,6 +1787,39 @@ class EditorState {
                         romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
                     }
                 }
+            } else if (patch.configType == "boss_stats") {
+                val data = patch.configData ?: continue
+                for (field in ALL_BOSS_FIELDS) {
+                    val value = data[field.key] ?: continue
+                    val pc = romParser.snesToPc(field.snesAddress) + field.offset
+                    if (pc + 1 < romData.size) {
+                        romData[pc] = (value and 0xFF).toByte()
+                        romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
+                    }
+                }
+            } else if (patch.configType == "enemy_stats") {
+                val data = patch.configData ?: continue
+                for (e in ENEMY_DEFS) {
+                    val hp = data["${e.key}_hp"]
+                    val dmg = data["${e.key}_dmg"]
+                    val snesAddr = 0xA00000 or e.speciesId
+                    if (hp != null) {
+                        val pc = romParser.snesToPc(snesAddr) + 4
+                        if (pc + 1 < romData.size) {
+                            romData[pc] = (hp and 0xFF).toByte()
+                            romData[pc + 1] = ((hp shr 8) and 0xFF).toByte()
+                        }
+                    }
+                    if (dmg != null) {
+                        val pc = romParser.snesToPc(snesAddr) + 6
+                        if (pc + 1 < romData.size) {
+                            romData[pc] = (dmg and 0xFF).toByte()
+                            romData[pc + 1] = ((dmg shr 8) and 0xFF).toByte()
+                        }
+                    }
+                }
+            } else if (patch.configType == "boss_defeated" || patch.configType == "hyper_beam") {
+                // These are handled by the combined per-frame hook below
             } else {
                 for (write in patch.writes) {
                     val off = write.offset.toInt()
@@ -1633,6 +1829,82 @@ class EditorState {
                 }
             }
             patchesApplied++
+        }
+
+        // Combined per-frame hook: boss-defeated + hyper beam
+        // Writes a single routine at $DF:F040 (PC $2FF040) and hooks $82:896E.
+        run {
+            val enabledBosses = mutableSetOf<String>()
+            var hyperBeam = false
+            for (patch in project.patches) {
+                if (!patch.enabled) continue
+                if (patch.configType == "boss_defeated") {
+                    val data = patch.configData ?: continue
+                    enabledBosses.addAll(data.filter { it.value != 0 }.keys)
+                }
+                if (patch.configType == "hyper_beam") hyperBeam = true
+            }
+            if (enabledBosses.isNotEmpty() || hyperBeam) {
+                val code = mutableListOf<Int>()
+                // Chain to original: JSL $8289EF
+                code.addAll(listOf(0x22, 0xEF, 0x89, 0x82))
+                code.add(0x08) // PHP
+                code.addAll(listOf(0xC2, 0x20)) // REP #$20
+
+                // Boss flags + associated event flags (long addressing for WRAM from bank $DF)
+                if (enabledBosses.isNotEmpty()) {
+                    val byAddr = mutableMapOf<Int, Int>()
+                    for (flag in BOSS_FLAG_DEFS) {
+                        if (flag.key in enabledBosses) {
+                            byAddr[flag.wramAddr] = (byAddr[flag.wramAddr] ?: 0) or flag.bit
+                        }
+                    }
+
+                    // Per-boss golden-statue events ($7E:D820-D821 event bitfield)
+                    val bossStatueEvents = mapOf(
+                        "phantoon" to (0xD820 to 0x40), // Event 0x06
+                        "ridley"   to (0xD820 to 0x80), // Event 0x07
+                        "draygon"  to (0xD821 to 0x01), // Event 0x08
+                        "kraid"    to (0xD821 to 0x02), // Event 0x09
+                    )
+                    for ((boss, addrBit) in bossStatueEvents) {
+                        if (boss in enabledBosses) {
+                            byAddr[addrBit.first] = (byAddr[addrBit.first] ?: 0) or addrBit.second
+                        }
+                    }
+                    val mainBosses = setOf("kraid", "phantoon", "ridley", "draygon")
+                    if (mainBosses.all { it in enabledBosses }) {
+                        byAddr[0xD821] = (byAddr[0xD821] ?: 0) or 0x04 // Event 0x0A: Path to Tourian open
+                    }
+
+                    for ((addr, bits) in byAddr) {
+                        code.addAll(listOf(0xAF, addr and 0xFF, (addr shr 8) and 0xFF, 0x7E))
+                        code.addAll(listOf(0x09, bits and 0xFF, 0x00))
+                        code.addAll(listOf(0x8F, addr and 0xFF, (addr shr 8) and 0xFF, 0x7E))
+                    }
+                }
+
+                // Hyper beam (long addressing: STA $7E:0A76)
+                if (hyperBeam) {
+                    code.addAll(listOf(0xA9, 0x00, 0x80))             // LDA #$8000
+                    code.addAll(listOf(0x8F, 0x76, 0x0A, 0x7E))      // STA $7E0A76
+                }
+
+                code.add(0x28) // PLP
+                code.add(0x6B) // RTL
+
+                // Write payload at PC $2FF040
+                for ((i, b) in code.withIndex()) {
+                    val addr = 0x2FF040 + i
+                    if (addr < romData.size) romData[addr] = b.toByte()
+                }
+                // Hook $82:896E (PC $1096E): JSL $DFF040
+                val hook = listOf(0x22, 0x40, 0xF0, 0xDF)
+                for ((i, b) in hook.withIndex()) {
+                    val addr = 0x1096E + i
+                    if (addr < romData.size) romData[addr] = b.toByte()
+                }
+            }
         }
 
         // Free space allocator for bank $8F (PLM sets live here).
@@ -1679,7 +1951,11 @@ class EditorState {
             val hasPlmEdits = roomEdits.plmChanges.isNotEmpty()
             val hasDoorEdits = roomEdits.doorChanges.isNotEmpty()
             val hasEnemyEdits = roomEdits.enemyChanges.isNotEmpty()
-            if (!hasTileEdits && !hasPlmEdits && !hasDoorEdits && !hasEnemyEdits) continue
+            val hasScrollEdits = roomEdits.scrollChanges.isNotEmpty()
+            val hasFxEdits = roomEdits.fxChange != null
+            val hasStateEdits = roomEdits.stateDataChange != null
+            if (!hasTileEdits && !hasPlmEdits && !hasDoorEdits && !hasEnemyEdits &&
+                !hasScrollEdits && !hasFxEdits && !hasStateEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
 
@@ -1692,7 +1968,7 @@ class EditorState {
                 for (op in roomEdits.operations) for (edit in op.edits) {
                     val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
                     if (off + 1 < editedData.size) { editedData[off] = (edit.newBlockWord and 0xFF).toByte(); editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte() }
-                    if (edit.newBts != edit.oldBts) { val btsOff = 2 + layer1Size + idx; if (btsOff < editedData.size) editedData[btsOff] = edit.newBts.toByte() }
+                    val btsOff = 2 + layer1Size + idx; if (btsOff < editedData.size) editedData[btsOff] = edit.newBts.toByte()
                 }
                 val compressed = lz5Compress(editedData)
                 val pcOff = romParser.snesToPc(room.levelDataPtr)
@@ -1740,77 +2016,82 @@ class EditorState {
                 }
             }
 
-            // Patch PLM set
-            if (hasPlmEdits && room.plmSetPtr != 0 && room.plmSetPtr != 0xFFFF) {
-                val originalPlms = romParser.parsePlmSet(room.plmSetPtr)
-                val modifiedPlms = originalPlms.toMutableList()
-                for (change in roomEdits.plmChanges) {
-                    when (change.action) {
-                        "add" -> modifiedPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
-                        "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
-                    }
+            // Patch PLM sets — rooms can have multiple state conditions (E629, E612, E5E6, etc.)
+            // each pointing to a DIFFERENT PLM set. We must apply user changes to every
+            // distinct PLM set so items/stations appear regardless of which state is active.
+            if (hasPlmEdits) {
+                val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                val distinctPlmPtrs = mutableSetOf<Int>()
+                for (stateOffset in allStateOffsets) {
+                    val ptr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                            ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                    if (ptr != 0 && ptr != 0xFFFF) distinctPlmPtrs.add(ptr)
                 }
-                // Deduplicate: if multiple item PLMs at the same (x,y), keep last one
-                val seen = mutableSetOf<Long>()
-                val deduped = mutableListOf<RomParser.PlmEntry>()
-                for (plm in modifiedPlms.reversed()) {
-                    val key = (plm.x.toLong() shl 16) or plm.y.toLong()
-                    if (RomParser.isItemPlm(plm.id)) {
-                        if (key in seen) continue
-                        seen.add(key)
-                    }
-                    deduped.add(plm)
-                }
-                deduped.reverse()
-                val originalSize = originalPlms.size * 6 + 2
-                val newSize = deduped.size * 6 + 2
-                val plmPc = romParser.snesToPc(0x8F0000 or room.plmSetPtr)
 
-                val writePc: Int
-                if (newSize <= originalSize) {
-                    writePc = plmPc
-                } else if (freePtr + newSize <= bank8FEnd) {
-                    writePc = freePtr
-                    freePtr += newSize
-                    // Update PLM set pointer in ALL state data blocks for this room.
-                    // Rooms can have multiple state conditions (E629, E612, E5E6, etc.)
-                    // that share the same PLM set pointer. We must update all of them
-                    // or the game will read the old (now stale) location for those states.
-                    val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
-                    val newSnes = romParser.pcToSnes(writePc)
-                    val newPtr = newSnes and 0xFFFF
-                    var updatedStates = 0
-                    for (stateOffset in allStateOffsets) {
-                        val existingPlmPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
-                                ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
-                        if (existingPlmPtr == room.plmSetPtr) {
-                            romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
-                            romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
-                            updatedStates++
+                for (plmSetPtr in distinctPlmPtrs) {
+                    val originalPlms = romParser.parsePlmSet(plmSetPtr)
+                    val modifiedPlms = originalPlms.toMutableList()
+                    for (change in roomEdits.plmChanges) {
+                        when (change.action) {
+                            "add" -> modifiedPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
+                            "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
                         }
                     }
-                    // Do NOT zero the old PLM set location — other state conditions
-                    // with different PLM pointers may share adjacent data, and states
-                    // we didn't match above still need the original data intact.
-                    println("Room 0x$roomKey: relocated PLM set to 0x${newSnes.toString(16)} (updated $updatedStates/${allStateOffsets.size} states)")
-                } else {
-                    println("WARN: Room 0x$roomKey no free space for expanded PLM set — skipped")
-                    continue
-                }
+                    val seen = mutableSetOf<Long>()
+                    val deduped = mutableListOf<RomParser.PlmEntry>()
+                    for (plm in modifiedPlms.reversed()) {
+                        val key = (plm.x.toLong() shl 16) or plm.y.toLong()
+                        if (RomParser.isItemPlm(plm.id)) {
+                            if (key in seen) continue
+                            seen.add(key)
+                        }
+                        deduped.add(plm)
+                    }
+                    deduped.reverse()
+                    val originalSize = originalPlms.size * 6 + 2
+                    val newSize = deduped.size * 6 + 2
+                    val plmPc = romParser.snesToPc(0x8F0000 or plmSetPtr)
 
-                var offset = writePc
-                for (plm in deduped) {
-                    romData[offset] = (plm.id and 0xFF).toByte()
-                    romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
-                    romData[offset + 2] = plm.x.toByte()
-                    romData[offset + 3] = plm.y.toByte()
-                    romData[offset + 4] = (plm.param and 0xFF).toByte()
-                    romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
-                    offset += 6
-                }
-                romData[offset] = 0; romData[offset + 1] = 0
-                if (writePc == plmPc) {
-                    for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                    val writePc: Int
+                    if (newSize <= originalSize) {
+                        writePc = plmPc
+                    } else if (freePtr + newSize <= bank8FEnd) {
+                        writePc = freePtr
+                        freePtr += newSize
+                        val newSnes = romParser.pcToSnes(writePc)
+                        val newPtr = newSnes and 0xFFFF
+                        var updatedStates = 0
+                        for (stateOffset in allStateOffsets) {
+                            val existingPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                                    ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                            if (existingPtr == plmSetPtr) {
+                                romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
+                                romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
+                                updatedStates++
+                            }
+                        }
+                        println("Room 0x$roomKey: relocated PLM set 0x${plmSetPtr.toString(16)} to 0x${newSnes.toString(16)} (updated $updatedStates states)")
+                    } else {
+                        println("WARN: Room 0x$roomKey no free space for expanded PLM set 0x${plmSetPtr.toString(16)} — skipped")
+                        continue
+                    }
+
+                    var offset = writePc
+                    for (plm in deduped) {
+                        romData[offset] = (plm.id and 0xFF).toByte()
+                        romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
+                        romData[offset + 2] = plm.x.toByte()
+                        romData[offset + 3] = plm.y.toByte()
+                        romData[offset + 4] = (plm.param and 0xFF).toByte()
+                        romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
+                        offset += 6
+                        val name = RomParser.plmDisplayName(plm.id, plm.param)
+                        println("  PLM: $name (0x${plm.id.toString(16)}) at (${plm.x},${plm.y}) param=0x${plm.param.toString(16)}")
+                    }
+                    romData[offset] = 0; romData[offset + 1] = 0
+                    if (writePc == plmPc) {
+                        for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                    }
                 }
                 roomsPatched.add(roomKey)
             }
@@ -1913,6 +2194,82 @@ class EditorState {
                 // Zero any leftover space if writing in-place
                 if (writePc == enemyPc) {
                     while (off < enemyPc + originalSize) { romData[off] = 0; off++ }
+                }
+                roomsPatched.add(roomKey)
+            }
+
+            // Patch scroll data
+            if (hasScrollEdits && room.roomScrollsPtr > 1) {
+                val originalScrolls = romParser.parseScrollData(room.roomScrollsPtr, room.width, room.height)
+                val modifiedScrolls = originalScrolls.copyOf()
+                for (sc in roomEdits.scrollChanges) {
+                    val idx = sc.screenY * room.width + sc.screenX
+                    if (idx in modifiedScrolls.indices) modifiedScrolls[idx] = sc.newValue
+                }
+                val scrollPc = romParser.snesToPc(0x8F0000 or room.roomScrollsPtr)
+                for (i in modifiedScrolls.indices) {
+                    if (scrollPc + i < romData.size) romData[scrollPc + i] = modifiedScrolls[i].toByte()
+                }
+                roomsPatched.add(roomKey)
+            }
+
+            // Patch FX data
+            if (hasFxEdits && room.fxPtr != 0 && room.fxPtr != 0xFFFF) {
+                val fx = roomEdits.fxChange!!
+                val fxEntries = romParser.parseFxEntries(room.fxPtr)
+                if (fxEntries.isNotEmpty()) {
+                    val fxSnesAddr = 0x830000 or room.fxPtr
+                    var fxPc = romParser.snesToPc(fxSnesAddr)
+                    // Find the default FX entry (doorSelect == 0) — it's always the last one
+                    for (entry in fxEntries) {
+                        if (entry.doorSelect == 0) {
+                            // fxPc points to this entry
+                            fx.liquidSurfaceStart?.let { v ->
+                                romData[fxPc + 2] = (v and 0xFF).toByte()
+                                romData[fxPc + 3] = ((v shr 8) and 0xFF).toByte()
+                            }
+                            fx.liquidSurfaceNew?.let { v ->
+                                romData[fxPc + 4] = (v and 0xFF).toByte()
+                                romData[fxPc + 5] = ((v shr 8) and 0xFF).toByte()
+                            }
+                            fx.liquidSpeed?.let { v ->
+                                romData[fxPc + 6] = (v and 0xFF).toByte()
+                                romData[fxPc + 7] = ((v shr 8) and 0xFF).toByte()
+                            }
+                            fx.liquidDelay?.let { v -> romData[fxPc + 8] = v.toByte() }
+                            fx.fxType?.let { v -> romData[fxPc + 9] = v.toByte() }
+                            fx.fxBitA?.let { v -> romData[fxPc + 10] = v.toByte() }
+                            fx.fxBitB?.let { v -> romData[fxPc + 11] = v.toByte() }
+                            fx.fxBitC?.let { v -> romData[fxPc + 12] = v.toByte() }
+                            fx.paletteFxBitflags?.let { v -> romData[fxPc + 13] = v.toByte() }
+                            fx.tileAnimBitflags?.let { v -> romData[fxPc + 14] = v.toByte() }
+                            fx.paletteBlend?.let { v -> romData[fxPc + 15] = v.toByte() }
+                            break
+                        }
+                        fxPc += 16
+                    }
+                    roomsPatched.add(roomKey)
+                }
+            }
+
+            // Patch state data fields (tileset, music, BG scrolling)
+            if (hasStateEdits) {
+                val sd = roomEdits.stateDataChange!!
+                val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                for (stateOffset in allStateOffsets) {
+                    sd.tileset?.let { v ->
+                        romData[stateOffset + 3] = v.toByte()
+                    }
+                    sd.musicData?.let { v ->
+                        romData[stateOffset + 4] = v.toByte()
+                    }
+                    sd.musicTrack?.let { v ->
+                        romData[stateOffset + 5] = v.toByte()
+                    }
+                    sd.bgScrolling?.let { v ->
+                        romData[stateOffset + 12] = (v and 0xFF).toByte()
+                        romData[stateOffset + 13] = ((v shr 8) and 0xFF).toByte()
+                    }
                 }
                 roomsPatched.add(roomKey)
             }
