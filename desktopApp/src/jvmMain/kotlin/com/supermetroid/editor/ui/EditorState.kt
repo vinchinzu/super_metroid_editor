@@ -694,6 +694,15 @@ class EditorState {
             pat.id in stationChozoIds && pat.builtIn && (pat.rows != 3 || pat.cols != 3)
         }
 
+        // Migrate energy/missile refill patterns: wrong PLM param or non-null bottom corners
+        val refillIds = setOf("builtin_energy_refill", "builtin_missile_refill")
+        project.patterns.removeAll { pat ->
+            pat.id in refillIds && pat.builtIn && (
+                pat.cells.any { it != null && it.plmParam == 0x8000 } ||
+                (pat.cells.size == 9 && pat.cells[6] != null)
+            )
+        }
+
         val existing = project.patterns.map { it.id }.toSet()
         if (builtInIds.all { it in existing }) return
 
@@ -769,16 +778,18 @@ class EditorState {
             ))
 
             // ── Energy Refill: 3x3, CRE tiles matching vanilla station layout ──
+            // Bottom corners are null: the PLM draws its own CRE tiles at runtime,
+            // and null cells let the room's background show through.
             addBuiltIn("builtin_energy_refill", "Energy Refill", 3, 3, listOf(
                 PatternCell(0x0A3, blockType = 0x0),
                 PatternCell(0x0A4, blockType = 0x0),
                 PatternCell(0x0A3, blockType = 0x0, hFlip = true),
                 PatternCell(0x0C3, blockType = 0x0),
-                PatternCell(0x0C4, blockType = 0x0, plmId = 0xB6DF, plmParam = 0x8000),
+                PatternCell(0x0C4, blockType = 0x0, plmId = 0xB6DF, plmParam = 0x0000),
                 PatternCell(0x0C3, blockType = 0x0, hFlip = true),
-                PatternCell(0x044, blockType = 0x0),
+                null,
                 PatternCell(0x0C2, blockType = 0x0),
-                PatternCell(0x044, blockType = 0x0),
+                null,
             ))
 
             // ── Missile Refill: 3x3, CRE tiles matching vanilla station layout ──
@@ -787,11 +798,11 @@ class EditorState {
                 PatternCell(0x0A7, blockType = 0x0),
                 PatternCell(0x0A3, blockType = 0x0, hFlip = true),
                 PatternCell(0x0C3, blockType = 0x0),
-                PatternCell(0x0C7, blockType = 0x0, plmId = 0xB6EB, plmParam = 0x8000),
+                PatternCell(0x0C7, blockType = 0x0, plmId = 0xB6EB, plmParam = 0x0000),
                 PatternCell(0x0C3, blockType = 0x0, hFlip = true),
-                PatternCell(0x044, blockType = 0x0),
+                null,
                 PatternCell(0x0C2, blockType = 0x0),
-                PatternCell(0x044, blockType = 0x0),
+                null,
             ))
 
             // ── Chozo Statue: 3x3, CRE chozo statue tiles ──
@@ -1415,15 +1426,14 @@ class EditorState {
         _workingPlms.filter { it.x == x && it.y == y }
 
     fun addPlm(plmId: Int, x: Int, y: Int, param: Int) {
-        // Remove any existing item PLM at the same position to avoid duplicates
-        if (RomParser.isItemPlm(plmId)) {
-            val existing = _workingPlms.filter { it.x == x && it.y == y && RomParser.isItemPlm(it.id) }
-            for (old in existing) {
-                _workingPlms.remove(old)
-                project.getOrCreateRoom(currentRoomId).plmChanges.add(
-                    PlmChange("remove", old.id, old.x, old.y, 0)
-                )
-            }
+        // Remove any existing PLM of the same type at the same position to avoid duplicates.
+        // Applies to items, stations, and gates -- two identical PLMs at one tile break the engine.
+        val existing = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
+        for (old in existing) {
+            _workingPlms.remove(old)
+            project.getOrCreateRoom(currentRoomId).plmChanges.add(
+                PlmChange("remove", old.id, old.x, old.y, 0)
+            )
         }
 
         val actualParam = when {
@@ -1833,7 +1843,7 @@ class EditorState {
                 code.add(0x08) // PHP
                 code.addAll(listOf(0xC2, 0x20)) // REP #$20
 
-                // Boss flags (long addressing for WRAM from bank $DF)
+                // Boss flags + associated event flags (long addressing for WRAM from bank $DF)
                 if (enabledBosses.isNotEmpty()) {
                     val byAddr = mutableMapOf<Int, Int>()
                     for (flag in BOSS_FLAG_DEFS) {
@@ -1841,6 +1851,24 @@ class EditorState {
                             byAddr[flag.wramAddr] = (byAddr[flag.wramAddr] ?: 0) or flag.bit
                         }
                     }
+
+                    // Per-boss golden-statue events ($7E:D820-D821 event bitfield)
+                    val bossStatueEvents = mapOf(
+                        "phantoon" to (0xD820 to 0x40), // Event 0x06
+                        "ridley"   to (0xD820 to 0x80), // Event 0x07
+                        "draygon"  to (0xD821 to 0x01), // Event 0x08
+                        "kraid"    to (0xD821 to 0x02), // Event 0x09
+                    )
+                    for ((boss, addrBit) in bossStatueEvents) {
+                        if (boss in enabledBosses) {
+                            byAddr[addrBit.first] = (byAddr[addrBit.first] ?: 0) or addrBit.second
+                        }
+                    }
+                    val mainBosses = setOf("kraid", "phantoon", "ridley", "draygon")
+                    if (mainBosses.all { it in enabledBosses }) {
+                        byAddr[0xD821] = (byAddr[0xD821] ?: 0) or 0x04 // Event 0x0A: Path to Tourian open
+                    }
+
                     for ((addr, bits) in byAddr) {
                         code.addAll(listOf(0xAF, addr and 0xFF, (addr shr 8) and 0xFF, 0x7E))
                         code.addAll(listOf(0x09, bits and 0xFF, 0x00))
@@ -1980,77 +2008,80 @@ class EditorState {
                 }
             }
 
-            // Patch PLM set
-            if (hasPlmEdits && room.plmSetPtr != 0 && room.plmSetPtr != 0xFFFF) {
-                val originalPlms = romParser.parsePlmSet(room.plmSetPtr)
-                val modifiedPlms = originalPlms.toMutableList()
-                for (change in roomEdits.plmChanges) {
-                    when (change.action) {
-                        "add" -> modifiedPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
-                        "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
-                    }
+            // Patch PLM sets — rooms can have multiple state conditions (E629, E612, E5E6, etc.)
+            // each pointing to a DIFFERENT PLM set. We must apply user changes to every
+            // distinct PLM set so items/stations appear regardless of which state is active.
+            if (hasPlmEdits) {
+                val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                val distinctPlmPtrs = mutableSetOf<Int>()
+                for (stateOffset in allStateOffsets) {
+                    val ptr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                            ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                    if (ptr != 0 && ptr != 0xFFFF) distinctPlmPtrs.add(ptr)
                 }
-                // Deduplicate: if multiple item PLMs at the same (x,y), keep last one
-                val seen = mutableSetOf<Long>()
-                val deduped = mutableListOf<RomParser.PlmEntry>()
-                for (plm in modifiedPlms.reversed()) {
-                    val key = (plm.x.toLong() shl 16) or plm.y.toLong()
-                    if (RomParser.isItemPlm(plm.id)) {
-                        if (key in seen) continue
-                        seen.add(key)
-                    }
-                    deduped.add(plm)
-                }
-                deduped.reverse()
-                val originalSize = originalPlms.size * 6 + 2
-                val newSize = deduped.size * 6 + 2
-                val plmPc = romParser.snesToPc(0x8F0000 or room.plmSetPtr)
 
-                val writePc: Int
-                if (newSize <= originalSize) {
-                    writePc = plmPc
-                } else if (freePtr + newSize <= bank8FEnd) {
-                    writePc = freePtr
-                    freePtr += newSize
-                    // Update PLM set pointer in ALL state data blocks for this room.
-                    // Rooms can have multiple state conditions (E629, E612, E5E6, etc.)
-                    // that share the same PLM set pointer. We must update all of them
-                    // or the game will read the old (now stale) location for those states.
-                    val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
-                    val newSnes = romParser.pcToSnes(writePc)
-                    val newPtr = newSnes and 0xFFFF
-                    var updatedStates = 0
-                    for (stateOffset in allStateOffsets) {
-                        val existingPlmPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
-                                ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
-                        if (existingPlmPtr == room.plmSetPtr) {
-                            romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
-                            romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
-                            updatedStates++
+                for (plmSetPtr in distinctPlmPtrs) {
+                    val originalPlms = romParser.parsePlmSet(plmSetPtr)
+                    val modifiedPlms = originalPlms.toMutableList()
+                    for (change in roomEdits.plmChanges) {
+                        when (change.action) {
+                            "add" -> modifiedPlms.add(RomParser.PlmEntry(change.plmId, change.x, change.y, change.param))
+                            "remove" -> modifiedPlms.removeAll { it.id == change.plmId && it.x == change.x && it.y == change.y }
                         }
                     }
-                    // Do NOT zero the old PLM set location — other state conditions
-                    // with different PLM pointers may share adjacent data, and states
-                    // we didn't match above still need the original data intact.
-                    println("Room 0x$roomKey: relocated PLM set to 0x${newSnes.toString(16)} (updated $updatedStates/${allStateOffsets.size} states)")
-                } else {
-                    println("WARN: Room 0x$roomKey no free space for expanded PLM set — skipped")
-                    continue
-                }
+                    val seen = mutableSetOf<Long>()
+                    val deduped = mutableListOf<RomParser.PlmEntry>()
+                    for (plm in modifiedPlms.reversed()) {
+                        val key = (plm.x.toLong() shl 16) or plm.y.toLong()
+                        if (RomParser.isItemPlm(plm.id)) {
+                            if (key in seen) continue
+                            seen.add(key)
+                        }
+                        deduped.add(plm)
+                    }
+                    deduped.reverse()
+                    val originalSize = originalPlms.size * 6 + 2
+                    val newSize = deduped.size * 6 + 2
+                    val plmPc = romParser.snesToPc(0x8F0000 or plmSetPtr)
 
-                var offset = writePc
-                for (plm in deduped) {
-                    romData[offset] = (plm.id and 0xFF).toByte()
-                    romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
-                    romData[offset + 2] = plm.x.toByte()
-                    romData[offset + 3] = plm.y.toByte()
-                    romData[offset + 4] = (plm.param and 0xFF).toByte()
-                    romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
-                    offset += 6
-                }
-                romData[offset] = 0; romData[offset + 1] = 0
-                if (writePc == plmPc) {
-                    for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                    val writePc: Int
+                    if (newSize <= originalSize) {
+                        writePc = plmPc
+                    } else if (freePtr + newSize <= bank8FEnd) {
+                        writePc = freePtr
+                        freePtr += newSize
+                        val newSnes = romParser.pcToSnes(writePc)
+                        val newPtr = newSnes and 0xFFFF
+                        var updatedStates = 0
+                        for (stateOffset in allStateOffsets) {
+                            val existingPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                                    ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                            if (existingPtr == plmSetPtr) {
+                                romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
+                                romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
+                                updatedStates++
+                            }
+                        }
+                        println("Room 0x$roomKey: relocated PLM set 0x${plmSetPtr.toString(16)} to 0x${newSnes.toString(16)} (updated $updatedStates states)")
+                    } else {
+                        println("WARN: Room 0x$roomKey no free space for expanded PLM set 0x${plmSetPtr.toString(16)} — skipped")
+                        continue
+                    }
+
+                    var offset = writePc
+                    for (plm in deduped) {
+                        romData[offset] = (plm.id and 0xFF).toByte()
+                        romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
+                        romData[offset + 2] = plm.x.toByte()
+                        romData[offset + 3] = plm.y.toByte()
+                        romData[offset + 4] = (plm.param and 0xFF).toByte()
+                        romData[offset + 5] = ((plm.param shr 8) and 0xFF).toByte()
+                        offset += 6
+                    }
+                    romData[offset] = 0; romData[offset + 1] = 0
+                    if (writePc == plmPc) {
+                        for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                    }
                 }
                 roomsPatched.add(roomKey)
             }

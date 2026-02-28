@@ -313,7 +313,7 @@ class ShotBlockTest {
 
         val energyRefill = RomParser.STATION_PLMS.find { it.plmId == 0xB6DF }
         assertNotNull(energyRefill, "Energy refill PLM should be in catalog")
-        assertEquals(0x8000, energyRefill!!.defaultParam,
-            "Energy refill default param should be 0x8000")
+        assertEquals(0x0000, energyRefill!!.defaultParam,
+            "Energy/missile refill default param should be 0x0000 (not save-station format)")
     }
 }

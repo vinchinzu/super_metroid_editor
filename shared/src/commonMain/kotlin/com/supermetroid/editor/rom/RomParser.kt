@@ -947,10 +947,10 @@ class RomParser(internal val romData: ByteArray) {
 
         val STATION_PLMS = listOf(
             StationPlmDef("Save Point",            "Sv", 0xB76F, 0x8000),
-            StationPlmDef("Energy Refill",          "ER", 0xB6DF, 0x8000),
-            StationPlmDef("Missile Refill",         "MR", 0xB6EB, 0x8000),
-            StationPlmDef("Mapping Station",        "Mp", 0xB6D3, 0x8000),
-            StationPlmDef("Elevator Base",          "El", 0xB70B, 0x8000),
+            StationPlmDef("Energy Refill",          "ER", 0xB6DF, 0x0000),
+            StationPlmDef("Missile Refill",         "MR", 0xB6EB, 0x0000),
+            StationPlmDef("Mapping Station",        "Mp", 0xB6D3, 0x0000),
+            StationPlmDef("Elevator Base",          "El", 0xB70B, 0x0000),
         )
 
         // ─── Gate PLM catalog ───────────────────────────────────────
