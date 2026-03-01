@@ -690,15 +690,45 @@ fun PatternEditorCanvas(
                         }
 
                         Spacer(Modifier.height(8.dp))
+                        var hoveredSlopeBts by remember { mutableStateOf<Int?>(null) }
+                        if (propsBlockType == 0x1) {
+                            val displayBts = hoveredSlopeBts ?: propsBts
+                            val displayName = btsOpts.firstOrNull { it.first == (displayBts and 0x40.inv()) }?.second
+                                ?: btsOpts.firstOrNull { it.first == displayBts }?.second
+                            if (displayName != null) {
+                                val flipLabel = if (displayBts and 0x40 != 0) " [X-Flipped]" else ""
+                                Text(
+                                    "0x${displayBts.toString(16).uppercase().padStart(2, '0')} $displayName$flipLabel",
+                                    fontSize = 9.sp,
+                                    color = if (hoveredSlopeBts != null) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 2.dp)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
                         val btsLabel = when (propsBlockType) {
                             0x9 -> "Door Connection Index"
-                            0x1 -> "Slope Type"
+                            0x1 -> "Slope Shape"
                             else -> "Sub Type (BTS)"
                         }
                         Text(btsLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(2.dp))
 
-                        if (btsOpts.isNotEmpty()) {
+                        if (propsBlockType == 0x1) {
+                            SlopeGridPicker(
+                                selectedBts = propsBts,
+                                onSelect = { bv ->
+                                    if (bv != propsBts) {
+                                        propsBts = bv
+                                        editorState.patSetCellProperties(
+                                            propsBlockX, propsBlockY, propsBlockType, bv)
+                                    }
+                                },
+                                onHoverBts = { hoveredSlopeBts = it }
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        } else if (btsOpts.isNotEmpty()) {
                             var btsDropExpanded by remember { mutableStateOf(false) }
                             val btsName = btsOpts.firstOrNull { it.first == propsBts }?.second
                                 ?: "Custom (0x${propsBts.toString(16).uppercase().padStart(2, '0')})"

@@ -50,3 +50,12 @@ Status: Planned
 Edit background scrolling modes and Layer 2 scroll data.
 Parallax configuration, BG tilemap editing.
 Status: Planned
+
+# Tile/Pattern Config as JSON
+Move core CRE tile meta (TilesetDefaults) and built-in patterns to JSON config in resources/.
+Enables easier compare/contrast/merge of updates against base config. Override layer (project.tileDefaults) remains for user edits.
+Status: Planned
+
+# Investigate: 2×2 Test Patterns
+Some users report 2×2 patterns appearing in pattern list (not built-in). Source unknown — may be from create-pattern defaults or legacy seed logic. Remove source if found.
+Status: Planned

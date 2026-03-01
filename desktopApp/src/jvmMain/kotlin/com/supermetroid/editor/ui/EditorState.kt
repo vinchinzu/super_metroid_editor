@@ -656,6 +656,25 @@ class EditorState {
     }
 
     /**
+     * Remove project tile-default overrides for tiles we've fixed in TilesetDefaults.
+     * Lets the core config take effect so users don't need to manually clear overrides.
+     */
+    private fun migrateTileDefaultsToCore() {
+        val fixedIndices = setOf(
+            69, 70, 71, 72, 73, 95, 100, 101, 102, 122, 123, 124, 125, 126, 127,
+            150, 151, 152, 153, 154, 182, 184, 185, 186,
+            187, 214, 215, 216, 217, 218, 219, 220
+        )
+        val keysToRemove = project.tileDefaults.keys.filter { key ->
+            key.split(":").getOrNull(1)?.toIntOrNull() in fixedIndices
+        }
+        if (keysToRemove.isNotEmpty()) {
+            keysToRemove.forEach { project.tileDefaults.remove(it) }
+            dirty = true
+        }
+    }
+
+    /**
      * Seed built-in patterns by extracting tile data from known vanilla ROM rooms.
      * Only adds patterns whose IDs don't already exist in the project.
      */
@@ -692,6 +711,11 @@ class EditorState {
         val stationChozoIds = setOf("builtin_energy_refill", "builtin_missile_refill", "builtin_chozo_statue")
         project.patterns.removeAll { pat ->
             pat.id in stationChozoIds && pat.builtIn && (pat.rows != 3 || pat.cols != 3)
+        }
+
+        // Migrate save station: was 3x2, correct is 2x5 with PLM on bottom-left
+        project.patterns.removeAll { pat ->
+            pat.id == "builtin_save_station" && pat.builtIn && (pat.cols != 2 || pat.rows != 5)
         }
 
         // Migrate energy/missile refill patterns: wrong PLM param, non-null bottom corners,
@@ -769,13 +793,17 @@ class EditorState {
             addBuiltIn("builtin_door_yellow_left", "Door: Yellow (Left)", 1, 4, doorPatternCells(0xC85A, true), noFlip = true)
             addBuiltIn("builtin_door_yellow_right","Door: Yellow (Right)", 1, 4, doorPatternCells(0xC860, false), noFlip = true)
 
-            // ── Save Station: 3x2, PLM renders graphic at runtime ──
-            addBuiltIn("builtin_save_station", "Save Station", 3, 2, listOf(
+            // ── Save Station: 2x5, PLM on bottom-left (row 4, col 0). PLM renders graphic at runtime.
+            addBuiltIn("builtin_save_station", "Save Station", 2, 5, listOf(
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(0x0FF, blockType = 0x8),
                 PatternCell(0x0FF, blockType = 0x8),
                 PatternCell(0x0FF, blockType = 0x8, plmId = 0xB76F, plmParam = 0x8000),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
                 PatternCell(0x0FF, blockType = 0x8),
             ))
 
@@ -1108,6 +1136,8 @@ class EditorState {
         workingLevelData = null
         originalLevelData = null
         romVersion++
+
+        migrateTileDefaultsToCore()
 
         // Merge in library patterns that aren't already in the project
         val existingIds = project.patterns.map { it.id }.toSet()

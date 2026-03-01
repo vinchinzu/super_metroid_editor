@@ -90,39 +90,61 @@ internal enum class ShotCategory { BEAM, SUPER, PB, HIDDEN, DOOR }
  */
 internal fun btsOptionsForBlockType(blockType: Int): List<Pair<Int, String>> = when (blockType) {
     0x1 -> listOf(
-        0x00 to "Half solid: bottom (flat platform)",
-        0x01 to "Half solid: right",
-        0x02 to "Quarter solid: bottom-right",
-        0x03 to "Three-quarter solid (no top-left)",
-        0x04 to "Fully solid (same as solid block)",
-        0x05 to "45° floor ◢ (right-low, 1 of 2)",
-        0x06 to "45° floor ◢ (right-low, 2 of 2)",
-        0x07 to "45° floor ◣ (left-low, 1 of 2)",
-        0x08 to "45° floor ◣ (left-low, 2 of 2)",
-        0x09 to "Gentle floor ◢ (right-low, 1 of 4)",
-        0x0A to "Gentle floor ◢ (right-low, 2 of 4)",
-        0x0B to "Gentle floor ◢ (right-low, 3 of 4)",
-        0x0C to "Gentle floor ◢ (right-low, 4 of 4)",
-        0x0D to "Gentle floor ◣ (left-low, 1 of 4)",
-        0x0E to "Gentle floor ◣ (left-low, 2 of 4)",
-        0x0F to "Gentle floor ◣ (left-low, 3 of 4)",
-        0x10 to "Gentle floor ◣ (left-low, 4 of 4)",
-        0x11 to "Steep floor ◢ (right-low, 1 of 1)",
-        0x12 to "Steep floor ◣ (left-low, 1 of 1)",
-        0x85 to "45° ceiling ◥ (right-high, 1 of 2)",
-        0x86 to "45° ceiling ◥ (right-high, 2 of 2)",
-        0x87 to "45° ceiling ◤ (left-high, 1 of 2)",
-        0x88 to "45° ceiling ◤ (left-high, 2 of 2)",
-        0x89 to "Gentle ceiling ◥ (1 of 4)",
-        0x8A to "Gentle ceiling ◥ (2 of 4)",
-        0x8B to "Gentle ceiling ◥ (3 of 4)",
-        0x8C to "Gentle ceiling ◥ (4 of 4)",
-        0x8D to "Gentle ceiling ◤ (1 of 4)",
-        0x8E to "Gentle ceiling ◤ (2 of 4)",
-        0x8F to "Gentle ceiling ◤ (3 of 4)",
-        0x90 to "Gentle ceiling ◤ (4 of 4)",
-        0x91 to "Steep ceiling ◥ (1 of 1)",
-        0x92 to "Steep ceiling ◤ (1 of 1)",
+        // Square shapes (special collision handling, shapes 0–4) + common variants
+        0x00 to "Half solid: bottom",
+        0x01 to "Half solid: side",
+        0x02 to "Three-quarter solid",
+        0x03 to "Quarter solid",
+        0x04 to "Fully solid",
+        0x07 to "Flat half (alt)",
+        0x13 to "Passthrough (air)",
+        // 45° floor (2-tile standard pair)
+        0x14 to "45° floor (tile 1/2)",
+        0x15 to "45° floor (tile 2/2)",
+        // 45° floor (2-tile smooth pair)
+        0x16 to "45° floor smooth (tile 1/2)",
+        0x17 to "45° floor smooth (tile 2/2)",
+        // Gentle floor (3-tile)
+        0x18 to "Gentle floor (tile 1/3)",
+        0x19 to "Gentle floor (tile 2/3)",
+        0x1A to "Gentle floor (tile 3/3)",
+        // Steep floor
+        0x12 to "Steep floor (1 tile)",
+        0x1B to "Steep floor (tile 1/2)",
+        0x1C to "Steep floor (tile 2/2)",
+        0x1D to "Steep floor (tile 1/3)",
+        0x1E to "Steep floor (tile 2/3)",
+        0x1F to "Steep floor (tile 3/3)",
+        // Square ceiling
+        0x80 to "Half solid ceiling: top",
+        0x82 to "Three-quarter ceiling",
+        0x83 to "Quarter ceiling",
+        0x87 to "Flat half ceiling (alt)",
+        0x93 to "Passthrough ceiling (air)",
+        // 45° ceiling (2-tile standard pair)
+        0x94 to "45° ceiling (tile 1/2)",
+        0x95 to "45° ceiling (tile 2/2)",
+        // 45° ceiling (2-tile smooth pair)
+        0x96 to "45° ceiling smooth (tile 1/2)",
+        0x97 to "45° ceiling smooth (tile 2/2)",
+        // Gentle ceiling (3-tile)
+        0x98 to "Gentle ceiling (tile 1/3)",
+        0x99 to "Gentle ceiling (tile 2/3)",
+        0x9A to "Gentle ceiling (tile 3/3)",
+        // Steep ceiling
+        0x92 to "Steep ceiling (1 tile)",
+        0x9B to "Steep ceiling (tile 1/2)",
+        0x9C to "Steep ceiling (tile 2/2)",
+        0x9D to "Steep ceiling (tile 1/3)",
+        0x9E to "Steep ceiling (tile 2/3)",
+        0x9F to "Steep ceiling (tile 3/3)",
+        // Uncommon/special shapes
+        0x05 to "Valley (shallow V-trough)",
+        0x06 to "Valley (deep V-trough)",
+        0x0E to "Staircase (4-step)",
+        0x0F to "Smooth staircase (8-step)",
+        0x10 to "Fully solid (table)",
+        0x11 to "Plateau (overshoot)",
     )
     0x2 -> listOf(
         0x00 to "Air (X-Ray safe)",
@@ -216,6 +238,163 @@ internal val blockTypeNames = mapOf(
     0xC to "Shot Block", 0xD to "V-Extend", 0xE to "Grapple", 0xF to "Bomb Block"
 )
 internal fun blockTypeName(type: Int): String = blockTypeNames[type] ?: "0x${type.toString(16).uppercase()}"
+
+// ─── Slope Grid Picker ──────────────────────────────────────────────────
+
+private data class SlopeGroup(val label: String, val entries: List<Int>)
+
+private val SLOPE_GRID_GROUPS = listOf(
+    SlopeGroup("Square", listOf(0x00, 0x01, 0x02, 0x03, 0x04, -1, 0x07, 0x13)),
+    SlopeGroup("45° Floor", listOf(0x14, 0x15, -1, 0x16, 0x17)),
+    SlopeGroup("Gentle Floor", listOf(0x18, 0x19, 0x1A)),
+    SlopeGroup("Steep Floor", listOf(0x12, -1, 0x1B, 0x1C, -1, 0x1D, 0x1E, 0x1F)),
+    SlopeGroup("Square Ceiling", listOf(0x80, 0x82, 0x83, -1, 0x87, 0x93)),
+    SlopeGroup("45° Ceiling", listOf(0x94, 0x95, -1, 0x96, 0x97)),
+    SlopeGroup("Gentle Ceiling", listOf(0x98, 0x99, 0x9A)),
+    SlopeGroup("Steep Ceiling", listOf(0x92, -1, 0x9B, 0x9C, -1, 0x9D, 0x9E, 0x9F)),
+    SlopeGroup("Other", listOf(0x05, 0x06, -1, 0x0E, 0x0F, 0x10, 0x11)),
+)
+
+private val SLOPE_BTS_NAMES: Map<Int, String> by lazy {
+    btsOptionsForBlockType(0x1).associate { it.first to it.second }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+internal fun SlopeGridPicker(
+    selectedBts: Int,
+    onSelect: (Int) -> Unit,
+    onHoverBts: (Int?) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val cellSize = 26.dp
+    val slopeColor = Color(0xFFEE7700)
+    val selectedBorder = Color(0xFF44AAFF)
+    val separatorColor = MaterialTheme.colorScheme.outlineVariant
+    var hoveredBts by remember { mutableStateOf(-1) }
+
+    val xFlip = (selectedBts and 0x40) != 0
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (group in SLOPE_GRID_GROUPS) {
+            Text(group.label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (bts in group.entries) {
+                    if (bts == -1) {
+                        Box(Modifier.width(4.dp).height(cellSize).background(separatorColor))
+                        continue
+                    }
+                    val effectiveBts = if (xFlip) bts or 0x40 else bts
+                    val isSelected = effectiveBts == selectedBts
+                    val isHovered = bts == hoveredBts
+                    Box(
+                        modifier = Modifier
+                            .size(cellSize)
+                            .background(
+                                when {
+                                    isSelected -> selectedBorder.copy(alpha = 0.2f)
+                                    isHovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                    else -> Color.Transparent
+                                },
+                                MaterialTheme.shapes.extraSmall
+                            )
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) selectedBorder
+                                        else if (isHovered) MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                shape = MaterialTheme.shapes.extraSmall
+                            )
+                            .clickable { onSelect(effectiveBts) }
+                            .onPointerEvent(PointerEventType.Enter) {
+                                hoveredBts = bts
+                                onHoverBts(effectiveBts)
+                            }
+                            .onPointerEvent(PointerEventType.Exit) {
+                                if (hoveredBts == bts) {
+                                    hoveredBts = -1
+                                    onHoverBts(null)
+                                }
+                            }
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+                            drawSlopeCell(effectiveBts, slopeColor)
+                        }
+                        Text(
+                            "0x${effectiveBts.toString(16).uppercase().padStart(2, '0')}",
+                            fontSize = 7.sp,
+                            color = Color.Black,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 1.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(start = 2.dp, top = 4.dp)
+        ) {
+            Checkbox(
+                checked = xFlip,
+                onCheckedChange = { flip ->
+                    val newBts = if (flip) selectedBts or 0x40 else selectedBts and 0x40.inv()
+                    onSelect(newBts)
+                },
+                modifier = Modifier.size(18.dp)
+            )
+            Text("X-Flip", fontSize = 9.sp)
+        }
+    }
+}
+
+private fun DrawScope.drawSlopeCell(bts: Int, color: Color) {
+    val s = size.width
+    val shape = bts and 0x1F
+    val isCeiling = (bts and 0x80) != 0
+    val xFlip = (bts and 0x40) != 0
+
+    if (shape >= SLOPE_HEIGHTS.size) return
+    val heights = SLOPE_HEIGHTS[shape]
+    if (heights.all { it == 0 }) {
+        drawRect(color.copy(alpha = 0.5f))
+        drawRect(color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f))
+        return
+    }
+
+    val path = androidx.compose.ui.graphics.Path()
+    val scale = s / 16f
+
+    if (!isCeiling) {
+        path.moveTo(0f, s)
+        for (screenX in 0 until 16) {
+            val col = if (xFlip) screenX else (15 - screenX)
+            val h = heights[col].coerceIn(0, 16)
+            path.lineTo(screenX * scale, s - h * scale)
+        }
+        path.lineTo(s, s)
+        path.close()
+    } else {
+        path.moveTo(0f, 0f)
+        for (screenX in 0 until 16) {
+            val col = if (xFlip) screenX else (15 - screenX)
+            val h = heights[col].coerceIn(0, 16)
+            path.lineTo(screenX * scale, h * scale)
+        }
+        path.lineTo(s, 0f)
+        path.close()
+    }
+
+    drawPath(path, color.copy(alpha = 0.5f))
+    drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f))
+}
 
 enum class TileOverlay(val label: String, val shortLabel: String, val color: Long) {
     // Block types (from level data bits 12-15)
@@ -380,7 +559,7 @@ fun MapCanvas(
                     Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp, modifier = Modifier.width(32.dp))
                     Slider(
                         value = zoomLevel,
-                        onValueChange = { zoomState.value = it },
+                        onValueChange = { zoomState.value = it; mapFocusReq.requestFocus() },
                         valueRange = 0.25f..4f,
                         steps = 14,
                         modifier = Modifier.width(80.dp)
@@ -389,7 +568,7 @@ fun MapCanvas(
                     // Grid toggle
                     FilterChip(
                         selected = showGrid,
-                        onClick = { showGrid = !showGrid },
+                        onClick = { showGrid = !showGrid; mapFocusReq.requestFocus() },
                         label = { Text("Grid", fontSize = 9.sp) },
                         modifier = Modifier.height(24.dp)
                     )
@@ -430,7 +609,7 @@ fun MapCanvas(
                         }
                         DropdownMenu(
                             expanded = tileMetaExpanded,
-                            onDismissRequest = { tileMetaExpanded = false }
+                            onDismissRequest = { tileMetaExpanded = false; mapFocusReq.requestFocus() }
                         ) {
                             TileOverlay.values().forEach { overlay ->
                                 val isOn = overlayToggles[overlay] ?: false
@@ -799,6 +978,9 @@ fun MapCanvas(
                                             }
                                         }
                                     }
+                                    .onPointerEvent(PointerEventType.Enter) {
+                                        mapFocusReq.requestFocus()
+                                    }
                                     .onPointerEvent(PointerEventType.Exit) {
                                         if (editorState != null) { editorState.hoverBlockX = -1; editorState.hoverBlockY = -1 }
                                     }
@@ -828,6 +1010,7 @@ fun MapCanvas(
                                             else {
                                                 val pw = b.cols * 16; val ph = b.rows * 16
                                                 val img = BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB)
+                                                val bgFill = 0xFF000000.toInt()
                                                 for (r in 0 until b.rows) {
                                                     for (c in 0 until b.cols) {
                                                         val ck = (r.toLong() shl 32) or (c.toLong() and 0xFFFFFFFFL)
@@ -842,11 +1025,10 @@ fun MapCanvas(
                                                             val sx = if (effH) 15 - tx else tx
                                                             val sy = if (effV) 15 - ty else ty
                                                             val argb = pixels[sy * 16 + sx]
-                                                            if (argb != 0) img.setRGB(dc * 16 + tx, dr * 16 + ty, argb)
+                                                            img.setRGB(dc * 16 + tx, dr * 16 + ty, if (argb != 0) argb else bgFill)
                                                         }
                                                     }
                                                 }
-                                                // Make semi-transparent
                                                 for (y in 0 until ph) for (x in 0 until pw) {
                                                     val p = img.getRGB(x, y)
                                                     if (p != 0) img.setRGB(x, y, (p and 0x00FFFFFF) or 0x99000000.toInt())
@@ -1079,7 +1261,7 @@ fun MapCanvas(
                                             Text(
                                                 "✕",
                                                 modifier = Modifier
-                                                    .clickable { propsExpanded = false }
+                                                    .clickable { propsExpanded = false; mapFocusReq.requestFocus() }
                                                     .padding(4.dp),
                                                 fontSize = 14.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1139,16 +1321,46 @@ fun MapCanvas(
 
                                         Spacer(modifier = Modifier.height(8.dp))
 
+                                        var hoveredSlopeBts by remember { mutableStateOf<Int?>(null) }
+                                        if (propsBlockType == 0x1) {
+                                            val displayBts = hoveredSlopeBts ?: propsBts
+                                            val displayName = SLOPE_BTS_NAMES[displayBts and 0x40.inv()]
+                                                ?: SLOPE_BTS_NAMES[displayBts]
+                                            if (displayName != null) {
+                                                val flipLabel = if (displayBts and 0x40 != 0) " [X-Flipped]" else ""
+                                                Text(
+                                                    "0x${displayBts.toString(16).uppercase().padStart(2, '0')} $displayName$flipLabel",
+                                                    fontSize = 9.sp,
+                                                    color = if (hoveredSlopeBts != null) MaterialTheme.colorScheme.primary
+                                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(start = 2.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                            }
+                                        }
+
                                         // ── Sub Type (BTS) ──
                                         val btsLabel = when (propsBlockType) {
                                             0x9 -> "Door Connection Index"
-                                            0x1 -> "Slope Type"
+                                            0x1 -> "Slope Shape"
                                             else -> "Sub Type (BTS)"
                                         }
                                         Text(btsLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Spacer(modifier = Modifier.height(2.dp))
 
-                                        if (btsOptions.isNotEmpty()) {
+                                        if (propsBlockType == 0x1) {
+                                            SlopeGridPicker(
+                                                selectedBts = propsBts,
+                                                onSelect = { btsVal ->
+                                                    if (btsVal != propsBts) {
+                                                        propsBts = btsVal
+                                                        editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, btsVal)
+                                                    }
+                                                },
+                                                onHoverBts = { hoveredSlopeBts = it }
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        } else if (btsOptions.isNotEmpty()) {
                                             var btsDropExpanded by remember { mutableStateOf(false) }
                                             val btsName = btsOptions.firstOrNull { it.first == propsBts }?.second
                                                 ?: "Custom (0x${propsBts.toString(16).uppercase().padStart(2, '0')})"
@@ -1915,44 +2127,64 @@ fun MapCanvas(
 }
 
 /**
- * Per-column solid heights from the ROM slope table at $94:8B2B.
- * 32 shapes × 16 columns, indexed right-to-left (col 0 = right edge).
- * Values clamped to 0-16 for rendering (originals >16 extend into adjacent tiles).
+ * Per-column solid heights from the ROM slope table (kAlignYPos_Tab0) at $94:8B2B.
+ * 32 shapes x 16 columns. ROM uses col 0 = left edge, but our renderer
+ * indexes right-to-left (col 0 = right screen edge) to match tile graphic orientation.
+ * Shapes 0-4 use separate "square" collision code; their entries here are visual
+ * approximations (shape 4 = fully solid but ROM table has zeros).
+ * Values >16 indicate overshoot into adjacent tiles; drawing code clamps to 0-16.
  */
 private val SLOPE_HEIGHTS = arrayOf(
-    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x00
-    intArrayOf(16,16,16,16,16,16,16,16, 0, 0, 0, 0, 0, 0, 0, 0), // 0x01
-    intArrayOf(16,16,16,16,16,16,16,16, 8, 8, 8, 8, 8, 8, 8, 8), // 0x02
-    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0), // 0x03
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x04
-    intArrayOf(16,15,14,13,12,11,10, 9, 9,10,11,12,13,14,15,16), // 0x05
-    intArrayOf(16,14,12,10, 8, 6, 4, 2, 2, 4, 6, 8,10,12,14,16), // 0x06
-    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x07
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x08
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x09
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0A
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0B
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0C
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0D
-    intArrayOf(12,12,12,12, 8, 8, 8, 8, 4, 4, 4, 4, 0, 0, 0, 0), // 0x0E
-    intArrayOf(14,14,12,12,10,10, 8, 8, 6, 6, 4, 4, 2, 2, 0, 0), // 0x0F
-    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x10
-    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x11
-    intArrayOf(16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1), // 0x12
-    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x13
-    intArrayOf(16,16,16,16,16,16,16,16,16,15,14,13,12,11,10, 9), // 0x14
-    intArrayOf( 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0), // 0x15
-    intArrayOf(16,16,15,15,14,14,13,13,12,12,11,11,10,10, 9, 9), // 0x16
-    intArrayOf( 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1), // 0x17
-    intArrayOf(16,16,16,15,15,15,14,14,14,13,13,13,12,12,12,11), // 0x18
-    intArrayOf(11,11,10,10,10, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6), // 0x19
-    intArrayOf( 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 1), // 0x1A
-    intArrayOf(16,16,16,16,16,16,16,16,16,14,12,10, 8, 6, 4, 2), // 0x1B
-    intArrayOf(16,14,12,10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1C
-    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,15,12, 9, 6, 3), // 0x1D
-    intArrayOf(16,16,16,16,16,16,14,11, 8, 5, 2, 0, 0, 0, 0, 0), // 0x1E
-    intArrayOf(16,13,10, 7, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1F
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x00 half solid bottom
+    intArrayOf(16,16,16,16,16,16,16,16, 0, 0, 0, 0, 0, 0, 0, 0), // 0x01 half solid side
+    intArrayOf(16,16,16,16,16,16,16,16, 8, 8, 8, 8, 8, 8, 8, 8), // 0x02 three-quarter
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0), // 0x03 quarter
+    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x04 fully solid (visual override)
+    intArrayOf(16,15,14,13,12,11,10, 9, 9,10,11,12,13,14,15,16), // 0x05 shallow V-trough
+    intArrayOf(16,14,12,10, 8, 6, 4, 2, 2, 4, 6, 8,10,12,14,16), // 0x06 deep V-trough
+    intArrayOf( 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), // 0x07 half solid (dup of 0x00)
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x08 unused
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x09 unused
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0A unused
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0B unused
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0C unused
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x0D unused
+    intArrayOf(12,12,12,12, 8, 8, 8, 8, 4, 4, 4, 4, 0, 0, 0, 0), // 0x0E staircase (4-step)
+    intArrayOf(14,14,12,12,10,10, 8, 8, 6, 6, 4, 4, 2, 2, 0, 0), // 0x0F smooth staircase
+    intArrayOf(16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16), // 0x10 fully solid
+    intArrayOf(20,20,20,20,20,20,20,20,20,20,20,20,20,16,16,16), // 0x11 plateau (overshoot)
+    intArrayOf(16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1), // 0x12 steep 1-tile
+    intArrayOf( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x13 unused
+    intArrayOf(16,16,16,16,16,16,16,16,16,15,14,13,12,11,10, 9), // 0x14 45° tile 1/2
+    intArrayOf( 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0), // 0x15 45° tile 2/2
+    intArrayOf(16,16,15,15,14,14,13,13,12,12,11,11,10,10, 9, 9), // 0x16 45° smooth tile 1/2
+    intArrayOf( 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1), // 0x17 45° smooth tile 2/2
+    intArrayOf(16,16,16,15,15,15,14,14,14,13,13,13,12,12,12,11), // 0x18 gentle tile 1/3
+    intArrayOf(11,11,10,10,10, 9, 9, 9, 8, 8, 8, 7, 7, 7, 6, 6), // 0x19 gentle tile 2/3
+    intArrayOf( 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 1), // 0x1A gentle tile 3/3
+    intArrayOf(20,20,20,20,20,20,20,20,16,14,12,10, 8, 6, 4, 2), // 0x1B steep tile 1/2
+    intArrayOf(16,14,12,10, 8, 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1C steep tile 2/2
+    intArrayOf(20,20,20,20,20,20,20,20,20,20,20,15,12, 9, 6, 3), // 0x1D steep tile 1/3
+    intArrayOf(20,20,20,20,20,20,14,11, 8, 5, 2, 0, 0, 0, 0, 0), // 0x1E steep tile 2/3
+    intArrayOf(16,13,10, 7, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), // 0x1F steep tile 3/3
 )
+
+private fun richOverlayLabel(overlay: TileOverlay, bts: Int): String = when (overlay) {
+    TileOverlay.DOOR -> "D$bts"
+    TileOverlay.SHOT_BEAM -> when {
+        bts in 0x04..0x07 -> "X?"
+        else -> "Xb"
+    }
+    TileOverlay.SHOT_SUPER -> if (bts == 0x0B) "Xs!" else "Xs"
+    TileOverlay.SHOT_PB -> if (bts == 0x09) "Xp!" else "Xp"
+    TileOverlay.CRUMBLE -> when {
+        bts in 0x04..0x07 -> "C!"
+        bts == 0x0B -> "CE"
+        else -> "C"
+    }
+    TileOverlay.BOMB -> if (bts in 0x04..0x07) "B!" else "B"
+    else -> overlay.shortLabel
+}
 
 /**
  * Draw the actual collision profile for a slope tile, matching SMILE's overlay style.
@@ -1960,7 +2192,7 @@ private val SLOPE_HEIGHTS = arrayOf(
  * Uses the ROM height table to draw the exact solid area polygon per tile.
  * BTS bit 6 (0x40) is the collision engine's X-flip flag ($94:87C0).
  * BTS bit 7 (0x80) selects ceiling vs floor.
- * Shapes with all-zero heights are skipped (no visible collision).
+ * Shapes with all-zero heights (passthrough/air slopes) draw an orange square.
  */
 private fun drawSlopeOverlay(g2: java.awt.Graphics2D, px: Int, py: Int, bts: Int, color: java.awt.Color) {
     val s = 16
@@ -1969,7 +2201,17 @@ private fun drawSlopeOverlay(g2: java.awt.Graphics2D, px: Int, py: Int, bts: Int
     val xFlip = (bts and 0x40) != 0
 
     val heights = SLOPE_HEIGHTS[shape]
-    if (heights.all { it == 0 }) return
+    if (heights.all { it == 0 }) {
+        val bg = java.awt.Color(color.red, color.green, color.blue, 80)
+        val border = java.awt.Color(color.red, color.green, color.blue, 200)
+        g2.color = bg
+        g2.fillRect(px, py, s, s)
+        g2.color = border
+        g2.stroke = java.awt.BasicStroke(1.5f)
+        g2.drawRect(px, py, s, s)
+        g2.stroke = java.awt.BasicStroke(1f)
+        return
+    }
 
     val bg = java.awt.Color(color.red, color.green, color.blue, 80)
     val border = java.awt.Color(color.red, color.green, color.blue, 200)
@@ -2137,18 +2379,21 @@ private fun buildCompositeImage(
                 if (overlay == TileOverlay.SLOPE) {
                     drawSlopeOverlay(g2, px, py, bts, color)
                 } else {
+                    val label = richOverlayLabel(overlay, bts)
+                    val labelW = g2.fontMetrics.stringWidth(label)
+                    val cellW = maxOf(iconSize, labelW + 4)
+
                     g2.color = java.awt.Color(0, 0, 0, 200)
-                    g2.fillRect(iconX, iconY, iconSize, iconSize)
+                    g2.fillRect(iconX + iconSize - cellW, iconY, cellW, iconSize)
                     g2.color = color
                     g2.stroke = java.awt.BasicStroke(2f)
-                    g2.drawRect(iconX + 1, iconY + 1, iconSize - 3, iconSize - 3)
+                    g2.drawRect(iconX + iconSize - cellW + 1, iconY + 1, cellW - 3, iconSize - 3)
                     g2.stroke = java.awt.BasicStroke(1f)
                     g2.color = java.awt.Color.WHITE
                     val fm = g2.fontMetrics
-                    val label = overlay.shortLabel
-                    val tw = fm.stringWidth(label)
-                    g2.drawString(label, iconX + (iconSize - tw) / 2, iconY + (iconSize + fm.ascent - fm.descent) / 2)
-                    iconX -= (iconSize + 1)
+                    g2.drawString(label, iconX + iconSize - cellW + (cellW - labelW) / 2,
+                        iconY + (iconSize + fm.ascent - fm.descent) / 2)
+                    iconX -= (cellW + 1)
                 }
             }
         }
