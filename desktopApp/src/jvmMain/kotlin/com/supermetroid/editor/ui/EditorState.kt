@@ -1249,9 +1249,9 @@ class EditorState {
         _workingScrolls = _originalScrolls.copyOf()
         scrollVersion++
 
-        // Load PLMs for this room
+        // Load PLMs for this room from all states so rogue door caps (e.g. in Mother Brain / Tourian escape) are visible
         _workingPlms.clear()
-        val plms = romParser.parsePlmSet(room.plmSetPtr)
+        val plms = romParser.getAllPlmEntriesForRoom(roomId)
         _workingPlms.addAll(plms)
         originalPlmCount = plms.size
 
@@ -1490,7 +1490,17 @@ class EditorState {
     // ─── PLM editing ────────────────────────────────────────────
 
     fun getPlmsAt(x: Int, y: Int): List<RomParser.PlmEntry> =
-        _workingPlms.filter { it.x == x && it.y == y }
+        _workingPlms.filter { plm ->
+            if (plm.x == x && plm.y == y) return@filter true
+            if (RomParser.doorCapColor(plm.id) != null) {
+                if (RomParser.doorCapIsHorizontal(plm.id)) {
+                    if (plm.y == y && x in plm.x..(plm.x + 3)) return@filter true
+                } else {
+                    if (plm.x == x && y in plm.y..(plm.y + 3)) return@filter true
+                }
+            }
+            false
+        }
 
     private fun autoAssignParam(plmId: Int, param: Int): Int = when {
         param == 0 && RomParser.isItemPlm(plmId) -> {
@@ -2156,61 +2166,82 @@ class EditorState {
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
 
-            // Patch tile data
+            // Patch tile data — apply edits to ALL states' level data so that
+            // non-default states (boss-dead, escape, etc.) also reflect tile changes.
+            // Without this, rooms with multiple states show the original layout when
+            // a non-default state is active, causing phantom door blocks/caps.
             if (hasTileEdits && room.levelDataPtr != 0) {
-                val (originalData, origSize) = romParser.decompressLZ2WithSize(room.levelDataPtr)
-                val editedData = originalData.copyOf()
+                val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
                 val bw = room.width * 16
-                val layer1Size = (editedData[0].toInt() and 0xFF) or ((editedData[1].toInt() and 0xFF) shl 8)
-                for (op in roomEdits.operations) for (edit in op.edits) {
-                    val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
-                    if (off + 1 < editedData.size) { editedData[off] = (edit.newBlockWord and 0xFF).toByte(); editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte() }
-                    val btsOff = 2 + layer1Size + idx; if (btsOff < editedData.size) editedData[btsOff] = edit.newBts.toByte()
-                }
-                val compressed = lz5Compress(editedData)
-                val pcOff = romParser.snesToPc(room.levelDataPtr)
-                if (compressed.size <= origSize) {
-                    System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
-                    for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
-                    roomsPatched.add(roomKey)
-                } else {
-                    // Relocate: find free space, trying same bank first, then $CE-$C0
-                    val origBank = (room.levelDataPtr shr 16) and 0xFF
-                    val banksToTry = listOf(origBank) +
-                            (0xCE downTo 0xC0).filter { it != origBank }
-                    var relocated = false
-                    for (tryBank in banksToTry) {
-                        val bEnd = romParser.snesToPc((tryBank shl 16) or 0xFFFF) + 1
-                        val freeStart = getLevelBankFreePtr(tryBank)
-                        if (freeStart + compressed.size <= bEnd) {
-                            System.arraycopy(compressed, 0, romData, freeStart, compressed.size)
-                            val newSnes = romParser.pcToSnes(freeStart)
-                            levelBankFree[tryBank] = freeStart + compressed.size
 
-                            val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
-                            var updatedStates = 0
-                            for (stateOffset in allStateOffsets) {
-                                val existingPtr = (romData[stateOffset].toInt() and 0xFF) or
-                                        ((romData[stateOffset + 1].toInt() and 0xFF) shl 8) or
-                                        ((romData[stateOffset + 2].toInt() and 0xFF) shl 16)
-                                if (existingPtr == room.levelDataPtr) {
+                // Group states by their level data pointer
+                val ptrToStates = mutableMapOf<Int, MutableList<Int>>()
+                for (stateOffset in allStateOffsets) {
+                    val lvlPtr = (romData[stateOffset].toInt() and 0xFF) or
+                            ((romData[stateOffset + 1].toInt() and 0xFF) shl 8) or
+                            ((romData[stateOffset + 2].toInt() and 0xFF) shl 16)
+                    if (lvlPtr != 0) ptrToStates.getOrPut(lvlPtr) { mutableListOf() }.add(stateOffset)
+                }
+
+                if (ptrToStates.size > 1) {
+                    println("Room 0x$roomKey: ${ptrToStates.size} distinct level data pointers across ${allStateOffsets.size} states — applying edits to ALL")
+                }
+
+                for ((lvlPtr, statesForPtr) in ptrToStates) {
+                    val (originalData, origSize) = romParser.decompressLZ2WithSize(lvlPtr)
+                    val editedData = originalData.copyOf()
+                    val layer1Size = (editedData[0].toInt() and 0xFF) or ((editedData[1].toInt() and 0xFF) shl 8)
+                    for (op in roomEdits.operations) for (edit in op.edits) {
+                        val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
+                        if (off + 1 < editedData.size) {
+                            editedData[off] = (edit.newBlockWord and 0xFF).toByte()
+                            editedData[off + 1] = ((edit.newBlockWord shr 8) and 0xFF).toByte()
+                        }
+                        val btsOff = 2 + layer1Size + idx
+                        if (btsOff < editedData.size) editedData[btsOff] = edit.newBts.toByte()
+                    }
+                    val compressed = lz5Compress(editedData)
+
+                    // LZ5 round-trip verification
+                    val roundTripped = LZ5Compressor.decompress(compressed)
+                    if (!roundTripped.contentEquals(editedData)) {
+                        val diffIdx = editedData.indices.firstOrNull { roundTripped.getOrNull(it) != editedData[it] }
+                        println("ERROR: LZ5 round-trip FAILED for room 0x$roomKey lvlPtr=\$${lvlPtr.toString(16)}! Size: orig=${editedData.size} rt=${roundTripped.size}, first diff at byte $diffIdx")
+                    }
+
+                    val pcOff = romParser.snesToPc(lvlPtr)
+                    if (compressed.size <= origSize) {
+                        System.arraycopy(compressed, 0, romData, pcOff, compressed.size)
+                        for (i in compressed.size until origSize) romData[pcOff + i] = 0xFF.toByte()
+                    } else {
+                        val origBank = (lvlPtr shr 16) and 0xFF
+                        val banksToTry = listOf(origBank) +
+                                (0xCE downTo 0xC0).filter { it != origBank }
+                        var relocated = false
+                        for (tryBank in banksToTry) {
+                            val bEnd = romParser.snesToPc((tryBank shl 16) or 0xFFFF) + 1
+                            val freeStart = getLevelBankFreePtr(tryBank)
+                            if (freeStart + compressed.size <= bEnd) {
+                                System.arraycopy(compressed, 0, romData, freeStart, compressed.size)
+                                val newSnes = romParser.pcToSnes(freeStart)
+                                levelBankFree[tryBank] = freeStart + compressed.size
+                                for (stateOffset in statesForPtr) {
                                     romData[stateOffset] = (newSnes and 0xFF).toByte()
                                     romData[stateOffset + 1] = ((newSnes shr 8) and 0xFF).toByte()
                                     romData[stateOffset + 2] = ((newSnes shr 16) and 0xFF).toByte()
-                                    updatedStates++
                                 }
+                                for (i in pcOff until pcOff + origSize) romData[i] = 0xFF.toByte()
+                                println("Room 0x$roomKey: relocated level data \$${lvlPtr.toString(16)} to \$${tryBank.toString(16).uppercase()}:${(newSnes and 0xFFFF).toString(16).uppercase()} (${compressed.size} bytes, updated ${statesForPtr.size} state(s))")
+                                relocated = true
+                                break
                             }
-                            for (i in pcOff until pcOff + origSize) romData[i] = 0xFF.toByte()
-                            println("Room 0x$roomKey: relocated level data to \$${tryBank.toString(16).uppercase()}:${(newSnes and 0xFFFF).toString(16).uppercase()} (${compressed.size} bytes, updated $updatedStates/${allStateOffsets.size} states)")
-                            roomsPatched.add(roomKey)
-                            relocated = true
-                            break
+                        }
+                        if (!relocated) {
+                            println("WARN: Room 0x$roomKey lvlPtr=\$${lvlPtr.toString(16)} compressed ${compressed.size} > orig $origSize and no free space — skipped")
                         }
                     }
-                    if (!relocated) {
-                        println("WARN: Room 0x$roomKey compressed ${compressed.size} > orig $origSize and no free space in any bank — skipped tiles")
-                    }
                 }
+                roomsPatched.add(roomKey)
             }
 
             // Patch PLM sets — rooms can have multiple state conditions (E629, E612, E5E6, etc.)
@@ -2220,9 +2251,10 @@ class EditorState {
                 val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
                 val distinctPlmPtrs = mutableSetOf<Int>()
                 for (stateOffset in allStateOffsets) {
-                    val ptr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                    val plmPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
                             ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
-                    if (ptr != 0 && ptr != 0xFFFF) distinctPlmPtrs.add(ptr)
+                    if (plmPtr == 0 || plmPtr == 0xFFFF) continue
+                    distinctPlmPtrs.add(plmPtr)
                 }
 
                 for (plmSetPtr in distinctPlmPtrs) {
@@ -2519,6 +2551,86 @@ class EditorState {
         }
 
         if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) return null
+
+        // ─── Export verification pass ───────────────────────────────
+        // Re-read all modified data from the export copy and validate.
+        println("\n=== Export Verification ===")
+        var verifyErrors = 0
+        val exportParser = RomParser(romData)
+        for (roomKey in roomsPatched) {
+            val roomId = roomKey.toIntOrNull(16) ?: continue
+            val room = romParser.readRoomHeader(roomId) ?: continue
+            val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+
+            // Collect per-state data from the EXPORT copy
+            val stateInfos = mutableListOf<String>()
+            val distinctLevelPtrs = mutableSetOf<Int>()
+            val distinctPlmPtrs = mutableSetOf<Int>()
+            for ((si, stateOffset) in allStateOffsets.withIndex()) {
+                val lvlPtr = (romData[stateOffset].toInt() and 0xFF) or
+                        ((romData[stateOffset + 1].toInt() and 0xFF) shl 8) or
+                        ((romData[stateOffset + 2].toInt() and 0xFF) shl 16)
+                val plmPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
+                        ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
+                distinctLevelPtrs.add(lvlPtr)
+                distinctPlmPtrs.add(plmPtr)
+                stateInfos.add("  state[$si] levelData=\$${lvlPtr.toString(16)} plmSet=\$${plmPtr.toString(16)}")
+            }
+
+            if (allStateOffsets.size > 1 || distinctLevelPtrs.size > 1 || distinctPlmPtrs.size > 1) {
+                println("Room 0x$roomKey: ${allStateOffsets.size} states, ${distinctLevelPtrs.size} distinct level ptrs, ${distinctPlmPtrs.size} distinct PLM ptrs")
+                for (info in stateInfos) println(info)
+            }
+
+            // Verify each distinct level data pointer decompresses correctly
+            for (lvlPtr in distinctLevelPtrs) {
+                if (lvlPtr == 0) continue
+                try {
+                    val decompressed = exportParser.decompressLZ2(lvlPtr)
+                    if (decompressed.isEmpty()) {
+                        println("  ERROR: level data at \$${lvlPtr.toString(16)} decompressed to 0 bytes!")
+                        verifyErrors++
+                    }
+                    // Check for door blocks (type 9) and report them
+                    val blockCount = room.width * 16 * room.height * 16
+                    val l1size = if (decompressed.size >= 2) (decompressed[0].toInt() and 0xFF) or ((decompressed[1].toInt() and 0xFF) shl 8) else 0
+                    var doorBlockCount = 0
+                    for (bi in 0 until minOf(blockCount, l1size / 2)) {
+                        val off = 2 + bi * 2
+                        if (off + 1 >= decompressed.size) break
+                        val word = (decompressed[off].toInt() and 0xFF) or ((decompressed[off + 1].toInt() and 0xFF) shl 8)
+                        if ((word shr 12) and 0xF == 9) doorBlockCount++
+                    }
+                    if (doorBlockCount > 0) {
+                        println("  level data \$${lvlPtr.toString(16)}: $doorBlockCount door blocks (type 9)")
+                    }
+                } catch (e: Exception) {
+                    println("  ERROR: failed to decompress level data at \$${lvlPtr.toString(16)}: ${e.message}")
+                    verifyErrors++
+                }
+            }
+
+            // Verify each distinct PLM set is properly terminated
+            for (plmPtr in distinctPlmPtrs) {
+                if (plmPtr == 0 || plmPtr == 0xFFFF) continue
+                val plms = exportParser.parsePlmSet(plmPtr)
+                val doorCaps = plms.filter { RomParser.doorCapColor(it.id) != null }
+                if (doorCaps.isNotEmpty()) {
+                    println("  PLM set \$${plmPtr.toString(16)}: ${plms.size} entries, ${doorCaps.size} door cap(s):")
+                    for (dc in doorCaps) {
+                        val name = RomParser.doorCapDisplayName(dc.id) ?: "Unknown"
+                        println("    $name at (${dc.x},${dc.y}) param=0x${dc.param.toString(16)}")
+                    }
+                }
+            }
+        }
+        if (verifyErrors > 0) {
+            println("EXPORT VERIFICATION: $verifyErrors error(s) found!")
+        } else {
+            println("EXPORT VERIFICATION: all checks passed")
+        }
+        println("=== End Verification ===\n")
+
         val orig = File(romPath)
         val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
         out.writeBytes(romData)

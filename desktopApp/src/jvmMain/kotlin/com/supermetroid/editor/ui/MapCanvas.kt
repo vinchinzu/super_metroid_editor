@@ -2,6 +2,8 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Colorize
@@ -22,6 +24,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -33,6 +36,7 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -1509,7 +1513,7 @@ fun MapCanvas(
                                             Spacer(modifier = Modifier.height(4.dp))
                                         }
 
-                                        // Raw hex input (always visible)
+                                        // Raw BTS hex input (BasicTextField so typed text is visible, same fix as room search)
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1518,20 +1522,28 @@ fun MapCanvas(
                                             var rawText by remember(propsBlockX, propsBlockY, propsBts) {
                                                 mutableStateOf(propsBts.toString(16).uppercase().padStart(2, '0'))
                                             }
-                                            OutlinedTextField(
-                                                value = rawText,
-                                                onValueChange = { s ->
-                                                    rawText = s
-                                                    val v = s.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
-                                                    if (v != null && v in 0..255 && v != propsBts) {
-                                                        propsBts = v
-                                                        editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, v)
-                                                    }
-                                                },
-                                                modifier = Modifier.width(80.dp).height(36.dp),
-                                                textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
-                                                singleLine = true
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(80.dp)
+                                                    .height(32.dp)
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                                            ) {
+                                                BasicTextField(
+                                                    value = rawText,
+                                                    onValueChange = { s ->
+                                                        val filtered = s.uppercase().filter { it in '0'..'9' || it in 'A'..'F' }.take(2)
+                                                        rawText = filtered
+                                                        val v = filtered.toIntOrNull(16)
+                                                        if (v != null && v in 0..255 && v != propsBts) {
+                                                            editorState.setTileProperties(propsBlockX, propsBlockY, propsBlockType, v)
+                                                        }
+                                                    },
+                                                    singleLine = true,
+                                                    textStyle = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
+                                                )
+                                            }
                                         }
 
                                         // ── Door Connection Info (when block type = Door) ──
@@ -2572,7 +2584,7 @@ private fun buildCompositeImage(
         }
     }
     
-    // Draw item / station / gate labels (positioned at PLM block coordinates)
+    // Draw item / station / gate / door cap labels (positioned at PLM block coordinates)
     if (activeOverlays.contains(TileOverlay.ITEMS) && data.plmEntries.isNotEmpty()) {
         val g2 = g as java.awt.Graphics2D
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
@@ -2582,23 +2594,28 @@ private fun buildCompositeImage(
         val itemColor = java.awt.Color(0xFF, 0xCC, 0x00)       // gold
         val stationColor = java.awt.Color(0x44, 0xCC, 0xFF)    // cyan
         val gateColor = java.awt.Color(0xCC, 0x66, 0xFF)       // purple
+        val doorCapColor = java.awt.Color(0x60, 0x80, 0xB0)    // gray-blue
         for (plm in data.plmEntries) {
             val isItem = RomParser.isItemPlm(plm.id)
             val isStation = RomParser.isStationPlm(plm.id)
             val isGate = RomParser.isGatePlm(plm.id)
-            if (!isItem && !isStation && !isGate) continue
+            val isDoorCap = RomParser.doorCapColor(plm.id) != null
+            if (!isItem && !isStation && !isGate && !isDoorCap) continue
             val name = when {
                 isItem -> RomParser.ITEM_DEFS.find { it.chozoId == plm.id || it.visibleId == plm.id || it.hiddenId == plm.id }?.name ?: continue
                 isStation -> RomParser.stationNameForPlm(plm.id) ?: continue
+                isDoorCap -> RomParser.doorCapDisplayName(plm.id) ?: continue
                 else -> RomParser.gateNameForPlm(plm.id, plm.param) ?: continue
             }
             val badgeBorder = when {
                 isStation -> stationColor
                 isGate -> gateColor
+                isDoorCap -> doorCapColor
                 else -> itemColor
             }
-            val cx = plm.x * 16 + 8
-            val cy = plm.y * 16 + 8
+            val horiz = isDoorCap && RomParser.doorCapIsHorizontal(plm.id)
+            val cx = if (horiz) plm.x * 16 + 32 else plm.x * 16 + 8
+            val cy = if (horiz) plm.y * 16 + 8 else plm.y * 16 + 32
             val textWidth = fm.stringWidth(name)
             val badgeW = textWidth + 6
             val badgeH = fm.height + 2

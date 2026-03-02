@@ -3,6 +3,7 @@ package com.supermetroid.editor.ui
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Delete
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.*
@@ -21,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -786,21 +789,29 @@ fun PatternEditorCanvas(
                             var rawText by remember(propsBlockX, propsBlockY, propsBts) {
                                 mutableStateOf(propsBts.toString(16).uppercase().padStart(2, '0'))
                             }
-                            OutlinedTextField(
-                                value = rawText,
-                                onValueChange = { s ->
-                                    rawText = s
-                                    val v = s.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
-                                    if (v != null && v in 0..255 && v != propsBts) {
-                                        propsBts = v
-                                        editorState.patSetCellProperties(
-                                            propsBlockX, propsBlockY, propsBlockType, v)
-                                    }
-                                },
-                                modifier = Modifier.width(80.dp).height(36.dp),
-                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
-                                singleLine = true
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(80.dp)
+                                    .height(32.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                BasicTextField(
+                                    value = rawText,
+                                    onValueChange = { s ->
+                                        val filtered = s.uppercase().filter { it in '0'..'9' || it in 'A'..'F' }.take(2)
+                                        rawText = filtered
+                                        val v = filtered.toIntOrNull(16)
+                                        if (v != null && v in 0..255 && v != propsBts) {
+                                            editorState.patSetCellProperties(
+                                                propsBlockX, propsBlockY, propsBlockType, v)
+                                        }
+                                    },
+                                    singleLine = true,
+                                    textStyle = TextStyle(fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
+                                )
+                            }
                         }
 
                         // ── Items / PLMs ──

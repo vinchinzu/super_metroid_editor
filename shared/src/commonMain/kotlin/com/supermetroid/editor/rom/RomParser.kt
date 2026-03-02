@@ -762,6 +762,34 @@ class RomParser(internal val romData: ByteArray) {
         }
         return entries
     }
+
+    /**
+     * Return all PLM entries for a room from every state (E629, E612, E5E6, etc.).
+     * Merged and deduplicated by (id, x, y) so the editor shows every PLM that exists
+     * in any state, including rogue door caps that only appear in non-default states.
+     */
+    fun getAllPlmEntriesForRoom(roomId: Int): List<PlmEntry> {
+        val stateOffsets = findAllStateDataOffsets(roomId)
+        val distinctPtrs = mutableSetOf<Int>()
+        for (off in stateOffsets) {
+            if (off + 21 < romData.size) {
+                val ptr = readUInt16At(off + 20)
+                if (ptr != 0 && ptr != 0xFFFF) distinctPtrs.add(ptr)
+            }
+        }
+        val result = mutableListOf<PlmEntry>()
+        val seen = mutableSetOf<Triple<Int, Int, Int>>()
+        for (ptr in distinctPtrs) {
+            for (plm in parsePlmSet(ptr)) {
+                val key = Triple(plm.id, plm.x, plm.y)
+                if (key !in seen) {
+                    seen.add(key)
+                    result.add(plm)
+                }
+            }
+        }
+        return result
+    }
     
     // ─── Enemy population parsing ─────────────────────────────────────
 
@@ -875,6 +903,20 @@ class RomParser(internal val romData: ByteArray) {
             entries.add(parseDoorEntry(doorOutPtr, i) ?: break)
         }
         return entries
+    }
+
+    /**
+     * Return the block type (0–15) at (bx, by) in decompressed level data.
+     * Level data layout: bytes 0–1 = layer1 size, then 2-byte words per block (type in high nibble of word).
+     * Returns null if out of bounds or level data too short.
+     */
+    fun blockTypeAt(levelData: ByteArray, blocksWide: Int, blocksTall: Int, bx: Int, by: Int): Int? {
+        if (levelData.size < 2 || bx < 0 || bx >= blocksWide || by < 0 || by >= blocksTall) return null
+        val tileDataStart = 2
+        val offset = tileDataStart + (by * blocksWide + bx) * 2
+        if (offset + 1 >= levelData.size) return null
+        val word = (levelData[offset].toInt() and 0xFF) or ((levelData[offset + 1].toInt() and 0xFF) shl 8)
+        return (word shr 12) and 0x0F
     }
 
     /**
@@ -1058,12 +1100,57 @@ class RomParser(internal val romData: ByteArray) {
          *   $C8BA-$C8CD = Blue (beam) closing   facing L/R/U/D
          */
         fun doorCapColor(plmId: Int): Int? = when (plmId) {
-            in 0xC842..0xC855 -> DOOR_CAP_GREY      // Grey door caps (boss/event)
-            in 0xC85A..0xC86D -> DOOR_CAP_YELLOW     // Orange/Yellow (power bomb)
-            in 0xC872..0xC885 -> DOOR_CAP_GREEN      // Green (super missile)
-            in 0xC88A..0xC89D -> DOOR_CAP_RED        // Red (5 missiles)
-            in 0xC8A2..0xC8CD -> DOOR_CAP_BLUE       // Blue (beam/anything)
+            in 0xC842..0xC859 -> DOOR_CAP_GREY      // Grey door caps (boss/event)
+            in 0xC85A..0xC871 -> DOOR_CAP_YELLOW     // Orange/Yellow (power bomb)
+            in 0xC872..0xC889 -> DOOR_CAP_GREEN      // Green (super missile)
+            in 0xC88A..0xC8A1 -> DOOR_CAP_RED        // Red (5 missiles)
+            in 0xC8A2..0xC8B9 -> DOOR_CAP_BLUE       // Blue (beam/anything)
             else -> null
+        }
+
+        enum class DoorCapDir { LEFT, RIGHT, DOWN, UP }
+
+        /**
+         * Each color group spans 24 bytes with 4 directions in order:
+         * left (+0), right (+6), down (+12), up (+18).
+         */
+        fun doorCapDirection(plmId: Int): DoorCapDir? {
+            val bases = intArrayOf(0xC842, 0xC85A, 0xC872, 0xC88A, 0xC8A2)
+            for (base in bases) {
+                val off = plmId - base
+                if (off in 0..23) return when (off / 6) {
+                    0 -> DoorCapDir.LEFT
+                    1 -> DoorCapDir.RIGHT
+                    2 -> DoorCapDir.DOWN
+                    3 -> DoorCapDir.UP
+                    else -> null
+                }
+            }
+            return null
+        }
+
+        fun doorCapIsHorizontal(plmId: Int): Boolean {
+            val dir = doorCapDirection(plmId) ?: return false
+            return dir == DoorCapDir.DOWN || dir == DoorCapDir.UP
+        }
+
+        fun doorCapDisplayName(plmId: Int): String? {
+            val color = when {
+                plmId in 0xC842..0xC859 -> "Grey"
+                plmId in 0xC85A..0xC871 -> "Yellow"
+                plmId in 0xC872..0xC889 -> "Green"
+                plmId in 0xC88A..0xC8A1 -> "Red"
+                plmId in 0xC8A2..0xC8B9 -> "Blue"
+                else -> return null
+            }
+            val dir = when (doorCapDirection(plmId)) {
+                DoorCapDir.LEFT -> "Left"
+                DoorCapDir.RIGHT -> "Right"
+                DoorCapDir.DOWN -> "Down"
+                DoorCapDir.UP -> "Up"
+                else -> "?"
+            }
+            return "$color $dir Door"
         }
         
         /**

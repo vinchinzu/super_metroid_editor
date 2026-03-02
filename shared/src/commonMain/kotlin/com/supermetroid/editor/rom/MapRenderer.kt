@@ -97,9 +97,9 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
         val doorCapColors = mutableMapOf<Long, Int>()
         for (plm in plms) {
             val capColor = RomParser.doorCapColor(plm.id) ?: continue
-            // Door caps are 4 blocks tall (left/right doors)
-            for (dy in 0 until 4) {
-                val key = packXY(plm.x, plm.y + dy)
+            val horiz = RomParser.doorCapIsHorizontal(plm.id)
+            for (d in 0 until 4) {
+                val key = if (horiz) packXY(plm.x + d, plm.y) else packXY(plm.x, plm.y + d)
                 doorCapColors[key] = capColor
             }
         }
@@ -178,8 +178,6 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
                 btsBytes[i] = levelData[btsOffset]
             }
         }
-        
-        // Grid is drawn in the UI layer when "Grid" is toggled on (see MapCanvas.buildCompositeImage)
         
         val itemBlockSet = mutableSetOf<Int>()
         for (plm in plms) {
