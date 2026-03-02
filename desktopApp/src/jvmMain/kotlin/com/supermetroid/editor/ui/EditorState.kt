@@ -73,7 +73,17 @@ class EditorState {
     var dirty by mutableStateOf(false)
         private set
 
-    fun markDirty() { dirty = true }
+    /** Monotonic counter incremented each time any room is edited. */
+    private var _editCounter = 0L
+
+    /** Maps roomId → last-edit counter value. Higher = more recently edited. */
+    private val _roomEditOrder = mutableMapOf<Int, Long>()
+    val roomEditOrder: Map<Int, Long> get() = _roomEditOrder
+
+    fun markDirty() {
+        dirty = true
+        _roomEditOrder[currentRoomId] = ++_editCounter
+    }
 
     /** Incremented on every edit to trigger map re-render. */
     var editVersion by mutableStateOf(0)
@@ -1139,6 +1149,14 @@ class EditorState {
         tileGraphics = null
         workingLevelData = null
         originalLevelData = null
+
+        _roomEditOrder.clear()
+        _editCounter = 0L
+        for (key in project.rooms.keys) {
+            val rid = key.toIntOrNull(16) ?: continue
+            _roomEditOrder[rid] = ++_editCounter
+        }
+
         romVersion++
 
         migrateTileDefaultsToCore()

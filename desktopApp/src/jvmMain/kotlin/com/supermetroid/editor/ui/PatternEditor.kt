@@ -429,6 +429,9 @@ fun PatternEditorCanvas(
                         Key.Z -> if (event.isCtrlPressed || event.isMetaPressed) {
                             if (event.isShiftPressed) editorState.patRedo() else editorState.patUndo(); true
                         } else false
+                        Key.Y -> if (event.isCtrlPressed || event.isMetaPressed) {
+                            editorState.patRedo(); true
+                        } else false
                         Key.H -> { editorState.flipOrCaptureH(); true }
                         Key.V -> if (!event.isCtrlPressed && !event.isMetaPressed) {
                             editorState.flipOrCaptureV(); true

@@ -234,6 +234,7 @@ fun main() = application {
                                         rooms = rooms,
                                         selectedRoom = selectedRoom,
                                         romParser = romParser,
+                                        editorState = editorState,
                                         onRoomSelected = { room ->
                                             selectedRoom = room
                                             val romPath = RomPreferences.getLastRomPath()

@@ -488,6 +488,11 @@ fun MapCanvas(
                                 true
                             } else false
                         }
+                        Key.Y -> {
+                            if (keyEvent.isCtrlPressed || keyEvent.isMetaPressed) {
+                                editorState.redo(); true
+                            } else false
+                        }
                         Key.S -> {
                             if (keyEvent.isCtrlPressed || keyEvent.isMetaPressed) {
                                 editorState.saveProject(romParser); true
@@ -897,13 +902,16 @@ fun MapCanvas(
                             val activeOverlays = overlayToggles.filter { it.value }.keys
 
                             val roomHeader = remember(room) { room?.let { romParser.readRoomHeader(it.getRoomIdAsInt()) } }
-                            val scrollDataForOverlay = remember(roomHeader) {
-                                roomHeader?.let { rh -> romParser.parseScrollData(rh.roomScrollsPtr, rh.width, rh.height) }
+                            val scrollVer = editorState?.scrollVersion ?: 0
+                            val scrollDataForOverlay = remember(scrollVer, roomHeader) {
+                                val ws = editorState?.workingScrolls
+                                if (ws != null && ws.isNotEmpty()) ws.copyOf()
+                                else roomHeader?.let { rh -> romParser.parseScrollData(rh.roomScrollsPtr, rh.width, rh.height) }
                             }
                             val rWidthScreens = roomHeader?.width ?: 0
                             val rHeightScreens = roomHeader?.height ?: 0
 
-                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid, scrollDataForOverlay) {
+                            val compositeImage = remember(data, activeOverlays.toSet(), showGrid, scrollDataForOverlay?.contentHashCode()) {
                                 buildCompositeImage(data, activeOverlays, showGrid, scrollDataForOverlay, rWidthScreens, rHeightScreens)
                             }
                             
@@ -941,7 +949,7 @@ fun MapCanvas(
                             }
                             
                             // Re-render from working data (reacts to editVersion from EditorState)
-                            val compositeForEdit = remember(data, editVersion, activeOverlays.toSet(), showGrid, scrollDataForOverlay) {
+                            val compositeForEdit = remember(data, editVersion, activeOverlays.toSet(), showGrid, scrollDataForOverlay?.contentHashCode(), scrollVer) {
                                 val es = editorState
                                 if (es != null && es.workingLevelData != null) {
                                     val rh = roomHeader
@@ -1599,6 +1607,7 @@ fun MapCanvas(
 
                                                 // Destination room dropdown
                                                 var destDropExpanded by remember { mutableStateOf(false) }
+                                                var destRoomSearch by remember { mutableStateOf("") }
                                                 val destName = roomIdToName[currentDoor.destRoomPtr]
                                                     ?: "0x${currentDoor.destRoomPtr.toString(16).uppercase()}"
                                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1618,16 +1627,29 @@ fun MapCanvas(
                                                         }
                                                         DropdownMenu(
                                                             expanded = destDropExpanded,
-                                                            onDismissRequest = { destDropExpanded = false },
+                                                            onDismissRequest = { destDropExpanded = false; destRoomSearch = "" },
                                                             modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
                                                         ) {
-                                                            for (r in rooms) {
+                                                            OutlinedTextField(
+                                                                value = destRoomSearch,
+                                                                onValueChange = { destRoomSearch = it },
+                                                                placeholder = { Text("Search…", fontSize = 10.sp) },
+                                                                singleLine = true,
+                                                                textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                                    .fillMaxWidth().height(32.dp)
+                                                            )
+                                                            val filteredRooms = if (destRoomSearch.isBlank()) rooms
+                                                                else rooms.filter { it.name.contains(destRoomSearch, ignoreCase = true) ||
+                                                                    it.id.contains(destRoomSearch, ignoreCase = true) }
+                                                            for (r in filteredRooms) {
                                                                 val rid = r.getRoomIdAsInt()
                                                                 DropdownMenuItem(
                                                                     text = { Text(r.name, fontSize = 10.sp,
                                                                         fontWeight = if (rid == currentDoor.destRoomPtr) FontWeight.Bold else FontWeight.Normal) },
                                                                     onClick = {
                                                                         destDropExpanded = false
+                                                                        destRoomSearch = ""
                                                                         if (rid != currentDoor.destRoomPtr) {
                                                                             editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
                                                                         }
