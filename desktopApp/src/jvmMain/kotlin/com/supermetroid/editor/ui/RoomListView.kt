@@ -35,7 +35,9 @@ private val areaInfo = mapOf(
 enum class RoomSortMode(val label: String) {
     AREA("Area"),
     LAST_EDITED("Last Edited"),
+    FIRST_EDITED("First Edited"),
     NAME_AZ("Name A-Z"),
+    NAME_ZA("Name Z-A"),
 }
 
 @Composable
@@ -81,21 +83,22 @@ fun RoomListView(
                 { roomAreas[it.handle] ?: 99 },
                 { it.getRoomIdAsInt() }
             ))
-            RoomSortMode.LAST_EDITED -> {
+            RoomSortMode.LAST_EDITED, RoomSortMode.FIRST_EDITED -> {
                 val edited = filtered.filter { it.getRoomIdAsInt() in editedRoomIds }
-                    .sortedByDescending { editOrder[it.getRoomIdAsInt()] ?: 0L }
                 val unedited = filtered.filter { it.getRoomIdAsInt() !in editedRoomIds }
-                    .sortedWith(compareBy(
-                        { roomAreas[it.handle] ?: 99 },
-                        { it.getRoomIdAsInt() }
-                    ))
-                edited + unedited
+                val editedSorted = if (sortMode == RoomSortMode.LAST_EDITED)
+                    edited.sortedByDescending { editOrder[it.getRoomIdAsInt()] ?: 0L }
+                else
+                    edited.sortedBy { editOrder[it.getRoomIdAsInt()] ?: 0L }
+                editedSorted + unedited
             }
             RoomSortMode.NAME_AZ -> filtered.sortedBy { it.name.lowercase() }
+            RoomSortMode.NAME_ZA -> filtered.sortedByDescending { it.name.lowercase() }
         }
     }
 
     val showAreaHeaders = sortMode == RoomSortMode.AREA && searchQuery.isBlank()
+    val totalRoomCount = rooms.size
 
     // Scroll to selected room when it changes
     LaunchedEffect(selectedRoom?.handle, filteredSortedRooms) {
@@ -130,16 +133,27 @@ fun RoomListView(
                     .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val countText = if (searchQuery.isNotBlank() && filteredSortedRooms.size != totalRoomCount)
+                    "${filteredSortedRooms.size}/$totalRoomCount"
+                else "$totalRoomCount"
                 Text(
-                    text = "Rooms",
+                    text = "Rooms ($countText)",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "${filteredSortedRooms.size}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 4.dp)
+                // Sort dropdown with toggle: clicking the active sort's group swaps direction
+                val menuEntries = listOf(
+                    RoomSortMode.AREA,
+                    when (sortMode) {
+                        RoomSortMode.LAST_EDITED -> RoomSortMode.FIRST_EDITED
+                        RoomSortMode.FIRST_EDITED -> RoomSortMode.LAST_EDITED
+                        else -> RoomSortMode.LAST_EDITED
+                    },
+                    when (sortMode) {
+                        RoomSortMode.NAME_AZ -> RoomSortMode.NAME_ZA
+                        RoomSortMode.NAME_ZA -> RoomSortMode.NAME_AZ
+                        else -> RoomSortMode.NAME_AZ
+                    },
                 )
                 Box {
                     TextButton(
@@ -153,11 +167,18 @@ fun RoomListView(
                         expanded = sortMenuExpanded,
                         onDismissRequest = { sortMenuExpanded = false }
                     ) {
-                        for (mode in RoomSortMode.entries) {
+                        for (mode in menuEntries) {
+                            val isActive = mode == sortMode || when (mode) {
+                                RoomSortMode.FIRST_EDITED -> sortMode == RoomSortMode.LAST_EDITED
+                                RoomSortMode.LAST_EDITED -> sortMode == RoomSortMode.FIRST_EDITED
+                                RoomSortMode.NAME_ZA -> sortMode == RoomSortMode.NAME_AZ
+                                RoomSortMode.NAME_AZ -> sortMode == RoomSortMode.NAME_ZA
+                                else -> false
+                            }
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (mode == sortMode) {
+                                        if (isActive) {
                                             Text("✓ ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                         Text(mode.label, fontSize = 12.sp)
@@ -188,14 +209,20 @@ fun RoomListView(
                     }
                 },
                 singleLine = true,
-                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp),
+                textStyle = LocalTextStyle.current.copy(
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 2.dp)
                     .height(36.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    cursorColor = MaterialTheme.colorScheme.primary
                 )
             )
 

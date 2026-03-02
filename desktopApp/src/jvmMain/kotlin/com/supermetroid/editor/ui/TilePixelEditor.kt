@@ -255,7 +255,7 @@ fun TilePixelEditor(
 
                 Spacer(Modifier.weight(1f))
 
-                // Apply & Close (Surface like Tileset Export/Import)
+                // Apply & Close (Surface like Tileset Export/Import) — 9.sp to match Grid, avoid cut-off
                 Surface(
                     modifier = Modifier.height(28.dp).clickable {
                         persistEdits()
@@ -264,14 +264,14 @@ fun TilePixelEditor(
                     shape = MaterialTheme.shapes.small,
                     color = MaterialTheme.colorScheme.primary
                 ) {
-                    Text("Apply", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                    Text("Apply", fontSize = 9.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 0.dp))
                 }
                 Surface(
                     modifier = Modifier.height(28.dp).clickable { onClose() },
                     shape = MaterialTheme.shapes.small,
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
-                    Text("Close", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                    Text("Close", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 0.dp))
                 }
             }
         }

@@ -85,9 +85,16 @@ class EditorState {
         _roomEditOrder[currentRoomId] = ++_editCounter
     }
 
-    /** Incremented on every edit to trigger map re-render. */
-    var editVersion by mutableStateOf(0)
-        private set
+    /** Incremented on every edit to trigger map re-render + update room edit order. */
+    private val _editVersionState = mutableStateOf(0)
+    var editVersion: Int
+        get() = _editVersionState.value
+        private set(value) {
+            _editVersionState.value = value
+            if (currentRoomId != 0) {
+                _roomEditOrder[currentRoomId] = ++_editCounter
+            }
+        }
 
     /** Incremented when a new ROM is loaded to force full UI refresh. */
     var romVersion by mutableStateOf(0)
@@ -894,7 +901,7 @@ class EditorState {
         val ordered = mutableListOf<SmPatch>()
 
         // 1. GUI config patches (featured at top)
-        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CERES_ESCAPE_PATCH)) {
+        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CERES_ESCAPE_PATCH)) {
             if (guiPatch.id !in existingIds) {
                 ordered.add(SmPatch(
                     id = guiPatch.id,
@@ -1972,6 +1979,16 @@ class EditorState {
                 for (field in ALL_BOSS_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = romParser.snesToPc(field.snesAddress) + field.offset
+                    if (pc + 1 < romData.size) {
+                        romData[pc] = (value and 0xFF).toByte()
+                        romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
+                    }
+                }
+            } else if (patch.configType == "phantoon") {
+                val data = patch.configData ?: continue
+                for (field in ALL_PHANTOON_FIELDS) {
+                    val value = data[field.key] ?: continue
+                    val pc = romParser.snesToPc(field.snesAddress)
                     if (pc + 1 < romData.size) {
                         romData[pc] = (value and 0xFF).toByte()
                         romData[pc + 1] = ((value shr 8) and 0xFF).toByte()

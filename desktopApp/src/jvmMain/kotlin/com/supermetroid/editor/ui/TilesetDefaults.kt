@@ -294,6 +294,16 @@ val BOSS_STATS_PATCH = SmPatch(
     configType = "boss_stats"
 )
 
+/** Config patch: Phantoon AI behavior. Stores timer/movement/position values in configData. */
+val PHANTOON_PATCH = SmPatch(
+    id = "config_phantoon",
+    name = "Phantoon Behavior",
+    description = "Deep-dive editor for Phantoon's AI timers, movement speed, flame rain, and wavy effect parameters.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "phantoon"
+)
+
 /** Config patch: Enemy Stats overrides. Stores per-enemy HP/damage in configData. */
 val ENEMY_STATS_PATCH = SmPatch(
     id = "config_enemy_stats",
