@@ -2257,6 +2257,9 @@ class EditorState {
                     distinctPlmPtrs.add(plmPtr)
                 }
 
+                data class PlmSetData(val plmSetPtr: Int, val originalSize: Int, val plms: MutableList<RomParser.PlmEntry>)
+                val plmSets = mutableListOf<PlmSetData>()
+
                 for (plmSetPtr in distinctPlmPtrs) {
                     val originalPlms = romParser.parsePlmSet(plmSetPtr)
                     val modifiedPlms = originalPlms.toMutableList()
@@ -2277,12 +2280,16 @@ class EditorState {
                         deduped.add(plm)
                     }
                     deduped.reverse()
-                    val originalSize = originalPlms.size * 6 + 2
-                    val newSize = deduped.size * 6 + 2
-                    val plmPc = romParser.snesToPc(0x8F0000 or plmSetPtr)
+                    plmSets.add(PlmSetData(plmSetPtr, originalPlms.size * 6 + 2, deduped))
+                }
+
+                // Write all PLM sets to ROM
+                for (psd in plmSets) {
+                    val newSize = psd.plms.size * 6 + 2
+                    val plmPc = romParser.snesToPc(0x8F0000 or psd.plmSetPtr)
 
                     val writePc: Int
-                    if (newSize <= originalSize) {
+                    if (newSize <= psd.originalSize) {
                         writePc = plmPc
                     } else if (freePtr + newSize <= bank8FEnd) {
                         writePc = freePtr
@@ -2293,20 +2300,20 @@ class EditorState {
                         for (stateOffset in allStateOffsets) {
                             val existingPtr = (romData[stateOffset + 20].toInt() and 0xFF) or
                                     ((romData[stateOffset + 21].toInt() and 0xFF) shl 8)
-                            if (existingPtr == plmSetPtr) {
+                            if (existingPtr == psd.plmSetPtr) {
                                 romData[stateOffset + 20] = (newPtr and 0xFF).toByte()
                                 romData[stateOffset + 21] = ((newPtr shr 8) and 0xFF).toByte()
                                 updatedStates++
                             }
                         }
-                        println("Room 0x$roomKey: relocated PLM set 0x${plmSetPtr.toString(16)} to 0x${newSnes.toString(16)} (updated $updatedStates states)")
+                        println("Room 0x$roomKey: relocated PLM set 0x${psd.plmSetPtr.toString(16)} to 0x${newSnes.toString(16)} (updated $updatedStates states)")
                     } else {
-                        println("WARN: Room 0x$roomKey no free space for expanded PLM set 0x${plmSetPtr.toString(16)} — skipped")
+                        println("WARN: Room 0x$roomKey no free space for expanded PLM set 0x${psd.plmSetPtr.toString(16)} — skipped")
                         continue
                     }
 
                     var offset = writePc
-                    for (plm in deduped) {
+                    for (plm in psd.plms) {
                         romData[offset] = (plm.id and 0xFF).toByte()
                         romData[offset + 1] = ((plm.id shr 8) and 0xFF).toByte()
                         romData[offset + 2] = plm.x.toByte()
@@ -2319,23 +2326,37 @@ class EditorState {
                     }
                     romData[offset] = 0; romData[offset + 1] = 0
                     if (writePc == plmPc) {
-                        for (i in offset + 2 until plmPc + originalSize) romData[i] = 0
+                        for (i in offset + 2 until plmPc + psd.originalSize) romData[i] = 0
                     }
                 }
                 roomsPatched.add(roomKey)
             }
 
             // Patch door entries (last change per index wins)
+            // SM's SpawnDoorClosingPLM ($82:E8EB) indexes kDoorClosingPlmIds by
+            // door_orientation: values 0-3 have PLM ID 0 (no cap), values 4-7 have
+            // blue closing cap PLM IDs. Bit 2 of door_orientation is the "spawn
+            // closing cap" flag. When editing doors we clear this bit to prevent
+            // blue closing caps at stale (x_pos_plm, y_pos_plm) positions carried
+            // over from the original DoorDef.
             if (hasDoorEdits && room.doorOut != 0 && room.doorOut != 0xFFFF) {
                 val byIndex = roomEdits.doorChanges.groupBy { it.doorIndex }
                 for ((doorIndex, changes) in byIndex) {
                     val dc = changes.last()
                     val entryPc = romParser.doorEntryPcOffset(room.doorOut, doorIndex) ?: continue
                     if (entryPc + 11 >= romData.size) continue
+
+                    val originalOrientation = (dc.bitflag shr 8) and 0xFF
+                    val clearedOrientation = originalOrientation and 0xFB // clear bit 2 (cap flag)
+                    if (originalOrientation != clearedOrientation) {
+                        val dirName = arrayOf("Right","Left","Down","Up")[clearedOrientation and 3]
+                        println("Room 0x$roomKey door $doorIndex: cleared cap flag (orient $originalOrientation→$clearedOrientation $dirName)")
+                    }
+
                     romData[entryPc] = (dc.destRoomPtr and 0xFF).toByte()
                     romData[entryPc + 1] = ((dc.destRoomPtr shr 8) and 0xFF).toByte()
                     romData[entryPc + 2] = (dc.bitflag and 0xFF).toByte()
-                    romData[entryPc + 3] = ((dc.bitflag shr 8) and 0xFF).toByte()
+                    romData[entryPc + 3] = clearedOrientation.toByte()
                     romData[entryPc + 4] = (dc.doorCapCode and 0xFF).toByte()
                     romData[entryPc + 5] = ((dc.doorCapCode shr 8) and 0xFF).toByte()
                     romData[entryPc + 6] = (dc.screenX and 0xFF).toByte()

@@ -1,64 +1,78 @@
-# Rogue Door Caps — Analysis and Fix
+# Phantom Blue Doors — Root Cause and Fix
 
-## What you see
+## Symptom
 
-- **Landing Site (0x91F8)**: A blue door cap appears floating in the air on the right side of the room (e.g. at block position 1,1 or similar). It can be opened but there is no door transition behind it.
-- **Tourian Escape Room 2 (0xDE7A)**: A door cap on the right side facing in, same behavior — openable but no door behind it.
+Blue door cap shields appear at door positions during gameplay, even though the room's
+PLM set has no blue door cap entries. These are most visible in large hack rooms
+(e.g., Spike Olympics) where the persistent blue caps are obvious.
 
-## Cause
+## Root Cause: door_orientation Bit 2 (Cap Flag)
 
-In Super Metroid, **door caps** (the colored shields you shoot to open) are **PLMs** (Post Load Modifications) in the room’s PLM set. Each door cap PLM has:
+The DoorDef's `door_orientation` byte (offset 3) controls whether a blue closing cap
+is spawned when entering through that door:
 
-- A **PLM ID** (e.g. 0xC8A2 Blue Left, 0xC8A8 Blue Right)
-- **Block coordinates (x, y)** where the cap is drawn
+- **Bit 2 clear (directions 0-3)**: `kDoorClosingPlmIds[0-3]` = 0x0000 → NO cap spawned
+- **Bit 2 set (directions 4-7)**: `kDoorClosingPlmIds[4-7]` = blue cap PLM → cap IS spawned
 
-The game draws a door cap at that (x, y) regardless of the tile underneath. So:
+When the editor changes a door's destination, the original `door_orientation` (with cap
+flag) and `x_pos_plm`/`y_pos_plm` are preserved. But these positions were valid for the
+ORIGINAL destination room — not the new one. Result: blue caps spawn at wrong/invalid
+positions in the new destination.
 
-- If a **door cap PLM** is placed at a block that is **not** a door block (block type 9) in the level data, you get a “rogue” cap: it looks and opens like a door, but there is no door transition there.
+### Why Vanilla SM Also Has "Rogue" Caps
 
-So the cause is: **a door cap PLM exists in the room’s PLM set at a position where there is no door block.**
+Even in vanilla SM, many DoorDef positions don't have matching PLM caps:
+- **Landing Site** ($91F8): Doors 0, 2, 3 have cap flag but no PLM caps at those positions
+- **Mother Brain** ($92FD): 7 doors all have cap flag; only 5 have caps in escape state
 
-Typical ways this can happen:
+This is normal vanilla behavior: blue closing caps appear when entering through those
+doors. It's just very visible in custom hacks with modified room layouts.
 
-1. **Wrong coordinates when adding a door**  
-   A door pattern or “add door cap” action ends up adding the PLM at (1,1) or another wrong position (e.g. default or buggy coordinates).
+## The Fix: Clear Cap Flag on Edited Doors
 
-2. **Shared PLM set**  
-   Two rooms can point to the same PLM set (e.g. different state of the same room). Edits from one context can add a door cap that only makes sense in the other, or at a position that isn’t a door in this room.
+During export, the editor clears bit 2 of `door_orientation` for all edited DoorDefs:
 
-3. **Paste / duplicate**  
-   Pasting a door or copying room data can copy a door cap PLM with coordinates that are valid in the source room but not in the current room (no door block there).
+```
+orientation = orientation & 0xFB  // clear bit 2
+```
 
-It is **not** caused by “another room also exiting to this room.” The door list and room exits only define transitions; they don’t create extra door cap PLMs. The rogue cap is always due to a **door cap PLM at (x,y) where block type ≠ 9** in that room’s level data.
+This makes the game read `kDoorClosingPlmIds[0-3]` (all zero) instead of
+`kDoorClosingPlmIds[4-7]` (blue cap PLMs), preventing SpawnDoorClosingPLM from
+spawning any cap.
 
-## How the editor addresses it
+**No side effects**: The door direction bits 0-1 (Right/Left/Down/Up) are preserved.
+All transition code uses `door_direction & 3` or `door_direction & 2` for direction
+checks, which produce the same result regardless of bit 2.
 
-- **On export**, when writing PLM sets, the editor checks each door cap PLM against the **current** level data (after tile patches and any relocation):
-  - It uses the level data pointer from the room state in the ROM.
-  - For each door cap PLM at `(plm.x, plm.y)` it checks the block type at that position.
-  - If the block type is **not** 9 (door), the editor **skips** that PLM (does not write it) and prints a line to the console, for example:
-    - `Room 0x91F8: skipping rogue door cap PLM 0xc8a8 at (1,1) — block type 0 (not door 9)`
-- So rogue door caps are **not** written to the ROM, and the in-game “floating” or “wrong” door cap disappears after re-export.
+### Previous Fix Attempt (PLM Propagation — Ineffective)
 
-## How to fix existing projects
+We previously tried propagating blue opening caps (C8A2-C8B4) to PLM sets that lacked
+door caps present in other states. This was ineffective because:
+1. Adding blue opening caps still shows blue doors (CheckIfColoredDoorCapSpawned
+   switches them to closing animation mode)
+2. Only helped rooms with multi-state cap divergence — couldn't fix rooms with 1 state
+   or doors with no cap in ANY state
+3. DoorDef positions often don't match PLM cap positions (different coordinate systems)
 
-1. **Re-export the ROM**  
-   With the new logic, any door cap PLM not on a door block is skipped and logged. Re-export and test; the rogue caps should be gone.
+## kDoorClosingPlmIds Table ($8F:E68A)
 
-2. **Remove the PLM in the editor**  
-   The editor now loads PLMs from every room state (default, E629, E612, etc.), so rogue door caps in e.g. Mother Brain (0x92FD) or Tourian escape (0xDE7A) are visible. If you want to clean the project:
-   - Open the affected room (e.g. Landing Site 0x91F8 or Tourian 0xDE7A).
-   - Open the PLM list and look for a **door cap** at a suspicious position (e.g. (1,1) or a block that’s not a door).
-   - Remove that PLM so it no longer appears in the room’s PLM set.
+| Index | Direction   | PLM ID | Effect |
+|-------|-------------|--------|--------|
+| 0     | Right       | 0x0000 | No cap |
+| 1     | Left        | 0x0000 | No cap |
+| 2     | Down        | 0x0000 | No cap |
+| 3     | Up          | 0x0000 | No cap |
+| 4     | Right + cap | 0xC8BE | Blue closing cap |
+| 5     | Left + cap  | 0xC8BA | Blue closing cap |
+| 6     | Down + cap  | 0xC8C6 | Blue closing cap |
+| 7     | Up + cap    | 0xC8C2 | Blue closing cap |
 
-3. **Check room and state**  
-   If a room has multiple states (e.g. E629, E612) with different PLM sets, make sure you’re not adding door caps in a state where that position isn’t a door.
+## Source References
 
-## Summary
-
-| What you see       | Cause                                      | Fix                                      |
-|--------------------|--------------------------------------------|------------------------------------------|
-| Rogue door cap     | Door cap PLM at (x,y) where block ≠ door 9 | Export (editor skips it) or remove PLM   |
-| “Another room exits here” | Not the cause of extra caps          | N/A                                      |
-
-The editor now prevents rogue door caps from being written to the ROM by only writing door cap PLMs that sit on door blocks (type 9) in the current level data.
+- `~/code/sm/src/sm_82.c:4257` — `SpawnDoorClosingPLM` implementation
+- `~/code/sm/src/sm_82.c:4270` — `CheckIfColoredDoorCapSpawned` implementation
+- `~/code/sm/src/sm_8f.c:715` — `RoomDefStateSelect_IsEventSet` (5-byte entry format)
+- `~/code/sm/src/sm_8f.c:708` — `RoomDefStateSelect_TourianBoss01` (4-byte, no param)
+- `~/code/sm/src/ida_types.h:260` — `DoorDef` structure
+- `~/code/sm/src/ida_types.h:1847` — `addr_kDoorClosingPlmIds = 0xE68A`
+- Vanilla ROM: `kDoorClosingPlmIds` at PC 0x07E68A (8 uint16 entries)

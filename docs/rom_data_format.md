@@ -329,18 +329,25 @@ Entry 1: PPPP   → DDB for door index 1
 
 Door cap PLM params and door-tile BTS values reference indices into this table.
 
-### Door Data Block (12 bytes, bank $83)
+### Door Data Block (DoorDef, 12 bytes, bank $83)
 
 ```
 Offset  Size  Field
   0-1    2    Destination room ID (SNES pointer in bank $8F)
-  2      1    Bitflag (elevator bit, region switching)
-  3      1    Direction (0=Right, 1=Left, 2=Down, 3=Up; +4 for closing door)
-  4-5    2    Door illusion X/Y on exit
-  6-7    2    Spawn screen X/Y coordinates
-  8-9    2    Distance from door (0x8000 = use default)
+  2      1    Bitflag (elevator bit, region switching; 0x40 = cross-area)
+  3      1    Direction (0=Right, 1=Left, 2=Down, 3=Up; +4 for closing door cap)
+  4      1    x_pos_plm — X block position of door cap PLM (used by SpawnDoorClosingPLM)
+  5      1    y_pos_plm — Y block position of door cap PLM
+  6      1    Spawn screen X coordinate
+  7      1    Spawn screen Y coordinate
+  8-9    2    Samus distance from door (0x8000 = use default)
   10-11  2    Door ASM pointer (bank $8F, scroll update code)
 ```
+
+**Note**: Bytes 4-5 are the position where `SpawnDoorClosingPLM` ($82:E8EB) places
+the blue closing cap if no colored cap PLM exists in the room's PLM set at that position.
+See `~/code/sm/src/sm_82.c` DoorDef structure and `SpawnDoorClosingPLM()`.
+In our editor these are stored as a single 16-bit `doorCapCode` field (little-endian: x=low, y=high).
 
 ---
 

@@ -657,12 +657,12 @@ class RomParser(internal val romData: ByteArray) {
      * Each room can have multiple state conditions (E629 boss check, E612 event, etc.)
      * plus the E5E6 default. Returns PC offsets of every 26-byte state data block.
      *
-     * State condition entry sizes (from SM disassembly):
+     * State condition entry sizes (verified against snesrev/sm $8F functions):
      *   E5E6: default (terminates list), 26-byte state data follows inline
-     *   E5EB: code(2)+doorEvent(2)+statePtr(2) = 6 bytes
-     *   E5FF: code(2)+event(2)+statePtr(2) = 6 bytes
-     *   E612: code(2)+bossFlag(1)+statePtr(2) = 5 bytes
-     *   E629: code(2)+bossFlag(1)+statePtr(2) = 5 bytes
+     *   E5EB: code(2)+doorPtr(2)+statePtr(2) = 6 bytes  (RoomDefStateSelect_Door)
+     *   E5FF: code(2)+statePtr(2)            = 4 bytes  (TourianBoss01: hardcoded boss check)
+     *   E612: code(2)+eventFlag(1)+statePtr(2) = 5 bytes (IsEventSet)
+     *   E629: code(2)+bossFlag(1)+statePtr(2)  = 5 bytes (IsBossDead)
      *   E640/E652/E669/E678: code(2)+statePtr(2) = 4 bytes
      */
     fun findAllStateDataOffsets(roomId: Int): List<Int> {
@@ -682,8 +682,8 @@ class RomParser(internal val romData: ByteArray) {
                     if (statePc + 26 <= romData.size) results.add(statePc)
                     return results
                 }
-                0xE5EB, 0xE5FF -> {
-                    // 2-byte event arg + 2-byte state pointer = 6 bytes total
+                0xE5EB -> {
+                    // door_ptr(2) + state_ptr(2) = 6 bytes total
                     if (pos + 5 < romData.size) {
                         val statePtr = readUInt16At(pos + 4)
                         val statePc = snesToPc(0x8F0000 or statePtr)
@@ -692,7 +692,7 @@ class RomParser(internal val romData: ByteArray) {
                     pos += 6
                 }
                 0xE612, 0xE629 -> {
-                    // 1-byte boss/event flag + 2-byte state pointer = 5 bytes total
+                    // 1-byte flag + 2-byte state pointer = 5 bytes total
                     if (pos + 4 < romData.size) {
                         val statePtr = readUInt16At(pos + 3)
                         val statePc = snesToPc(0x8F0000 or statePtr)
@@ -700,7 +700,7 @@ class RomParser(internal val romData: ByteArray) {
                     }
                     pos += 5
                 }
-                0xE640, 0xE652, 0xE669, 0xE678 -> {
+                0xE5FF, 0xE640, 0xE652, 0xE669, 0xE678 -> {
                     // 2-byte state pointer only = 4 bytes total
                     if (pos + 3 < romData.size) {
                         val statePtr = readUInt16At(pos + 2)
