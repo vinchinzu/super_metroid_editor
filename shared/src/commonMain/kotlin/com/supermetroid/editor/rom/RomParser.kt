@@ -979,12 +979,43 @@ class RomParser(internal val romData: ByteArray) {
 
         fun isStationPlm(plmId: Int): Boolean = STATION_PLMS.any { it.plmId == plmId }
         fun isGatePlm(plmId: Int): Boolean = plmId == 0xC836 || plmId == 0xC82A
+        fun isDoorCapPlm(plmId: Int): Boolean = doorCapColor(plmId) != null
+
+        // ─── Door Cap PLM catalog ─────────────────────────────────
+        data class DoorCapDef(val name: String, val color: String, val direction: String, val plmId: Int)
+
+        val DOOR_CAP_PLMS = listOf(
+            DoorCapDef("Blue Left",    "Blue",   "Left",  0xC8A2),
+            DoorCapDef("Blue Right",   "Blue",   "Right", 0xC8A8),
+            DoorCapDef("Blue Up",      "Blue",   "Up",    0xC8AE),
+            DoorCapDef("Blue Down",    "Blue",   "Down",  0xC8B4),
+            DoorCapDef("Red Left",     "Red",    "Left",  0xC88A),
+            DoorCapDef("Red Right",    "Red",    "Right", 0xC890),
+            DoorCapDef("Red Up",       "Red",    "Up",    0xC896),
+            DoorCapDef("Red Down",     "Red",    "Down",  0xC89C),
+            DoorCapDef("Green Left",   "Green",  "Left",  0xC872),
+            DoorCapDef("Green Right",  "Green",  "Right", 0xC878),
+            DoorCapDef("Green Up",     "Green",  "Up",    0xC87E),
+            DoorCapDef("Green Down",   "Green",  "Down",  0xC884),
+            DoorCapDef("Yellow Left",  "Yellow", "Left",  0xC85A),
+            DoorCapDef("Yellow Right", "Yellow", "Right", 0xC860),
+            DoorCapDef("Yellow Up",    "Yellow", "Up",    0xC866),
+            DoorCapDef("Yellow Down",  "Yellow", "Down",  0xC86C),
+            DoorCapDef("Grey Left",    "Grey",   "Left",  0xC842),
+            DoorCapDef("Grey Right",   "Grey",   "Right", 0xC848),
+            DoorCapDef("Grey Up",      "Grey",   "Up",    0xC84E),
+            DoorCapDef("Grey Down",    "Grey",   "Down",  0xC854),
+        )
+
+        fun doorCapDefFor(plmId: Int): DoorCapDef? = DOOR_CAP_PLMS.find { it.plmId == plmId }
+
+        fun doorCapNameForPlm(plmId: Int): String? = doorCapDefFor(plmId)?.let { "Door Cap: ${it.name}" }
 
         fun plmDisplayName(plmId: Int, param: Int = 0): String {
             itemNameForPlm(plmId)?.let { return it }
             stationNameForPlm(plmId)?.let { return it }
             gateNameForPlm(plmId, param)?.let { return it }
-            doorCapColor(plmId)?.let { return "Door Cap" }
+            doorCapNameForPlm(plmId)?.let { return it }
             return "PLM 0x${plmId.toString(16).uppercase().padStart(4, '0')}"
         }
 

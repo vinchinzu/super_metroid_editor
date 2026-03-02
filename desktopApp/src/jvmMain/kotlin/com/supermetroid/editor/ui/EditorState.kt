@@ -18,6 +18,7 @@ import com.supermetroid.editor.data.TileEdit
 import com.supermetroid.editor.data.TilePattern
 import com.supermetroid.editor.data.PatternCell
 import com.supermetroid.editor.data.PatternLibrary
+import com.supermetroid.editor.data.EnemyUpdate
 import com.supermetroid.editor.rom.LZ5Compressor
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
@@ -661,7 +662,8 @@ class EditorState {
      */
     private fun migrateTileDefaultsToCore() {
         val fixedIndices = setOf(
-            69, 70, 71, 72, 73, 95, 100, 101, 102, 122, 123, 124, 125, 126, 127,
+            69, 70, 71, 72, 73, 89, 90, 91, 92, 95, 100, 101, 102,
+            122, 123, 124, 125, 126, 127,
             150, 151, 152, 153, 154, 182, 184, 185, 186,
             187, 214, 215, 216, 217, 218, 219, 220
         )
@@ -713,9 +715,10 @@ class EditorState {
             pat.id in stationChozoIds && pat.builtIn && (pat.rows != 3 || pat.cols != 3)
         }
 
-        // Migrate save station: was 3x2, correct is 2x5 with PLM on bottom-left
+        // Migrate save station: updated to use CRE tiles 89/91 instead of 0xFF placeholders
         project.patterns.removeAll { pat ->
-            pat.id == "builtin_save_station" && pat.builtIn && (pat.cols != 2 || pat.rows != 5)
+            pat.id == "builtin_save_station" && pat.builtIn &&
+                (pat.cols != 2 || pat.rows != 5 || pat.cells.firstOrNull()?.metatile != 89)
         }
 
         // Migrate energy/missile refill patterns: wrong PLM param, non-null bottom corners,
@@ -793,18 +796,19 @@ class EditorState {
             addBuiltIn("builtin_door_yellow_left", "Door: Yellow (Left)", 1, 4, doorPatternCells(0xC85A, true), noFlip = true)
             addBuiltIn("builtin_door_yellow_right","Door: Yellow (Right)", 1, 4, doorPatternCells(0xC860, false), noFlip = true)
 
-            // ── Save Station: 2x5, PLM on bottom-left (row 4, col 0). PLM renders graphic at runtime.
+            // ── Save Station: 2x5, CRE tiles 89 (solid top/bottom) + 91 (air BG).
+            // PLM on bottom-left (row 4, col 0). PLM renders animated graphic at runtime.
             addBuiltIn("builtin_save_station", "Save Station", 2, 5, listOf(
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8),
-                PatternCell(0x0FF, blockType = 0x8, plmId = 0xB76F, plmParam = 0x8000),
-                PatternCell(0x0FF, blockType = 0x8),
+                PatternCell(89, blockType = 0x8, bts = 4),
+                PatternCell(89, blockType = 0x8, bts = 4, hFlip = true),
+                PatternCell(91, blockType = 0x0),
+                PatternCell(91, blockType = 0x0, hFlip = true),
+                PatternCell(91, blockType = 0x0),
+                PatternCell(91, blockType = 0x0, hFlip = true),
+                PatternCell(91, blockType = 0x0),
+                PatternCell(91, blockType = 0x0, hFlip = true),
+                PatternCell(89, blockType = 0x8, bts = 4, vFlip = true, plmId = 0xB76F, plmParam = 0x8000),
+                PatternCell(89, blockType = 0x8, bts = 4, hFlip = true, vFlip = true),
             ))
 
             // ── Energy Refill: 3x3, CRE tiles matching vanilla station layout ──
@@ -1463,75 +1467,74 @@ class EditorState {
     fun getPlmsAt(x: Int, y: Int): List<RomParser.PlmEntry> =
         _workingPlms.filter { it.x == x && it.y == y }
 
+    private fun autoAssignParam(plmId: Int, param: Int): Int = when {
+        param == 0 && RomParser.isItemPlm(plmId) -> {
+            val usedIndices = mutableSetOf<Int>()
+            for ((_, roomEdits) in project.rooms) {
+                for (change in roomEdits.plmChanges) {
+                    if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+                }
+            }
+            for (plm in _workingPlms) {
+                if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
+            }
+            var idx = 0x51
+            while (idx in usedIndices && idx <= 0x7F) idx++
+            if (idx > 0x7F) { idx = 0x9B; while (idx in usedIndices && idx <= 0x9F) idx++ }
+            if (idx > 0x9F) 0x06 else idx
+        }
+        plmId == 0xB76F && param == 0x8000 -> {
+            val usedSaveIndices = mutableSetOf<Int>()
+            for (plm in _workingPlms) {
+                if (plm.id == 0xB76F) usedSaveIndices.add(plm.param and 0xFF)
+            }
+            for ((_, roomEdits) in project.rooms) {
+                for (change in roomEdits.plmChanges) {
+                    if (change.action == "add" && change.plmId == 0xB76F) usedSaveIndices.add(change.param and 0xFF)
+                }
+            }
+            var idx = 0
+            while (idx in usedSaveIndices && idx <= 0x0F) idx++
+            0x8000 or idx
+        }
+        else -> param
+    }
+
     fun addPlm(plmId: Int, x: Int, y: Int, param: Int) {
-        // Remove any existing PLM of the same type at the same position to avoid duplicates.
-        // Applies to items, stations, and gates -- two identical PLMs at one tile break the engine.
         val existing = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
+        val removedChanges = mutableListOf<PlmChange>()
         for (old in existing) {
             _workingPlms.remove(old)
-            project.getOrCreateRoom(currentRoomId).plmChanges.add(
-                PlmChange("remove", old.id, old.x, old.y, 0)
-            )
+            val rc = PlmChange("remove", old.id, old.x, old.y, old.param)
+            project.getOrCreateRoom(currentRoomId).plmChanges.add(rc)
+            removedChanges.add(rc)
         }
 
-        val actualParam = when {
-            // Auto-assign collection index for items when param is 0.
-            // SM uses sequential indices stored in a ~20-byte collection bit array.
-            // Original items use: Crateria 0x00-0x0B, Brinstar 0x0D-0x30,
-            // Norfair 0x31-0x50, Wrecked Ship 0x80-0x87, Maridia 0x88-0x9A.
-            // The gap 0x51-0x7F (47 slots) is unused and safe for new items.
-            // WARNING: 0xA0+ overflows the collection array and corrupts save data!
-            param == 0 && RomParser.isItemPlm(plmId) -> {
-                val usedIndices = mutableSetOf<Int>()
-                for ((_, roomEdits) in project.rooms) {
-                    for (change in roomEdits.plmChanges) {
-                        if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
-                    }
-                }
-                for (plm in _workingPlms) {
-                    if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
-                }
-                var idx = 0x51
-                while (idx in usedIndices && idx <= 0x7F) idx++
-                if (idx > 0x7F) {
-                    idx = 0x9B
-                    while (idx in usedIndices && idx <= 0x9F) idx++
-                }
-                if (idx > 0x9F) 0x06 else idx
-            }
-            // Auto-assign save station index: High byte 0x80, Low byte = next unused index.
-            // Each area has its own save station list; indices must be unique within the area.
-            plmId == 0xB76F && param == 0x8000 -> {
-                val usedSaveIndices = mutableSetOf<Int>()
-                for (plm in _workingPlms) {
-                    if (plm.id == 0xB76F) usedSaveIndices.add(plm.param and 0xFF)
-                }
-                for ((_, roomEdits) in project.rooms) {
-                    for (change in roomEdits.plmChanges) {
-                        if (change.action == "add" && change.plmId == 0xB76F) {
-                            usedSaveIndices.add(change.param and 0xFF)
-                        }
-                    }
-                }
-                var idx = 0
-                while (idx in usedSaveIndices && idx <= 0x0F) idx++
-                0x8000 or idx
-            }
-            else -> param
-        }
+        val actualParam = autoAssignParam(plmId, param)
         _workingPlms.add(RomParser.PlmEntry(plmId, x, y, actualParam))
-        project.getOrCreateRoom(currentRoomId).plmChanges.add(
-            PlmChange("add", plmId, x, y, actualParam)
-        )
+        val addChange = PlmChange("add", plmId, x, y, actualParam)
+        project.getOrCreateRoom(currentRoomId).plmChanges.add(addChange)
+
+        val name = RomParser.plmDisplayName(plmId)
+        val op = EditOperation("Add $name ($x,$y)", plmAdds = listOf(addChange), plmRemoves = removedChanges)
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
     }
 
     fun removePlm(x: Int, y: Int, plmId: Int) {
+        val removed = _workingPlms.filter { it.x == x && it.y == y && it.id == plmId }
         _workingPlms.removeAll { it.x == x && it.y == y && it.id == plmId }
-        project.getOrCreateRoom(currentRoomId).plmChanges.add(
-            PlmChange("remove", plmId, x, y, 0)
-        )
+        val changes = removed.map { PlmChange("remove", it.id, it.x, it.y, it.param) }
+        for (c in changes) project.getOrCreateRoom(currentRoomId).plmChanges.add(c)
+
+        val name = RomParser.plmDisplayName(plmId)
+        val op = EditOperation("Remove $name ($x,$y)", plmRemoves = changes)
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
     }
@@ -1544,19 +1547,29 @@ class EditorState {
     fun addEnemy(enemyId: Int, pixelX: Int, pixelY: Int, initParam: Int = 0, properties: Int = 0x0800) {
         val entry = RomParser.EnemyEntry(enemyId, pixelX, pixelY, initParam, properties)
         _workingEnemies.add(entry)
-        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
-            EnemyChange("add", enemyId, pixelX, pixelY, initParam, properties)
-        )
+        val ec = EnemyChange("add", enemyId, pixelX, pixelY, initParam, properties)
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(ec)
+
+        val name = RomParser.enemyName(enemyId)
+        val op = EditOperation("Add $name", enemyAdds = listOf(ec))
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
     }
 
     fun removeEnemy(enemy: RomParser.EnemyEntry) {
         _workingEnemies.removeAll { it.id == enemy.id && it.x == enemy.x && it.y == enemy.y }
-        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
-            EnemyChange("remove", enemy.id, enemy.x, enemy.y, enemy.initParam, enemy.properties,
-                enemy.extra1, enemy.extra2, enemy.extra3, origX = enemy.x, origY = enemy.y)
-        )
+        val ec = EnemyChange("remove", enemy.id, enemy.x, enemy.y, enemy.initParam, enemy.properties,
+            enemy.extra1, enemy.extra2, enemy.extra3, origX = enemy.x, origY = enemy.y)
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(ec)
+
+        val name = RomParser.enemyName(enemy.id)
+        val op = EditOperation("Remove $name", enemyRemoves = listOf(ec))
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
     }
@@ -1565,10 +1578,17 @@ class EditorState {
         val idx = _workingEnemies.indexOfFirst { it.id == old.id && it.x == old.x && it.y == old.y }
         if (idx < 0) return
         _workingEnemies[idx] = new
-        project.getOrCreateRoom(currentRoomId).enemyChanges.add(
-            EnemyChange("update", new.id, new.x, new.y, new.initParam, new.properties,
-                new.extra1, new.extra2, new.extra3, origX = old.x, origY = old.y)
-        )
+        val newEc = EnemyChange("update", new.id, new.x, new.y, new.initParam, new.properties,
+            new.extra1, new.extra2, new.extra3, origX = old.x, origY = old.y)
+        project.getOrCreateRoom(currentRoomId).enemyChanges.add(newEc)
+
+        val oldEc = EnemyChange("update", old.id, old.x, old.y, old.initParam, old.properties,
+            old.extra1, old.extra2, old.extra3, origX = old.x, origY = old.y)
+        val name = RomParser.enemyName(new.id)
+        val op = EditOperation("Update $name", enemyUpdates = listOf(EnemyUpdate(oldEc, newEc)))
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         dirty = true
         editVersion++
     }
@@ -1608,6 +1628,13 @@ class EditorState {
         if (newValue != _originalScrolls[idx]) {
             roomEdits.scrollChanges.add(ScrollChange(screenX, screenY, _originalScrolls[idx], newValue))
         }
+
+        val scrollName = when (newValue) { 0 -> "Red"; 1 -> "Blue"; 2 -> "Green"; else -> "0x${newValue.toString(16)}" }
+        val sc = ScrollChange(screenX, screenY, oldValue, newValue)
+        val op = EditOperation("Scroll ($screenX,$screenY) → $scrollName", scrollEdits = listOf(sc))
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
         scrollVersion++
         dirty = true
     }
@@ -1689,15 +1716,67 @@ class EditorState {
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
         val op = undoStack.removeAt(undoStack.lastIndex)
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+
+        // Undo tile edits
         for (edit in op.edits.reversed()) {
             writeBlockWord(edit.blockX, edit.blockY, edit.oldBlockWord)
             writeBts(edit.blockX, edit.blockY, edit.oldBts)
         }
+        if (op.edits.isNotEmpty() && roomEdits.operations.isNotEmpty())
+            roomEdits.operations.removeAt(roomEdits.operations.lastIndex)
+
+        // Undo PLM adds (reverse = remove them)
+        for (plm in op.plmAdds) {
+            _workingPlms.removeAll { it.id == plm.plmId && it.x == plm.x && it.y == plm.y && it.param == plm.param }
+            roomEdits.plmChanges.add(PlmChange("remove", plm.plmId, plm.x, plm.y, plm.param))
+        }
+        // Undo PLM removes (reverse = re-add them)
+        for (plm in op.plmRemoves) {
+            _workingPlms.add(RomParser.PlmEntry(plm.plmId, plm.x, plm.y, plm.param))
+            roomEdits.plmChanges.add(PlmChange("add", plm.plmId, plm.x, plm.y, plm.param))
+        }
+
+        // Undo enemy adds
+        for (ec in op.enemyAdds) {
+            _workingEnemies.removeAll { it.id == ec.enemyId && it.x == ec.x && it.y == ec.y }
+            roomEdits.enemyChanges.add(EnemyChange("remove", ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3, origX = ec.x, origY = ec.y))
+        }
+        // Undo enemy removes
+        for (ec in op.enemyRemoves) {
+            _workingEnemies.add(RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3))
+            roomEdits.enemyChanges.add(EnemyChange("add", ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3))
+        }
+        // Undo enemy updates (swap back to old)
+        for (eu in op.enemyUpdates) {
+            val idx = _workingEnemies.indexOfFirst { it.id == eu.new.enemyId && it.x == eu.new.x && it.y == eu.new.y }
+            if (idx >= 0) {
+                val o = eu.old
+                _workingEnemies[idx] = RomParser.EnemyEntry(o.enemyId, o.x, o.y, o.initParam, o.properties, o.extra1, o.extra2, o.extra3)
+                roomEdits.enemyChanges.add(EnemyChange("update", o.enemyId, o.x, o.y, o.initParam, o.properties,
+                    o.extra1, o.extra2, o.extra3, origX = eu.new.x, origY = eu.new.y))
+            }
+        }
+
+        // Undo scroll edits
+        for (sc in op.scrollEdits) {
+            val roomWidthScreens = workingBlocksWide / 16
+            val scrollIdx = sc.screenY * roomWidthScreens + sc.screenX
+            if (scrollIdx in _workingScrolls.indices) {
+                _workingScrolls[scrollIdx] = sc.oldValue
+                roomEdits.scrollChanges.removeAll { it.screenX == sc.screenX && it.screenY == sc.screenY }
+                if (sc.oldValue != _originalScrolls.getOrElse(scrollIdx) { sc.oldValue }) {
+                    roomEdits.scrollChanges.add(ScrollChange(sc.screenX, sc.screenY, _originalScrolls[scrollIdx], sc.oldValue))
+                }
+                scrollVersion++
+            }
+        }
+
         redoStack.add(op)
         undoVersion++
-        val roomEdits = project.rooms[project.roomKey(currentRoomId)]
-        if (roomEdits != null && roomEdits.operations.isNotEmpty())
-            roomEdits.operations.removeAt(roomEdits.operations.lastIndex)
         dirty = true
         editVersion++
         return true
@@ -1706,13 +1785,66 @@ class EditorState {
     fun redo(): Boolean {
         if (redoStack.isEmpty()) return false
         val op = redoStack.removeAt(redoStack.lastIndex)
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+
+        // Redo tile edits
         for (edit in op.edits) {
             writeBlockWord(edit.blockX, edit.blockY, edit.newBlockWord)
             writeBts(edit.blockX, edit.blockY, edit.newBts)
         }
+        if (op.edits.isNotEmpty()) roomEdits.operations.add(op)
+
+        // Redo PLM adds
+        for (plm in op.plmAdds) {
+            _workingPlms.add(RomParser.PlmEntry(plm.plmId, plm.x, plm.y, plm.param))
+            roomEdits.plmChanges.add(PlmChange("add", plm.plmId, plm.x, plm.y, plm.param))
+        }
+        // Redo PLM removes
+        for (plm in op.plmRemoves) {
+            _workingPlms.removeAll { it.id == plm.plmId && it.x == plm.x && it.y == plm.y && it.param == plm.param }
+            roomEdits.plmChanges.add(PlmChange("remove", plm.plmId, plm.x, plm.y, plm.param))
+        }
+
+        // Redo enemy adds
+        for (ec in op.enemyAdds) {
+            _workingEnemies.add(RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3))
+            roomEdits.enemyChanges.add(EnemyChange("add", ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3))
+        }
+        // Redo enemy removes
+        for (ec in op.enemyRemoves) {
+            _workingEnemies.removeAll { it.id == ec.enemyId && it.x == ec.x && it.y == ec.y }
+            roomEdits.enemyChanges.add(EnemyChange("remove", ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties,
+                ec.extra1, ec.extra2, ec.extra3, origX = ec.x, origY = ec.y))
+        }
+        // Redo enemy updates
+        for (eu in op.enemyUpdates) {
+            val idx = _workingEnemies.indexOfFirst { it.id == eu.old.enemyId && it.x == eu.old.x && it.y == eu.old.y }
+            if (idx >= 0) {
+                val n = eu.new
+                _workingEnemies[idx] = RomParser.EnemyEntry(n.enemyId, n.x, n.y, n.initParam, n.properties, n.extra1, n.extra2, n.extra3)
+                roomEdits.enemyChanges.add(EnemyChange("update", n.enemyId, n.x, n.y, n.initParam, n.properties,
+                    n.extra1, n.extra2, n.extra3, origX = eu.old.x, origY = eu.old.y))
+            }
+        }
+
+        // Redo scroll edits
+        for (sc in op.scrollEdits) {
+            val roomWidthScreens = workingBlocksWide / 16
+            val scrollIdx = sc.screenY * roomWidthScreens + sc.screenX
+            if (scrollIdx in _workingScrolls.indices) {
+                _workingScrolls[scrollIdx] = sc.newValue
+                roomEdits.scrollChanges.removeAll { it.screenX == sc.screenX && it.screenY == sc.screenY }
+                if (sc.newValue != _originalScrolls.getOrElse(scrollIdx) { sc.newValue }) {
+                    roomEdits.scrollChanges.add(ScrollChange(sc.screenX, sc.screenY, _originalScrolls[scrollIdx], sc.newValue))
+                }
+                scrollVersion++
+            }
+        }
+
         undoStack.add(op)
         undoVersion++
-        project.getOrCreateRoom(currentRoomId).operations.add(op)
         dirty = true
         editVersion++
         return true

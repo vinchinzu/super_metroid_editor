@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +37,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Popup
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -787,6 +790,82 @@ fun MapCanvas(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+
+                        // ─── Room warnings ────────────────────────────
+                        val warnings = remember(editorState.editVersion) {
+                            val w = mutableListOf<String>()
+                            val plms = editorState.workingPlms
+                            val uniqueItemTypes = plms
+                                .filter { RomParser.isItemPlm(it.id) }
+                                .map { it.id }
+                                .distinct()
+                                .size
+                            if (uniqueItemTypes > 5) {
+                                w.add("$uniqueItemTypes unique item types in room (SNES limit ~5). Item sprites may display incorrectly in-game.")
+                            }
+                            val totalPlms = plms.size
+                            if (totalPlms > 48) {
+                                w.add("$totalPlms PLMs in room. High PLM counts may cause instability.")
+                            }
+                            val totalEnemies = editorState.workingEnemies.size
+                            if (totalEnemies > 24) {
+                                w.add("$totalEnemies enemies in room. High enemy counts may cause slowdown or instability.")
+                            }
+                            w
+                        }
+                        if (warnings.isNotEmpty()) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            var warningPopupExpanded by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(
+                                    onClick = { warningPopupExpanded = !warningPopupExpanded },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Warning,
+                                        contentDescription = "Warnings",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color(0xFFE6A700)
+                                    )
+                                }
+                                if (warningPopupExpanded) {
+                                    Popup(
+                                        alignment = Alignment.TopEnd,
+                                        onDismissRequest = { warningPopupExpanded = false },
+                                        offset = IntOffset(0, 32)
+                                    ) {
+                                        Surface(
+                                            shape = MaterialTheme.shapes.medium,
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            shadowElevation = 8.dp,
+                                            modifier = Modifier.widthIn(max = 340.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text("Room Warnings", fontSize = 12.sp,
+                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                    Text("✕", modifier = Modifier.clickable { warningPopupExpanded = false }.padding(4.dp),
+                                                        fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                                for (warning in warnings) {
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Icon(Icons.Default.Warning, contentDescription = null,
+                                                            modifier = Modifier.size(14.dp),
+                                                            tint = Color(0xFFE6A700))
+                                                        Text(warning, fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -876,10 +955,21 @@ fun MapCanvas(
                                     .fillMaxSize()
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
-                                        val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
+                                        val isZoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
                                         val sd = event.changes.first().scrollDelta
-                                        if (zoom) zoomState.value = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.25f, 4f)
-                                        else coroutineScope.launch {
+                                        if (isZoom) {
+                                            val mousePos = event.changes.first().position
+                                            val contentXBefore = (hScrollState.value + mousePos.x) / zoomLevel
+                                            val contentYBefore = (vScrollState.value + mousePos.y) / zoomLevel
+                                            val newZoom = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.25f, 4f)
+                                            zoomState.value = newZoom
+                                            coroutineScope.launch {
+                                                val newScrollX = (contentXBefore * newZoom - mousePos.x).toInt().coerceAtLeast(0)
+                                                val newScrollY = (contentYBefore * newZoom - mousePos.y).toInt().coerceAtLeast(0)
+                                                hScrollState.scrollTo(newScrollX)
+                                                vScrollState.scrollTo(newScrollY)
+                                            }
+                                        } else coroutineScope.launch {
                                             hScrollState.scrollTo((hScrollState.value + sd.x).toInt().coerceIn(0, hScrollState.maxValue))
                                             vScrollState.scrollTo((vScrollState.value + sd.y).toInt().coerceIn(0, vScrollState.maxValue))
                                         }
@@ -1860,6 +1950,62 @@ fun MapCanvas(
                                                         },
                                                         modifier = Modifier.height(28.dp)
                                                     )
+                                                }
+                                            }
+                                        }
+
+                                        // Add Door Cap button + dropdown
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        var addDoorCapExpanded by remember { mutableStateOf(false) }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                    .clickable { addDoorCapExpanded = true },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = MaterialTheme.colorScheme.tertiaryContainer
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("+ Add Door Cap", fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = addDoorCapExpanded,
+                                                onDismissRequest = { addDoorCapExpanded = false }
+                                            ) {
+                                                val doorColors = listOf("Blue", "Red", "Green", "Yellow", "Grey")
+                                                for (color in doorColors) {
+                                                    val caps = RomParser.DOOR_CAP_PLMS.filter { it.color == color }
+                                                    Text(color, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                    for (cap in caps) {
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                                    val dotColor = when (cap.color) {
+                                                                        "Blue" -> Color(0xFF3880D0)
+                                                                        "Red" -> Color(0xFFD05050)
+                                                                        "Green" -> Color(0xFF40C048)
+                                                                        "Yellow" -> Color(0xFFD8C830)
+                                                                        else -> Color(0xFF808088)
+                                                                    }
+                                                                    Box(Modifier.size(10.dp).background(dotColor, MaterialTheme.shapes.extraSmall))
+                                                                    Text("${cap.direction}", fontSize = 11.sp)
+                                                                }
+                                                            },
+                                                            onClick = {
+                                                                addDoorCapExpanded = false
+                                                                editorState.addPlm(cap.plmId, propsBlockX, propsBlockY, 0x0000)
+                                                            },
+                                                            modifier = Modifier.height(28.dp)
+                                                        )
+                                                    }
+                                                    if (color != doorColors.last()) Divider()
                                                 }
                                             }
                                         }

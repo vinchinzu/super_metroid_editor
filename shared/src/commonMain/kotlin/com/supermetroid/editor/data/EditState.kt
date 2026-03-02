@@ -17,13 +17,25 @@ data class TileEdit(
 )
 
 /**
- * A single undoable operation: one or more tile edits applied together.
- * E.g. a paint stroke or a fill is one operation with many tile edits.
+ * A single undoable operation: one or more tile edits applied together,
+ * optionally combined with PLM and enemy changes.
  */
 @Serializable
 data class EditOperation(
     val description: String,
-    val edits: List<TileEdit>
+    val edits: List<TileEdit> = emptyList(),
+    val plmAdds: List<PlmChange> = emptyList(),
+    val plmRemoves: List<PlmChange> = emptyList(),
+    val enemyAdds: List<EnemyChange> = emptyList(),
+    val enemyRemoves: List<EnemyChange> = emptyList(),
+    val enemyUpdates: List<EnemyUpdate> = emptyList(),
+    val scrollEdits: List<ScrollChange> = emptyList(),
+)
+
+@Serializable
+data class EnemyUpdate(
+    val old: EnemyChange,
+    val new: EnemyChange
 )
 
 /**
