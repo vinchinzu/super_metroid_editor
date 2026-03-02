@@ -942,6 +942,27 @@ class RomParser(internal val romData: ByteArray) {
         fun itemNameForPlm(plmId: Int): String? = plmToItemName[plmId]
         fun isItemPlm(plmId: Int): Boolean = plmId in plmToItemName
 
+        private val EXPANSION_ITEM_NAMES = setOf("Energy Tank", "Missile", "Super Missile", "Power Bomb")
+
+        private val upgradeItemPlmIds: Set<Int> = buildSet {
+            for (item in ITEM_DEFS) {
+                if (item.name !in EXPANSION_ITEM_NAMES) {
+                    add(item.chozoId); add(item.visibleId); add(item.hiddenId)
+                }
+            }
+        }
+
+        /**
+         * Upgrade items (Bombs through Reserve Tank) use instruction $8764 to dynamically
+         * load graphics into one of 4 CRE VRAM slots (metatiles 0x8E-0x95). The slot
+         * counter at $7E:1C2D cycles 0→2→4→6 via AND #$0006, so only 4 unique upgrade
+         * item graphics can coexist per room. The 5th overwrites the 1st.
+         *
+         * Expansion items (ETank, Missile, Super, PBomb) use hardcoded CRE metatiles
+         * (0x4A-0x51) and do NOT consume these slots.
+         */
+        fun isUpgradeItemPlm(plmId: Int): Boolean = plmId in upgradeItemPlmIds
+
         // ─── Station / special PLM catalog ──────────────────────────
         data class StationPlmDef(val name: String, val shortLabel: String, val plmId: Int, val defaultParam: Int)
 

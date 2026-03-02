@@ -233,6 +233,89 @@ Gate patterns are 1×4 tiles (the gate extends downward from the PLM position).
 
 ---
 
+## Item PLM Graphics System (bank $84)
+
+Item PLMs display their sprites using CRE tile table entries and VRAM tile data.
+There are two distinct categories with different rendering mechanisms:
+
+### Expansion Items (ETank, Missile, Super Missile, Power Bomb)
+
+Use **hardcoded CRE metatiles** that are always present in VRAM. No dynamic loading.
+
+| Item           | Frame 0 metatile | Frame 1 metatile | DF0C value |
+|----------------|-----------------|-----------------|------------|
+| Energy Tank    | 0x4A            | 0x4B            | 0x08       |
+| Missile        | 0x4C            | 0x4D            | 0x0A       |
+| Super Missile  | 0x4E            | 0x4F            | 0x0C       |
+| Power Bomb     | 0x50            | 0x51            | 0x0E       |
+
+Their setup routines ($EE4D-$EE5C) store fixed DF0C values and use direct draw data
+pointers in their instruction streams. **No slot limit.**
+
+### Upgrade Items (Bombs through Reserve Tank — 17 types)
+
+Use instruction `$8764` to DMA custom 8×8 tile graphics from bank `$89` into
+the last 2 rows of CRE VRAM, and write tile table entries for metatiles 0x8E-0x95.
+
+**Slot allocation** — `$84:8764` uses counter `$7E:1C2D`:
+```
+$8764: LDA $1C2D       ; current slot (0, 2, 4, or 6)
+       STA $7EDF0C,X   ; assign to this PLM
+       ...
+       INC A
+       INC A           ; next slot
+       AND #$0006      ; wrap: 0→2→4→6→0→2→4→6...
+       STA $1C2D       ; store back
+```
+
+| Slot | $1C2D | Frame 0 metatile | Frame 1 metatile | VRAM dest  |
+|------|-------|-----------------|-----------------|------------|
+| 0    | 0     | 0x8E            | 0x8F            | $3E00      |
+| 1    | 2     | 0x90            | 0x91            | $3E80      |
+| 2    | 4     | 0x92            | 0x93            | $3F00      |
+| 3    | 6     | 0x94            | 0x95            | $3F80      |
+
+The `AND #$0006` hard-codes a **4-slot limit**. The 5th upgrade item PLM wraps
+to slot 0 and overwrites the 1st item's graphics. The draw pointer tables at
+`$84:E05F` (frame 0) and `$84:E077` (frame 1) each contain exactly 4 entries.
+
+Items still **function correctly** when collected (PLM ID and param are unaffected) —
+only the visual sprite is wrong.
+
+### Graphics source (bank $89)
+
+Each upgrade item's `$8764` argument points to its 8×8 tile data in bank `$89`:
+
+| Item           | Bank $89 ptr | Palette bytes                    |
+|----------------|-------------|----------------------------------|
+| Bombs          | $8000       | 00 00 00 00 00 00 00 00          |
+| Gravity Suit   | $8100       | 00 00 00 00 00 00 00 00          |
+| Spring Ball    | $8200       | 00 00 00 00 00 00 00 00          |
+| Varia Suit     | $8300       | 00 00 00 00 00 00 00 00          |
+| Hi-Jump Boots  | $8400       | 00 00 00 00 00 00 00 00          |
+| Screw Attack   | $8500       | 00 00 00 00 00 00 00 00          |
+| Space Jump     | $8600       | 00 00 00 00 00 00 00 00          |
+| Morph Ball     | $8700       | 00 00 00 00 00 00 00 00          |
+| Grapple Beam   | $8800       | 00 00 00 00 00 00 00 00          |
+| X-Ray Scope    | $8900       | 01 01 00 00 03 03 00 00          |
+| Speed Booster  | $8A00       | 00 00 00 00 00 00 00 00          |
+| Charge Beam    | $8B00       | 00 00 00 00 00 00 00 00          |
+| Ice Beam       | $8C00       | 00 03 00 00 00 03 00 00          |
+| Wave Beam      | $8D00       | 00 02 00 00 00 02 00 00          |
+| Plasma Beam    | $8E00       | 00 01 00 00 00 01 00 00          |
+| Spazer         | $8F00       | 00 00 00 00 00 00 00 00          |
+| Reserve Tank   | $9000       | 00 00 00 00 00 00 00 00          |
+
+### CRE VRAM reservation (MapRandomizer context)
+
+MapRandomizer's `load_plms_early.asm` explicitly skips the last 2 CRE rows during
+door transitions to avoid clobbering item PLM graphics:
+- Ordinary rooms: load `$1C` rows (28 of 32), reserving 4 8×8-tile rows for items
+- Kraid's Room: loads all `$20` rows (no items allowed)
+- `validate_bts.py` flags metatiles 0x8E-0x95 as overwritable by item PLMs
+
+---
+
 ## Door-Out Table (bank $8F)
 
 Pointed to by room header bytes 9-10. Contains a list of 2-byte pointers

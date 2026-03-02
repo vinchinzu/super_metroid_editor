@@ -795,13 +795,18 @@ fun MapCanvas(
                         val warnings = remember(editorState.editVersion) {
                             val w = mutableListOf<String>()
                             val plms = editorState.workingPlms
-                            val uniqueItemTypes = plms
-                                .filter { RomParser.isItemPlm(it.id) }
+                            val upgradeItemCount = plms.count { RomParser.isUpgradeItemPlm(it.id) }
+                            val uniqueUpgradeTypes = plms
+                                .filter { RomParser.isUpgradeItemPlm(it.id) }
                                 .map { it.id }
                                 .distinct()
                                 .size
-                            if (uniqueItemTypes > 5) {
-                                w.add("$uniqueItemTypes unique item types in room (SNES limit ~5). Item sprites may display incorrectly in-game.")
+                            if (uniqueUpgradeTypes > 4) {
+                                w.add("$uniqueUpgradeTypes unique upgrade items in room (engine limit: 4 graphics slots). " +
+                                    "Items will display incorrect sprites. Expansion items (ETank/Missile/Super/PBomb) are unaffected.")
+                            } else if (upgradeItemCount > 4 && uniqueUpgradeTypes > 1) {
+                                w.add("$upgradeItemCount upgrade item PLMs with $uniqueUpgradeTypes unique types (4 graphics slots). " +
+                                    "Graphics may cycle unexpectedly between items.")
                             }
                             val totalPlms = plms.size
                             if (totalPlms > 48) {
