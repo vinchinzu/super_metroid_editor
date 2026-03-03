@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
@@ -735,6 +736,7 @@ fun MapCanvas(
                                 tint = if (editorState.redoStack.isNotEmpty()) MaterialTheme.colorScheme.onSurface
                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                         }
+
                         
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -770,6 +772,52 @@ fun MapCanvas(
                                 modifier = Modifier.size(16.dp),
                                 tint = if (editorState.brush != null) MaterialTheme.colorScheme.onSurface
                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        }
+
+                        // ─── Save Picture ────────────────────────────────
+                        if (renderData != null) {
+                            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                            val coroutineScopeForSave = rememberCoroutineScope()
+                            IconButton(
+                                onClick = {
+                                    coroutineScopeForSave.launch {
+                                        val roomName = room?.name?.replace(Regex("[^A-Za-z0-9_-]"), "_") ?: "room"
+                                        val chooser = javax.swing.JFileChooser().apply {
+                                            dialogTitle = "Save Map as PNG"
+                                            selectedFile = java.io.File("$roomName.png")
+                                            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("PNG Image", "png")
+                                        }
+                                        if (chooser.showSaveDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                            var file = chooser.selectedFile
+                                            if (!file.name.endsWith(".png", ignoreCase = true)) file = java.io.File(file.path + ".png")
+                                            val rd = renderData!!
+                                            val es = editorState
+                                            val rh = room?.let { romParser.readRoomHeader(it.getRoomIdAsInt()) }
+                                            val rWidthScreens = rh?.width ?: 0
+                                            val rHeightScreens = rh?.height ?: 0
+                                            val scrollDataForSave = rh?.let { romParser.parseScrollData(it.roomScrollsPtr, it.width, it.height) }
+                                            val activeOvs = overlayToggles.filter { it.value }.keys
+                                            val img = if (es != null && es.workingLevelData != null && rh != null) {
+                                                val edited = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(rh, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
+                                                if (edited != null) buildCompositeImage(edited, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens)
+                                                else buildCompositeImage(rd, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens)
+                                            } else {
+                                                buildCompositeImage(rd, activeOvs, showGrid, scrollDataForSave, rWidthScreens, rHeightScreens)
+                                            }
+                                            ImageIO.write(img, "PNG", file)
+                                        }
+                                    }
+                                    mapFocusReq.requestFocus()
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.SaveAlt,
+                                    contentDescription = "Save map as PNG",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
@@ -881,6 +929,7 @@ fun MapCanvas(
                             }
                         }
                     }
+
                 }
                 
                 // ─── Map Display ─────────────────────────────────────
