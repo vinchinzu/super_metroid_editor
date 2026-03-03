@@ -6,6 +6,11 @@ plugins {
 // ─── Native libspc build ────────────────────────────────────────────────
 // Compiles blargg's snes_spc (tools/snes_spc submodule) into a shared
 // library and places it in the JNA resource path for the current platform.
+//
+// macOS: builds a universal (fat) binary covering arm64 + x86_64 so that
+// the packaged .app works on both Apple Silicon and Intel Macs.  The same
+// fat dylib is written to both darwin-aarch64/ and darwin-x86-64/ because
+// JNA selects the resource directory based on the JVM's reported arch.
 
 fun detectJnaPlatformDir(): String {
     val osName = System.getProperty("os.name").lowercase()
@@ -44,7 +49,14 @@ val buildNativeSpc = tasks.register("buildNativeSpc") {
 
     inputs.dir(spcSourceDir.resolve("snes_spc"))
     inputs.file(spcSourceDir.resolve("Makefile"))
-    outputs.file(nativeOutputDir.resolve(libName))
+    // On macOS we output to both arch dirs (fat binary)
+    val osNameCfg = System.getProperty("os.name").lowercase()
+    if (osNameCfg.contains("mac") || osNameCfg.contains("darwin")) {
+        outputs.file(file("src/jvmMain/resources/darwin-aarch64/$libName"))
+        outputs.file(file("src/jvmMain/resources/darwin-x86-64/$libName"))
+    } else {
+        outputs.file(nativeOutputDir.resolve(libName))
+    }
 
     doLast {
         if (!spcSourceDir.resolve("Makefile").exists()) {
@@ -53,8 +65,9 @@ val buildNativeSpc = tasks.register("buildNativeSpc") {
         }
 
         val osName = System.getProperty("os.name").lowercase()
+        val isMac = osName.contains("mac") || osName.contains("darwin")
         val dynlibExt = when {
-            osName.contains("mac") || osName.contains("darwin") -> ".dylib"
+            isMac -> ".dylib"
             osName.contains("win") -> ".dll"
             else -> ".so"
         }
@@ -68,16 +81,35 @@ val buildNativeSpc = tasks.register("buildNativeSpc") {
         exec {
             workingDir = spcSourceDir
             val args = mutableListOf("make", "DYNLIB_EXT=$dynlibExt")
+            if (isMac) {
+                // Build a universal (fat) binary so the .app works on both
+                // Apple Silicon (arm64) and Intel (x86_64) Macs.
+                args.add("EXTRA_CXXFLAGS=-arch arm64 -arch x86_64")
+                args.add("EXTRA_LDFLAGS=-arch arm64 -arch x86_64")
+            }
             if (osName.contains("win")) {
                 args.add("DYNLIB_PREFIX=")
             }
             commandLine(args)
         }
 
-        nativeOutputDir.mkdirs()
         val builtLib = spcSourceDir.resolve("${if (osName.contains("win")) "" else "lib"}spc$dynlibExt")
-        builtLib.copyTo(nativeOutputDir.resolve(libName), overwrite = true)
-        logger.lifecycle("Built $libName -> $nativeOutputDir/$libName")
+
+        if (isMac) {
+            // Copy the fat binary into both JNA platform resource dirs so
+            // JNA finds it regardless of whether the JVM reports aarch64 or x86-64.
+            val arm64Dir = file("src/jvmMain/resources/darwin-aarch64")
+            val x64Dir   = file("src/jvmMain/resources/darwin-x86-64")
+            arm64Dir.mkdirs()
+            x64Dir.mkdirs()
+            builtLib.copyTo(arm64Dir.resolve(libName), overwrite = true)
+            builtLib.copyTo(x64Dir.resolve(libName), overwrite = true)
+            logger.lifecycle("Built universal $libName -> darwin-aarch64/ and darwin-x86-64/")
+        } else {
+            nativeOutputDir.mkdirs()
+            builtLib.copyTo(nativeOutputDir.resolve(libName), overwrite = true)
+            logger.lifecycle("Built $libName -> $nativeOutputDir/$libName")
+        }
     }
 }
 
