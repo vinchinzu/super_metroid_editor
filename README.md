@@ -24,8 +24,8 @@ Tile Editor
 Patches
 
 <p>
-  <img src="screenshots/smedit_patches_beams.png" width="54%" alt="Patches" />
-  <img src="screenshots/smedit_patches_boss_stats.png" width="44%" alt="Patches" />
+  <img src="screenshots/smedit_patches_beams.png" width="44%" alt="Patches" />
+  <img src="screenshots/smedit_patches_boss_stats.png" width="54%" alt="Patches" />
 </p>
 
 
@@ -33,7 +33,7 @@ Misc
 
 <p>
   <img src="screenshots/smedit_slopes.png" width="54%" alt="Slopes" />
-  <img src="screenshots/smedit_sounds.png" width="44%" alt="Sound" />
+  <img src="screenshots/smedit_sound.png" width="44%" alt="Sound" />
 </p>
 
 
