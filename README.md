@@ -3,12 +3,39 @@
 The MS Paint of Super Metroid ROM hacking. A native cross-platform desktop editor built with Kotlin/Compose.
 
 <p>
-  <img src="screenshots/smedit_01.png" width="54%" alt="Room Editor" />
-  <img src="screenshots/smedit_03.png" width="44%" alt="Tileset Editor" />
+  <img src="screenshots/smedit_spike_olympics_landing_site.png" width="54%" alt="Room Editor" />
+  <img src="screenshots/smedit_spike_olympics_landing_site_with_meta.png" width="44%" alt="Room Editor" />
 </p>
+
+Exported Room Images
+
 <p>
-  <img src="screenshots/smedit_02.png" width="60%" alt="Sound Editor" />
+  <img src="screenshots/Landing_Site.png" width="54%" alt="Room Export" />
+  <img src="screenshots/Landing_Site_With_Meta.png" width="44%" alt="Room Export" />
 </p>
+
+Tile Editor
+
+<p>
+  <img src="screenshots/smedit_tile_editor.png" width="54%" alt="Tile Editor" />
+  <img src="screenshots/smedit_tile_pixel_editor.png" width="44%" alt="Tile Editor" />
+</p>
+
+Patches
+
+<p>
+  <img src="screenshots/smedit_patches_beams.png" width="54%" alt="Patches" />
+  <img src="screenshots/smedit_patches_boss_stats.png" width="44%" alt="Patches" />
+</p>
+
+
+Misc
+
+<p>
+  <img src="screenshots/smedit_slopes.png" width="54%" alt="Slopes" />
+  <img src="screenshots/smedit_sounds.png" width="44%" alt="Sound" />
+</p>
+
 
 ## Features
 
