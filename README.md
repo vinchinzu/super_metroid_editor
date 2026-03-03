@@ -24,8 +24,8 @@ Tile Editor
 Patches
 
 <p>
-  <img src="screenshots/smedit_patches_beams.png" width="44%" alt="Patches" />
-  <img src="screenshots/smedit_patches_boss_stats.png" width="54%" alt="Patches" />
+  <img src="screenshots/smedit_patches_beams.png" width="64%" alt="Patches" />
+  <img src="screenshots/smedit_patches_boss_stats.png" width="34%" alt="Patches" />
 </p>
 
 
