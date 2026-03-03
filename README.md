@@ -3,15 +3,15 @@
 The MS Paint of Super Metroid ROM hacking. A native cross-platform desktop editor built with Kotlin/Compose.
 
 <p>
-  <img src="screenshots/smedit_spike_olympics_landing_site.png" width="54%" alt="Room Editor" />
-  <img src="screenshots/smedit_spike_olympics_landing_site_with_meta.png" width="44%" alt="Room Editor" />
+  <img src="screenshots/smedit_spike_olympics_landing_site.png" width="49%" alt="Room Editor" />
+  <img src="screenshots/smedit_spike_olympics_landing_site_with_meta.png" width="49%" alt="Room Editor" />
 </p>
 
 Exported Room Images
 
 <p>
-  <img src="screenshots/Landing_Site.png" width="54%" alt="Room Export" />
-  <img src="screenshots/Landing_Site_With_Meta.png" width="44%" alt="Room Export" />
+  <img src="screenshots/Landing_Site.png" width="49%" alt="Room Export" />
+  <img src="screenshots/Landing_Site_With_Meta.png" width="49%" alt="Room Export" />
 </p>
 
 Tile Editor
@@ -24,8 +24,8 @@ Tile Editor
 Patches
 
 <p>
-  <img src="screenshots/smedit_patches_beams.png" width="64%" alt="Patches" />
-  <img src="screenshots/smedit_patches_boss_stats.png" width="34%" alt="Patches" />
+  <img src="screenshots/smedit_patches_beams.png" width="60%" alt="Patches" />
+  <img src="screenshots/smedit_patches_boss_stats.png" width="38%" alt="Patches" />
 </p>
 
 
