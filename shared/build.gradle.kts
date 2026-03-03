@@ -82,10 +82,11 @@ val buildNativeSpc = tasks.register("buildNativeSpc") {
             workingDir = spcSourceDir
             val args = mutableListOf("make", "DYNLIB_EXT=$dynlibExt")
             if (isMac) {
-                // Build a universal (fat) binary so the .app works on both
-                // Apple Silicon (arm64) and Intel (x86_64) Macs.
-                args.add("EXTRA_CXXFLAGS=-arch arm64 -arch x86_64")
-                args.add("EXTRA_LDFLAGS=-arch arm64 -arch x86_64")
+                // Inject -arch flags by overriding CXX directly.  Make expands
+                // $(CXX) by simple text substitution so this injects the flags
+                // into both compile and link steps without any Makefile changes
+                // (the submodule Makefile is unmodified in CI).
+                args.add("CXX=c++ -arch arm64 -arch x86_64")
             }
             if (osName.contains("win")) {
                 args.add("DYNLIB_PREFIX=")
