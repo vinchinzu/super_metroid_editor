@@ -19,5 +19,45 @@ SM Source / Binary Documentation:
 - **LoROM formula**: `PC = ((bank & 0x7F) * 0x8000) + (snesOffset - 0x8000)`
 - **Enemy species headers**: 64 bytes at `$A0:xxxxxx`; HP at +4 (u16 LE), damage at +6, width at +8, height at +10
 - **Boss AI**: Kraid + Phantoon in bank `$A7`; Ridley + Draygon in other banks
-- **Enemy graphics sets**: Pointed to by `enemyGfxPtr` in room state data (offset +10)
+- **Enemy graphics sets**: Pointed to by `enemyGfxPtr` in room state data (offset +10); species list in bank `$B4`
 - **Pre-rendered enemy sprite PNGs**: `desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`
+
+## Enemy Species Header (64-byte DNA at bank $A0)
+
+Key fields for the sprite editor:
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| +$00 | 2 | tileDataSize | Decompressed tile bytes needed for this species |
+| +$02 | 2 | palPtr | Palette pointer (16-bit, used with aiBank) |
+| +$04 | 2 | HP | |
+| +$06 | 2 | Damage | |
+| +$08 | 2 | Width | Hitbox half-width in pixels |
+| +$0A | 2 | Height | Hitbox half-height in pixels |
+| +$0C | 1 | aiBank | Bank for AI routines AND palette data |
+| +$14 | 2 | parts | Number of sub-pieces (0 = 1 part) |
+| +$36 | 2 | GRAPHADR offset | 16-bit LE offset of compressed tile data |
+| +$38 | 1 | GRAPHADR bank | Bank byte for compressed tile data |
+| +$39 | 1 | Layer control | 02=front, 05=behind Samus, 0B=behind BG |
+| +$3A | 2 | Drop chances ptr | Bank $B4 |
+| +$3C | 2 | Resistances ptr | Bank $B4 |
+| +$3E | 2 | Name ptr | Bank $B4 |
+
+### Palette formula
+`palette_data = $(aiBank):(palPtr + 0x20)` — 32 bytes of BGR555 colors.
+
+### Tile data loading
+`GRAPHADR = $(bank at +$38):(offset at +$36-37)` points to an LZ5-compressed block.
+The game decompresses the full block but only loads the first `tileDataSize` bytes for this species.
+Multiple enemies can share the same GRAPHADR block with different tileDataSizes.
+Bosses (Phantoon, etc.) may use separate DMA-based tile loading instead of GRAPHADR.
+
+## External References
+
+- **Kejardon's docs**: https://patrickjohnston.org/ASM/ROM%20data/Super%20Metroid/Kejardon's%20docs/
+- **Patrick Johnston bank logs**: https://patrickjohnston.org/bank/8F (also /B4, /A0, etc.)
+- **Metroid Construction wiki**: https://wiki.metroidconstruction.com/
+- **EnemyData.txt** (Kejardon): Full 64-byte species header format
+- **VG Resource SM ripping project**: https://archive.vg-resource.com/thread-23505.html — GRAPHADR discovery, tilemap format, frame pointer arrays
+- **SM decompilation (snesrev/sm)**: ~/code/sm/ — C structs for DoorDef, PlmSetup, etc.
+- **SPC sound data**: `SpcData.KNOWN_TRACKS` maps songSet+playIndex to track names

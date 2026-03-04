@@ -1618,10 +1618,6 @@ fun MapCanvas(
                                                     fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
                                             } else {
                                                 val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                                val fieldStyle = LocalTextStyle.current.copy(
-                                                    fontSize = 10.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
 
                                                 // Helper: 0x00–0xFF dropdown
                                                 @Composable

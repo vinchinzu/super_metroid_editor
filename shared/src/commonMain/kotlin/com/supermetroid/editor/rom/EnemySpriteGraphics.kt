@@ -137,6 +137,50 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             return Triple(tileSize, hp, damage)
         }
 
+        /**
+         * Read the GRAPHADR (graphics address) from a species header.
+         * Located at species header +$36 (16-bit LE offset) and +$38 (bank byte).
+         * This points to LZ5-compressed tile data. The game decompresses the full
+         * block but only loads the first `tileDataSize` bytes for this species.
+         *
+         * @return SpriteBlock with pcAddress, snesAddress, and tileDataSize, or null
+         */
+        fun readGraphicsBlock(romParser: RomParser, speciesId: Int): SpriteBlock? {
+            val rom = romParser.getRomData()
+            val pc = romParser.snesToPc(0xA00000 or speciesId)
+            if (pc < 0 || pc + 0x39 > rom.size) return null
+            val gfxOffset = (rom[pc + 0x36].toInt() and 0xFF) or
+                ((rom[pc + 0x37].toInt() and 0xFF) shl 8)
+            val gfxBank = rom[pc + 0x38].toInt() and 0xFF
+            if (gfxBank == 0 && gfxOffset == 0) return null
+            val snesAddr = (gfxBank shl 16) or gfxOffset
+            val pcAddr = romParser.snesToPc(snesAddr)
+            if (pcAddr < 0 || pcAddr >= rom.size) return null
+            return SpriteBlock(pcAddr, snesAddr, 0, "Tiles")
+        }
+
+        /**
+         * Load and render enemy tile data directly from ROM using GRAPHADR.
+         * Decompresses the full block, then truncates to tileDataSize.
+         * @return raw 4bpp tile bytes (tileDataSize bytes) or null
+         */
+        fun loadEnemyTileData(romParser: RomParser, speciesId: Int): ByteArray? {
+            val stats = readSpeciesStats(romParser, speciesId) ?: return null
+            val tileDataSize = stats.first
+            if (tileDataSize <= 0) return null
+            val block = readGraphicsBlock(romParser, speciesId) ?: return null
+            return try {
+                val fullData = romParser.decompressLZ5AtPc(block.pcAddress)
+                if (fullData.size >= tileDataSize) {
+                    fullData.copyOf(tileDataSize)
+                } else {
+                    fullData
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         /** Extract a ≤16-color palette from an ARGB pixel array (index 0 = transparent). */
         fun extractPaletteFromArgb(pixels: IntArray): IntArray {
             val palette = IntArray(16)

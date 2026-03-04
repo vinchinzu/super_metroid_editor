@@ -78,6 +78,34 @@ class EnemyGfxSetTest {
     }
 
     @Test
+    fun `loadEnemyTileData returns correct sized tile data from GRAPHADR`() {
+        val parser = loadTestRom() ?: return
+
+        val enemies = listOf(
+            0xDCFF to "Zoomer",
+            0xDC7F to "Zeela",
+            0xD93F to "Sidehopper",
+            0xD7FF to "Skree",
+            0xCFFF to "Cacatac",
+        )
+
+        for ((speciesId, name) in enemies) {
+            val stats = EnemySpriteGraphics.readSpeciesStats(parser, speciesId)
+            assertNotNull(stats, "$name stats should not be null")
+            val expectedSize = stats!!.first
+
+            val tileData = EnemySpriteGraphics.loadEnemyTileData(parser, speciesId)
+            assertNotNull(tileData, "$name tile data should not be null")
+            assertEquals(expectedSize, tileData!!.size,
+                "$name tile data should be $expectedSize bytes, got ${tileData.size}")
+
+            val nonZero = tileData.count { it.toInt() != 0 }
+            assertTrue(nonZero > expectedSize / 10,
+                "$name tile data should have substantial non-zero content, got $nonZero/$expectedSize")
+        }
+    }
+
+    @Test
     fun `B4 GFX set format is 4-byte entries terminated by FFFF`() {
         val parser = loadTestRom() ?: return
         val rom = parser.getRomData()

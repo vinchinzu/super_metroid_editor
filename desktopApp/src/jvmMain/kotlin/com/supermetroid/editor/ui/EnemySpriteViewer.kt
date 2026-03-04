@@ -40,13 +40,15 @@ fun EnemySpriteViewer(
     val palette = remember(entry.speciesId) {
         EnemySpriteGraphics.readEnemyPalette(rp, entry.speciesId)
     }
-    val tileBlocks = EnemySpriteGraphics.ENEMY_TILE_BLOCKS[entry.speciesId]
+    val gfxBlock = remember(entry.speciesId) {
+        EnemySpriteGraphics.readGraphicsBlock(rp, entry.speciesId)
+    }
 
     val tileSheet = remember(entry.speciesId) {
-        if (tileBlocks == null) return@remember null
+        val pal = palette ?: return@remember null
+        val tileData = EnemySpriteGraphics.loadEnemyTileData(rp, entry.speciesId) ?: return@remember null
         val gfx = EnemySpriteGraphics(rp)
-        if (!gfx.load(tileBlocks)) return@remember null
-        val pal = palette ?: EnemySpriteGraphics.PHANTOON_PALETTE
+        gfx.loadFromRaw(listOf(tileData))
         gfx.renderSheet(pal)
     }
 
@@ -85,8 +87,11 @@ fun EnemySpriteViewer(
                     InfoRow("Tile Data Size", "$tileSize bytes (${tileSize / 32} tiles)")
                 }
 
-                val hasTiles = tileBlocks != null
-                InfoRow("Tile Editing", if (hasTiles) "Supported" else "View only (tiles not yet mapped)")
+                if (gfxBlock != null) {
+                    val snesHex = "\$${(gfxBlock.snesAddress shr 16).toString(16).uppercase()}:" +
+                        "${(gfxBlock.snesAddress and 0xFFFF).toString(16).uppercase().padStart(4, '0')}"
+                    InfoRow("GFX Address", snesHex)
+                }
             }
         }
 
@@ -171,7 +176,7 @@ fun EnemySpriteViewer(
                         fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-        } else if (tileBlocks == null) {
+        } else {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(8.dp),
@@ -182,10 +187,10 @@ fun EnemySpriteViewer(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text("Tile editing coming soon",
+                    Text("Could not load tile data",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Enemy tile data addresses are loaded via room-specific DMA code.\n" +
-                        "Support for extracting and editing ${entry.name} tiles is planned.",
+                    Text("The GRAPHADR field in this enemy's species header may be invalid,\n" +
+                        "or the compressed tile data could not be decompressed.",
                         fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         lineHeight = 14.sp)
                 }
