@@ -1172,12 +1172,12 @@ class RomParser(internal val romData: ByteArray) {
             0xD13F to "Chozo Ball",
             0xD17F to "Chozo Statue",
             0xD1BF to "Chozo Statue (Golden)",
-            // ── Rinka / Boss parts ──
+            // ── Rinka / Norfair fire enemies ──
             0xD23F to "Rinka",
-            0xD2BF to "Kraid",
-            0xD2FF to "Kraid (ceiling spike)",
-            0xD33F to "Kraid (claw)",
-            0xD37F to "Kraid (belly spike)",
+            0xD2BF to "Squeept",
+            0xD2FF to "Geruta",
+            0xD33F to "Holtz",
+            0xD37F to "Holtz (variant)",
             0xD3BF to "Hiru",
             // ── Rippers ──
             0xD3FF to "Ripper II",
@@ -1240,13 +1240,21 @@ class RomParser(internal val romData: ByteArray) {
             0xE03F to "Kihunter (green)",
             0xE07F to "Hibashi",
             0xE0BF to "Puromi",
-            0xE0FF to "Evir",
-            // ── More bosses ──
+            0xE0FF to "Mini Kraid (belly spike)",
+            // ── Ridley / Puyo ──
             0xE13F to "Ceres Ridley",
             0xE17F to "Ridley",
             0xE1BF to "Puyo",
             0xE27F to "Zebetite",
-            0xE2FF to "Owtch",
+            // ── Kraid (species verified from room $A1:9EB5) ──
+            0xE2BF to "Kraid",
+            0xE2FF to "Kraid (upper body)",
+            0xE33F to "Kraid (belly spike 1)",
+            0xE37F to "Kraid (belly spike 2)",
+            0xE3BF to "Kraid (belly spike 3)",
+            0xE3FF to "Kraid (flying claw 1)",
+            0xE43F to "Kraid (flying claw 2)",
+            0xE47F to "Kraid (flying claw 3)",
             // ── Phantoon ──
             0xE4BF to "Phantoon",
             0xE4FF to "Phantoon (piece)",

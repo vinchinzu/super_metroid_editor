@@ -1,5 +1,6 @@
 package com.supermetroid.editor
 
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -36,6 +37,7 @@ import com.supermetroid.editor.ui.PatternThumbnailList
 import com.supermetroid.editor.ui.SoundListPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
+import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -184,7 +186,8 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound
+                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound, 4 = Sprites
+                var selectedSpritesBoss by remember { mutableStateOf(0) } // 0 = Phantoon
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
@@ -223,6 +226,10 @@ fun main() = application {
                                 Tab(selected = leftTab == 3, onClick = { leftTab = 3 },
                                     modifier = Modifier.height(32.dp)) {
                                     Text("Sound", fontSize = 11.sp)
+                                }
+                                Tab(selected = leftTab == 4, onClick = { leftTab = 4 },
+                                    modifier = Modifier.height(32.dp)) {
+                                    Text("Sprites", fontSize = 11.sp)
                                 }
                             }
 
@@ -370,6 +377,37 @@ fun main() = application {
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
+                                4 -> {
+                                    // Boss selector for sprite editing
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text("Bosses", fontSize = 12.sp,
+                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface)
+                                        Spacer(Modifier.height(4.dp))
+                                        val bosses = listOf("Phantoon")
+                                        bosses.forEachIndexed { idx, name ->
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth()
+                                                    .clickable { selectedSpritesBoss = idx },
+                                                color = if (selectedSpritesBoss == idx) MaterialTheme.colorScheme.primaryContainer
+                                                        else MaterialTheme.colorScheme.surface,
+                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(name, fontSize = 11.sp,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    color = if (selectedSpritesBoss == idx) MaterialTheme.colorScheme.onPrimaryContainer
+                                                            else MaterialTheme.colorScheme.onSurface)
+                                            }
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        Text("More bosses coming soon",
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                    }
+                                }
                             }
                             }
                         }
@@ -381,7 +419,7 @@ fun main() = application {
                         )
 
                         // ── Right canvas ──
-                        key(leftTab, tilesetSubTab) {
+                        key(leftTab, tilesetSubTab, selectedSpritesBoss) {
                         when (leftTab) {
                             0 -> MapCanvas(
                                 room = selectedRoom,
@@ -415,6 +453,11 @@ fun main() = application {
                                 romParser = romParser,
                                 editorState = editorState,
                                 soundEditorState = soundEditorState,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            4 -> PhantoonSpriteEditor(
+                                editorState = editorState,
+                                romParser = romParser,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }

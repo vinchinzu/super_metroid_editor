@@ -33,10 +33,14 @@ class BossStatsTest {
         val rom = parser.getRomData()
 
         val bossIds = listOf(
-            0xD2BF to "Kraid",
-            0xD33F to "Kraid Claw",
-            0xD2FF to "Kraid Ceiling Spike",
-            0xD37F to "Kraid Belly Spike",
+            0xE2BF to "Kraid",
+            0xE2FF to "Kraid (upper body)",
+            0xE33F to "Kraid (belly spike 1)",
+            0xE37F to "Kraid (belly spike 2)",
+            0xE3BF to "Kraid (belly spike 3)",
+            0xE3FF to "Kraid (flying claw 1)",
+            0xE43F to "Kraid (flying claw 2)",
+            0xE47F to "Kraid (flying claw 3)",
             0xE4BF to "Phantoon",
             0xE4FF to "Phantoon Flame 1",
             0xE53F to "Phantoon Flame 2",
@@ -75,7 +79,7 @@ class BossStatsTest {
         fun hp(id: Int): Int = readU16(rom, parser.snesToPc(0xA00000 or id) + 4)
         fun dmg(id: Int): Int = readU16(rom, parser.snesToPc(0xA00000 or id) + 6)
 
-        println("Kraid HP=${hp(0xD2BF)}, Damage=${dmg(0xD2BF)}")
+        println("Kraid HP=${hp(0xE2BF)}, Damage=${dmg(0xE2BF)}")
         println("Phantoon HP=${hp(0xE4BF)}, Damage=${dmg(0xE4BF)}")
         println("Ridley HP=${hp(0xE17F)}, Damage=${dmg(0xE17F)}")
         println("Draygon Body HP=${hp(0xDE3F)}, Damage=${dmg(0xDE3F)}")
@@ -87,10 +91,11 @@ class BossStatsTest {
         println("Golden Torizo HP=${hp(0xEF7F)}, Damage=${dmg(0xEF7F)}")
         println("Bomb Torizo HP=${hp(0xEEFF)}, Damage=${dmg(0xEEFF)}")
 
-        assertTrue(hp(0xD2BF) > 0, "Kraid should have HP")
-        assertTrue(hp(0xE4BF) > 0, "Phantoon should have HP")
-        assertTrue(hp(0xE17F) > 0, "Ridley should have HP")
-        assertTrue(hp(0xDE3F) > 0, "Draygon should have HP")
+        // Verify correct vanilla values
+        assertEquals(1000, hp(0xE2BF), "Kraid vanilla HP should be 1000 (species 0xE2BF, not 0xD2BF which is Squeept)")
+        assertEquals(2500, hp(0xE4BF), "Phantoon vanilla HP should be 2500")
+        assertEquals(18000, hp(0xE17F), "Ridley vanilla HP should be 18000")
+        assertEquals(6000, hp(0xDE3F), "Draygon vanilla HP should be 6000")
     }
 
     @Test
@@ -177,9 +182,12 @@ class BossStatsTest {
         val rom = parser.getRomData()
 
         val subEnemies = listOf(
-            0xD33F to "Kraid Claw",
-            0xD2FF to "Kraid Ceiling Spike",
-            0xD37F to "Kraid Belly Spike",
+            0xE33F to "Kraid Belly Spike 1",
+            0xE37F to "Kraid Belly Spike 2",
+            0xE3BF to "Kraid Belly Spike 3",
+            0xE3FF to "Kraid Flying Claw 1",
+            0xE43F to "Kraid Flying Claw 2",
+            0xE47F to "Kraid Flying Claw 3",
         )
 
         for ((id, name) in subEnemies) {

@@ -1356,10 +1356,10 @@ fun MapCanvas(
                                     onDismissRequest = { showSavePatternDialog = false },
                                     title = { Text("Save Selection as Pattern", fontSize = 14.sp) },
                                     text = {
-                                        OutlinedTextField(
+                                        AppOutlinedTextField(
                                             value = patName,
                                             onValueChange = { patName = it },
-                                            label = { Text("Pattern name") },
+                                            label = "Pattern name",
                                             singleLine = true,
                                             modifier = Modifier.fillMaxWidth()
                                         )
@@ -1618,7 +1618,10 @@ fun MapCanvas(
                                                     fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
                                             } else {
                                                 val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                                val fieldStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
+                                                val fieldStyle = LocalTextStyle.current.copy(
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
 
                                                 // Helper: 0x00–0xFF dropdown
                                                 @Composable
@@ -1691,15 +1694,23 @@ fun MapCanvas(
                                                             onDismissRequest = { destDropExpanded = false; destRoomSearch = "" },
                                                             modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
                                                         ) {
-                                                            OutlinedTextField(
-                                                                value = destRoomSearch,
-                                                                onValueChange = { destRoomSearch = it },
-                                                                placeholder = { Text("Search…", fontSize = 10.sp) },
-                                                                singleLine = true,
-                                                                textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                                    .fillMaxWidth().height(32.dp)
-                                                            )
+                                            OutlinedTextField(
+                                                value = destRoomSearch,
+                                                onValueChange = { destRoomSearch = it },
+                                                placeholder = { Text("Search…", fontSize = 10.sp) },
+                                                singleLine = true,
+                                                textStyle = LocalTextStyle.current.copy(
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    cursorColor = MaterialTheme.colorScheme.primary
+                                                ),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    .fillMaxWidth().height(32.dp)
+                                            )
                                                             val filteredRooms = if (destRoomSearch.isBlank()) rooms
                                                                 else rooms.filter { it.name.contains(destRoomSearch, ignoreCase = true) ||
                                                                     it.id.contains(destRoomSearch, ignoreCase = true) }
@@ -2168,14 +2179,16 @@ fun MapCanvas(
                                                         OutlinedTextField(
                                                             value = editX, onValueChange = { editX = it },
                                                             modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
                                                             singleLine = true
                                                         )
                                                         Text("Y:", fontSize = 9.sp)
                                                         OutlinedTextField(
                                                             value = editY, onValueChange = { editY = it },
                                                             modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
                                                             singleLine = true
                                                         )
                                                     }
@@ -2221,7 +2234,8 @@ fun MapCanvas(
                                                             OutlinedTextField(
                                                                 value = value, onValueChange = onValueChange,
                                                                 modifier = Modifier.weight(1f).height(30.dp),
-                                                                textStyle = LocalTextStyle.current.copy(fontSize = 9.sp),
+                                                                textStyle = LocalTextStyle.current.copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
                                                                 singleLine = true
                                                             )
                                                         }
@@ -2300,7 +2314,12 @@ fun MapCanvas(
                                                     onValueChange = { enemySearch = it },
                                                     placeholder = { Text("Search enemies…", fontSize = 10.sp) },
                                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).height(36.dp),
-                                                    textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
+                                                    textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                    colors = OutlinedTextFieldDefaults.colors(
+                                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                        cursorColor = MaterialTheme.colorScheme.primary
+                                                    ),
                                                     singleLine = true
                                                 )
                                                 val filtered = remember(enemySearch) {
