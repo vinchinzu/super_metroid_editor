@@ -115,4 +115,44 @@ class PhantoonSpriteMapTest {
             ((rom[headerPc + 0x13].toInt() and 0xFF) shl 8)
         assertEquals(0xCDF3, initAi, "Phantoon init AI should be \$CDF3")
     }
+
+    @Test
+    fun `dump Phantoon species header for spritemap analysis`() {
+        val paths = listOf(
+            "/Users/kenny/code/super_metroid_dev/test-resources/Super Metroid (JU) [!].smc",
+            "test-resources/Super Metroid (JU) [!].smc"
+        )
+        val parser = paths.map { File(it) }.firstOrNull { it.exists() }?.let { RomParser.loadRom(it.absolutePath) }
+            ?: run {
+                println("Test ROM not found, skipping")
+                assertTrue(true)
+                return
+            }
+        val rom = parser.getRomData()
+        val headerPc = parser.snesToPc(0xA0E4BF)
+
+        println("Phantoon species header at \$A0:E4BF (PC $headerPc), 64 bytes:")
+        for (row in 0 until 4) {
+            val base = row * 0x10
+            val hex = (0 until 16).map { i ->
+                String.format("%02X", rom[headerPc + base + i].toInt() and 0xFF)
+            }
+            val line = "+%02X: %s  %s".format(
+                base,
+                hex.take(8).joinToString(" "),
+                hex.drop(8).joinToString(" ")
+            )
+            println(line)
+        }
+
+        val word00 = (rom[headerPc + 0x00].toInt() and 0xFF) or ((rom[headerPc + 0x01].toInt() and 0xFF) shl 8)
+        val word02 = (rom[headerPc + 0x02].toInt() and 0xFF) or ((rom[headerPc + 0x03].toInt() and 0xFF) shl 8)
+        println("+0x00 (word LE): 0x%04X (potential pointer)".format(word00))
+        println("+0x02 (word LE): 0x%04X (potential pointer)".format(word02))
+
+        val word2C = (rom[headerPc + 0x2C].toInt() and 0xFF) or ((rom[headerPc + 0x2D].toInt() and 0xFF) shl 8)
+        println("+0x2C (word LE): 0x%04X (instruction list)".format(word2C))
+
+        assertTrue(true)
+    }
 }

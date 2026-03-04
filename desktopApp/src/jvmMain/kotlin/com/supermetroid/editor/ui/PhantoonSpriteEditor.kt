@@ -15,41 +15,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.supermetroid.editor.rom.PhantoonSpritemap
 import com.supermetroid.editor.rom.RomParser
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.image.BufferedImage
-import javax.imageio.ImageIO
-
-/**
- * One Phantoon body-component entry.
- * All 4 species ($E4BF, $E4FF, $E53F, $E57F) are overlaid body/component sprites
- * rendered simultaneously by the SNES PPU. They are NOT separate projectiles.
- * The "flame" projectiles Phantoon fires are dynamically spawned with different species IDs.
- */
-data class PhantoonSpriteComponent(
-    val speciesIdHex: String,
-    val label: String,
-    val description: String
-)
-
-val PHANTOON_SPRITE_COMPONENTS = listOf(
-    PhantoonSpriteComponent("E4BF", "Body",       "Main ghost body. 2500 HP, 40 contact dmg. Eye opens during figure-8."),
-    PhantoonSpriteComponent("E4FF", "Component 1","Body component overlay. Shares tile data with main body."),
-    PhantoonSpriteComponent("E53F", "Component 2","Body component overlay. Shares tile data with main body."),
-    PhantoonSpriteComponent("E57F", "Component 3","Body component overlay. Shares tile data with main body.")
-)
 
 private enum class SpriteEditorTab { COMPONENTS, TILE_SHEET }
 
-/**
- * Sprite editor for Phantoon.
- *
- * COMPONENTS tab: pre-rendered PNG per species (visual reference + import/export).
- * TILE SHEET tab: decoded ROM tile graphics from $B7:170F + $B7:1808 (actual edit surface).
- *
- * ROM export applies any tile-sheet edits to both blocks in bank $B7 via LZ5 re-compression.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhantoonSpriteEditor(
@@ -58,19 +31,19 @@ fun PhantoonSpriteEditor(
     modifier: Modifier = Modifier
 ) {
     var activeTab by remember { mutableStateOf(SpriteEditorTab.COMPONENTS) }
-    var selectedComponent by remember { mutableStateOf<PhantoonSpriteComponent?>(PHANTOON_SPRITE_COMPONENTS.first()) }
-    var editingComponent by remember { mutableStateOf<PhantoonSpriteComponent?>(null) }
+    var selectedDef by remember { mutableStateOf(PhantoonSpritemap.COMPONENT_TILEMAPS.first()) }
+
+    // Pixel editor state
     var editingPixels by remember { mutableStateOf<IntArray?>(null) }
     var editingWidth by remember { mutableStateOf(0) }
     var editingHeight by remember { mutableStateOf(0) }
     var editingPalette by remember { mutableStateOf<IntArray?>(null) }
     var editingLabel by remember { mutableStateOf("") }
     var editingIsTileSheet by remember { mutableStateOf(false) }
-    // Reference image: assembled sprite shown alongside the raw tile editor
+    var editingAssembledSprite by remember { mutableStateOf<PhantoonSpritemap.AssembledSprite?>(null) }
     var editingReference by remember { mutableStateOf<ImageBitmap?>(null) }
     var refreshKey by remember { mutableStateOf(0) }
 
-    // If the pixel editor is open, show it full-screen
     val ep = editingPixels
     if (ep != null) {
         SpritePixelEditor(
@@ -84,18 +57,20 @@ fun PhantoonSpriteEditor(
                 if (editingIsTileSheet) {
                     editorState.applyPhantoonTileSheetEdits(pixels, editingWidth, editingHeight)
                 } else {
-                    val ec = editingComponent
-                    if (ec != null) {
-                        editorState.saveEnemySpritePixels(ec.speciesIdHex, pixels, editingWidth, editingHeight)
+                    val rp = romParser
+                    val sprite = editingAssembledSprite
+                    if (rp != null && sprite != null) {
+                        editorState.applyPhantoonComponentEdits(rp, sprite, pixels)
                     }
                 }
                 refreshKey++
             },
             onClose = {
                 editingPixels = null
-                editingComponent = null
                 editingPalette = null
                 editingIsTileSheet = false
+                editingAssembledSprite = null
+                editingReference = null
             },
             modifier = modifier
         )
@@ -103,7 +78,6 @@ fun PhantoonSpriteEditor(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ── Top tab selector ──
         Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(
                 modifier = Modifier
@@ -118,7 +92,15 @@ fun PhantoonSpriteEditor(
                 FilterChip(
                     selected = activeTab == SpriteEditorTab.COMPONENTS,
                     onClick = { activeTab = SpriteEditorTab.COMPONENTS },
-                    label = { Text("Components", fontSize = 10.sp) },
+                    label = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Components", fontSize = 10.sp)
+                            Surface(color = Color(0xFF336633), shape = RoundedCornerShape(3.dp)) {
+                                Text("ROM", fontSize = 7.sp, color = Color(0xFF88FF88),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                            }
+                        }
+                    },
                     modifier = Modifier.height(28.dp)
                 )
                 FilterChip(
@@ -148,21 +130,21 @@ fun PhantoonSpriteEditor(
         when (activeTab) {
             SpriteEditorTab.COMPONENTS -> ComponentsTab(
                 editorState = editorState,
-                selectedComponent = selectedComponent,
-                onSelectComponent = { selectedComponent = it },
+                romParser = romParser,
+                selectedDef = selectedDef,
+                onSelectDef = { selectedDef = it },
                 refreshKey = refreshKey,
-                onEditPixels = { comp ->
-                    val result = editorState.getEnemySpritePixels(comp.speciesIdHex)
-                    if (result != null) {
-                        editingPixels = result.first
-                        editingWidth = result.second.first
-                        editingHeight = result.second.second
-                        editingPalette = null
-                        editingLabel = comp.label
-                        editingIsTileSheet = false
-                        editingComponent = comp
-                        editingReference = null
-                    }
+                onEditPixels = { def ->
+                    val rp = romParser ?: return@ComponentsTab
+                    val sprite = editorState.renderPhantoonComponent(rp, def) ?: return@ComponentsTab
+                    editingPixels = sprite.pixels.copyOf()
+                    editingWidth = sprite.width
+                    editingHeight = sprite.height
+                    editingPalette = editorState.getPhantoonPalette(rp)
+                    editingLabel = "Phantoon ${def.name}"
+                    editingIsTileSheet = false
+                    editingAssembledSprite = sprite
+                    editingReference = null
                 },
                 onRefresh = { refreshKey++ },
                 modifier = Modifier.weight(1f)
@@ -183,8 +165,8 @@ fun PhantoonSpriteEditor(
                         editingPalette = editorState.getSpriteSheetPalette()
                         editingLabel = "Phantoon Tile Sheet"
                         editingIsTileSheet = true
-                        editingComponent = null
-                        editingReference = buildReferenceImageBitmap(editorState)
+                        editingAssembledSprite = null
+                        editingReference = buildReferenceImageBitmap(editorState, romParser)
                     }
                 },
                 onRefresh = { refreshKey++ },
@@ -198,10 +180,11 @@ fun PhantoonSpriteEditor(
 @Composable
 private fun ComponentsTab(
     editorState: EditorState,
-    selectedComponent: PhantoonSpriteComponent?,
-    onSelectComponent: (PhantoonSpriteComponent) -> Unit,
+    romParser: RomParser?,
+    selectedDef: PhantoonSpritemap.ComponentDef,
+    onSelectDef: (PhantoonSpritemap.ComponentDef) -> Unit,
     refreshKey: Int,
-    onEditPixels: (PhantoonSpriteComponent) -> Unit,
+    onEditPixels: (PhantoonSpritemap.ComponentDef) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -214,21 +197,20 @@ private fun ComponentsTab(
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("Room: \$CD13 · AI: \$A7", fontSize = 9.sp,
+            Text("Room: \$CD13 · Tileset: 5 · AI: \$A7", fontSize = 9.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp))
-            Text("All 4 components share tile data in bank \$B7. " +
-                "Use the Tile Sheet tab to edit the actual ROM tiles.",
+            Text("BG2 tilemap components rendered from the room tileset. " +
+                "Editing a tile updates all instances of that tile.",
                 fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
             Divider()
             Spacer(Modifier.height(4.dp))
 
-            PHANTOON_SPRITE_COMPONENTS.forEach { comp ->
-                val isSelected = selectedComponent?.speciesIdHex == comp.speciesIdHex
-                val hasCustom = editorState.hasCustomEnemySprite(comp.speciesIdHex)
+            PhantoonSpritemap.COMPONENT_TILEMAPS.forEach { def ->
+                val isSelected = selectedDef.tilemapSnes == def.tilemapSnes
                 Surface(
-                    modifier = Modifier.fillMaxWidth().clickable { onSelectComponent(comp) },
+                    modifier = Modifier.fillMaxWidth().clickable { onSelectDef(def) },
                     color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                             else MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(6.dp)
@@ -238,16 +220,15 @@ private fun ComponentsTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        SpriteThumb(comp.speciesIdHex, editorState, refreshKey, size = 32)
+                        ComponentThumb(def, editorState, romParser, refreshKey, size = 32)
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(comp.label, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                            Text(def.name, fontSize = 10.sp, fontWeight = FontWeight.Medium,
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
                                         else MaterialTheme.colorScheme.onSurface)
-                            Text("\$${comp.speciesIdHex}", fontSize = 9.sp,
+                            Text("\$${def.tilemapSnes.toString(16).uppercase()}", fontSize = 9.sp,
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                                         else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (hasCustom) Text("●", fontSize = 8.sp, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -255,53 +236,39 @@ private fun ComponentsTab(
 
         Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
 
-        val sel = selectedComponent
-        if (sel == null) {
-            Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                Text("Select a sprite component", fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            ComponentDetailPanel(
-                component = sel,
-                editorState = editorState,
-                refreshKey = refreshKey,
-                onEditPixels = onEditPixels,
-                onRefresh = onRefresh,
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            )
-        }
+        ComponentDetailPanel(
+            def = selectedDef,
+            editorState = editorState,
+            romParser = romParser,
+            refreshKey = refreshKey,
+            onEditPixels = onEditPixels,
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f).fillMaxHeight()
+        )
     }
 }
 
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun ComponentDetailPanel(
-    component: PhantoonSpriteComponent,
+    def: PhantoonSpritemap.ComponentDef,
     editorState: EditorState,
+    romParser: RomParser?,
     refreshKey: Int,
-    onEditPixels: (PhantoonSpriteComponent) -> Unit,
+    onEditPixels: (PhantoonSpritemap.ComponentDef) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hasCustom = editorState.hasCustomEnemySprite(component.speciesIdHex)
-
     Column(modifier = modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SpriteThumb(component.speciesIdHex, editorState, refreshKey, size = 72)
+            ComponentThumb(def, editorState, romParser, refreshKey, size = 72)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(component.label, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                Text(def.name, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface)
-                Text("Species ID: \$${component.speciesIdHex}", fontSize = 11.sp,
+                Text("Tilemap: \$${def.tilemapSnes.toString(16).uppercase()}", fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(component.description, fontSize = 10.sp,
+                Text("Species: \$${def.speciesId}", fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (hasCustom) {
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(4.dp)) {
-                        Text("Custom PNG active", fontSize = 9.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
-                }
             }
         }
 
@@ -310,68 +277,123 @@ private fun ComponentDetailPanel(
             color = MaterialTheme.colorScheme.onSurface)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onEditPixels(component) }) { Text("Edit Preview", fontSize = 11.sp) }
+            Button(
+                onClick = { onEditPixels(def) },
+                enabled = romParser != null
+            ) { Text("Edit Pixels", fontSize = 11.sp) }
 
-            OutlinedButton(onClick = {
-                val dialog = FileDialog(null as Frame?, "Export Sprite PNG", FileDialog.SAVE)
-                dialog.file = "${component.speciesIdHex}.png"
-                dialog.isVisible = true
-                val file = dialog.file
-                if (file != null) {
-                    val path = if (file.endsWith(".png", ignoreCase = true)) "${dialog.directory}$file"
-                               else "${dialog.directory}$file.png"
-                    editorState.exportEnemySprite(component.speciesIdHex, path)
-                }
-            }) { Text("Export PNG", fontSize = 11.sp) }
-
-            OutlinedButton(onClick = {
-                val dialog = FileDialog(null as Frame?, "Import Sprite PNG", FileDialog.LOAD)
-                dialog.setFilenameFilter { _, name -> name.endsWith(".png", ignoreCase = true) }
-                dialog.isVisible = true
-                val file = dialog.file
-                if (file != null) {
-                    editorState.importEnemySprite(component.speciesIdHex, "${dialog.directory}$file")
-                    onRefresh()
-                }
-            }) { Text("Import PNG", fontSize = 11.sp) }
-
-            if (hasCustom) {
-                OutlinedButton(
-                    onClick = { editorState.resetEnemySprite(component.speciesIdHex); onRefresh() },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Reset", fontSize = 11.sp) }
-            }
+            OutlinedButton(
+                onClick = {
+                    val rp = romParser ?: return@OutlinedButton
+                    val sprite = editorState.renderPhantoonComponent(rp, def) ?: return@OutlinedButton
+                    val dialog = FileDialog(null as Frame?, "Export ${def.name} PNG", FileDialog.SAVE)
+                    dialog.file = "phantoon_${def.name.lowercase().replace(" ", "_")}.png"
+                    dialog.isVisible = true
+                    val file = dialog.file
+                    if (file != null) {
+                        val path = if (file.endsWith(".png", ignoreCase = true)) "${dialog.directory}$file"
+                                   else "${dialog.directory}$file.png"
+                        val img = BufferedImage(sprite.width, sprite.height, BufferedImage.TYPE_INT_ARGB)
+                        img.setRGB(0, 0, sprite.width, sprite.height, sprite.pixels, 0, sprite.width)
+                        javax.imageio.ImageIO.write(img, "PNG", java.io.File(path))
+                    }
+                },
+                enabled = romParser != null
+            ) { Text("Export PNG", fontSize = 11.sp) }
         }
 
         Surface(
-            color = Color(0xFF2A2A1A),
+            color = Color(0xFF1A2A1A),
             shape = RoundedCornerShape(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Preview only \u2014 edits here update the display image but do NOT change the ROM. " +
-                "To modify in-game sprites, use the Tile Sheet tab.",
-                fontSize = 9.sp, color = Color(0xFFCCBB66),
+            Text("Assembled from ROM tileset tiles via BG2 tilemap. " +
+                "Pixel edits write back to the underlying 8x8 tiles \u2014 " +
+                "shared tiles update everywhere simultaneously.",
+                fontSize = 9.sp, color = Color(0xFF88CC88),
                 lineHeight = 12.sp,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
         }
 
         Divider()
 
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("ROM Info", fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface)
-                Text("Species header: \$A0:${component.speciesIdHex}  ·  AI bank: \$A7",
-                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Sprite tiles shared: \$B7:170F (37 tiles) + \$B7:1808 (41 tiles)",
-                    fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("All 4 Phantoon components overlay these same VRAM tiles.",
-                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+        // Large preview of the assembled sprite
+        val rp = romParser
+        if (rp != null) {
+            var spriteBitmap by remember(def.tilemapSnes, refreshKey) { mutableStateOf<ImageBitmap?>(null) }
+            LaunchedEffect(def.tilemapSnes, refreshKey) {
+                val sprite = editorState.renderPhantoonComponent(rp, def)
+                spriteBitmap = sprite?.let {
+                    val img = BufferedImage(it.width, it.height, BufferedImage.TYPE_INT_ARGB)
+                    img.setRGB(0, 0, it.width, it.height, it.pixels, 0, it.width)
+                    img.toComposeImageBitmap()
+                }
             }
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth()
+                    .background(Color(0xFF111122), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                val bm = spriteBitmap
+                if (bm != null) {
+                    Image(
+                        bitmap = bm,
+                        contentDescription = "Phantoon ${def.name}",
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .size((bm.width * 4).dp, (bm.height * 4).dp)
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Load a ROM to view sprites", fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComponentThumb(
+    def: PhantoonSpritemap.ComponentDef,
+    editorState: EditorState,
+    romParser: RomParser?,
+    refreshKey: Int,
+    size: Int
+) {
+    val bitmap by produceState<ImageBitmap?>(null, def.tilemapSnes, refreshKey) {
+        value = try {
+            val rp = romParser ?: return@produceState
+            val sprite = editorState.renderPhantoonComponent(rp, def) ?: return@produceState
+            val img = BufferedImage(sprite.width, sprite.height, BufferedImage.TYPE_INT_ARGB)
+            img.setRGB(0, 0, sprite.width, sprite.height, sprite.pixels, 0, sprite.width)
+            img.toComposeImageBitmap()
+        } catch (_: Exception) { null }
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!,
+            contentDescription = "Sprite ${def.name}",
+            modifier = Modifier
+                .size(size.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFF222244))
+        )
+    } else {
+        Box(
+            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFF222244)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("?", fontSize = (size / 3).sp, color = Color(0xFF666688))
         }
     }
 }
@@ -387,7 +409,6 @@ private fun TileSheetTab(
 ) {
     val hasCustom = editorState.hasCustomPhantoonTileSheet()
 
-    // Load and render the tile sheet in background
     var sheetBitmap by remember(refreshKey) { mutableStateOf<ImageBitmap?>(null) }
     var loadError by remember(refreshKey) { mutableStateOf<String?>(null) }
 
@@ -413,13 +434,13 @@ private fun TileSheetTab(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Phantoon Sprite Tile Sheet", fontSize = 15.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface)
-                Text("78 tiles total · Bank \$B7: 0x170F (37 tiles) + 0x1808 (41 tiles) · VRAM 0x0300/0x0380",
+                Text("78 tiles total \u00b7 Bank \$B7: 0x170F (37 tiles) + 0x1808 (41 tiles) \u00b7 VRAM 0x0300/0x0380",
                     fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("These tiles are shared by all 4 Phantoon species. Edits here are written to the ROM on export.",
                     fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (hasCustom) {
                     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(4.dp)) {
-                        Text("Custom tile data active — will patch ROM on export",
+                        Text("Custom tile data active \u2014 will patch ROM on export",
                             fontSize = 9.sp, color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     }
@@ -443,7 +464,6 @@ private fun TileSheetTab(
 
         Divider()
 
-        // Tile sheet preview
         Box(
             modifier = Modifier.weight(1f).fillMaxWidth()
                 .background(Color(0xFF111122), RoundedCornerShape(8.dp)),
@@ -462,13 +482,12 @@ private fun TileSheetTab(
                     }
                 }
                 else -> {
-                    androidx.compose.foundation.Image(
+                    Image(
                         bitmap = sheetBitmap!!,
                         contentDescription = "Phantoon tile sheet",
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            // Scale up 4× for visibility (each 8px tile → 32px)
                             .let { m ->
                                 val bm = sheetBitmap!!
                                 m.size((bm.width * 4).dp, (bm.height * 4).dp)
@@ -478,7 +497,6 @@ private fun TileSheetTab(
             }
         }
 
-        // Palette swatches (loaded after tile sheet load)
         val palette = editorState.getSpriteSheetPalette()
         if (palette != null) {
             Row(
@@ -502,56 +520,16 @@ private fun TileSheetTab(
     }
 }
 
-@Composable
-private fun SpriteThumb(
-    speciesIdHex: String,
-    editorState: EditorState,
-    refreshKey: Int,
-    size: Int
-) {
-    val bitmap by produceState<ImageBitmap?>(null, speciesIdHex, refreshKey) {
-        value = try {
-            val result = editorState.getEnemySpritePixels(speciesIdHex)
-            if (result != null) {
-                val (pixels, dims) = result
-                val img = BufferedImage(dims.first, dims.second, BufferedImage.TYPE_INT_ARGB)
-                img.setRGB(0, 0, dims.first, dims.second, pixels, 0, dims.first)
-                img.toComposeImageBitmap()
-            } else null
-        } catch (_: Exception) { null }
-    }
-
-    if (bitmap != null) {
-        androidx.compose.foundation.Image(
-            bitmap = bitmap!!,
-            contentDescription = "Sprite $speciesIdHex",
-            modifier = Modifier
-                .size(size.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF222244))
-        )
-    } else {
-        Box(
-            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF222244)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("?", fontSize = (size / 3).sp, color = Color(0xFF666688))
-        }
-    }
-}
-
 /**
- * Loads the assembled Phantoon body image (E4BF.png) and converts it to an ImageBitmap
- * for use as a reference panel in the tile sheet editor.
+ * Build a reference image (the assembled Phantoon body from ROM) for
+ * display alongside the raw tile sheet editor.
  */
-private fun buildReferenceImageBitmap(editorState: EditorState): ImageBitmap? {
-    val result = editorState.getEnemySpritePixels("E4BF") ?: return null
-    val (pixels, dims) = result
-    val (w, h) = dims
+private fun buildReferenceImageBitmap(editorState: EditorState, romParser: RomParser?): ImageBitmap? {
+    val rp = romParser ?: return null
+    val sprite = editorState.renderPhantoonComponent(rp, PhantoonSpritemap.COMPONENT_TILEMAPS[0]) ?: return null
     return try {
-        val bi = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-        bi.setRGB(0, 0, w, h, pixels, 0, w)
+        val bi = BufferedImage(sprite.width, sprite.height, BufferedImage.TYPE_INT_ARGB)
+        bi.setRGB(0, 0, sprite.width, sprite.height, sprite.pixels, 0, sprite.width)
         bi.toComposeImageBitmap()
     } catch (_: Exception) { null }
 }

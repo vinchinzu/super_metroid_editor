@@ -1694,22 +1694,13 @@ fun MapCanvas(
                                                             onDismissRequest = { destDropExpanded = false; destRoomSearch = "" },
                                                             modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
                                                         ) {
-                                            OutlinedTextField(
+                                            AppTextInput(
                                                 value = destRoomSearch,
                                                 onValueChange = { destRoomSearch = it },
-                                                placeholder = { Text("Search…", fontSize = 10.sp) },
-                                                singleLine = true,
-                                                textStyle = LocalTextStyle.current.copy(
-                                                    fontSize = 10.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                ),
-                                                colors = OutlinedTextFieldDefaults.colors(
-                                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                    cursorColor = MaterialTheme.colorScheme.primary
-                                                ),
+                                                placeholder = "Search…",
+                                                fontSize = 10.sp,
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                    .fillMaxWidth().height(32.dp)
+                                                    .fillMaxWidth()
                                             )
                                                             val filteredRooms = if (destRoomSearch.isBlank()) rooms
                                                                 else rooms.filter { it.name.contains(destRoomSearch, ignoreCase = true) ||
@@ -1794,7 +1785,7 @@ fun MapCanvas(
                                                     var distText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = distText,
                                                         onValueChange = { v ->
                                                             distText = v
@@ -1802,8 +1793,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
@@ -1840,7 +1831,7 @@ fun MapCanvas(
                                                     var scrollText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = scrollText,
                                                         onValueChange = { v ->
                                                             scrollText = v
@@ -1848,8 +1839,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(2.dp))
@@ -1858,7 +1849,7 @@ fun MapCanvas(
                                                     var asmText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = asmText,
                                                         onValueChange = { v ->
                                                             asmText = v
@@ -1866,8 +1857,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                             }
@@ -2176,20 +2167,16 @@ fun MapCanvas(
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text("X:", fontSize = 9.sp)
-                                                        OutlinedTextField(
+                                                        AppTextInput(
                                                             value = editX, onValueChange = { editX = it },
-                                                            modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
-                                                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
-                                                            singleLine = true
+                                                            modifier = Modifier.width(60.dp),
+                                                            fontSize = 10.sp, monospace = true
                                                         )
                                                         Text("Y:", fontSize = 9.sp)
-                                                        OutlinedTextField(
+                                                        AppTextInput(
                                                             value = editY, onValueChange = { editY = it },
-                                                            modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
-                                                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
-                                                            singleLine = true
+                                                            modifier = Modifier.width(60.dp),
+                                                            fontSize = 10.sp, monospace = true
                                                         )
                                                     }
                                                     Spacer(modifier = Modifier.height(4.dp))
@@ -2231,12 +2218,10 @@ fun MapCanvas(
                                                         ) {
                                                             Text(label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                                 modifier = Modifier.width(60.dp))
-                                                            OutlinedTextField(
+                                                            AppTextInput(
                                                                 value = value, onValueChange = onValueChange,
-                                                                modifier = Modifier.weight(1f).height(30.dp),
-                                                                textStyle = LocalTextStyle.current.copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface),
-                                                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface, cursorColor = MaterialTheme.colorScheme.primary),
-                                                                singleLine = true
+                                                                modifier = Modifier.weight(1f),
+                                                                fontSize = 9.sp, monospace = true, height = 28.dp
                                                             )
                                                         }
                                                     }
@@ -2309,18 +2294,12 @@ fun MapCanvas(
                                                 onDismissRequest = { addEnemyExpanded = false },
                                                 modifier = Modifier.requiredSizeIn(maxHeight = 400.dp, maxWidth = 250.dp)
                                             ) {
-                                                OutlinedTextField(
+                                                AppTextInput(
                                                     value = enemySearch,
                                                     onValueChange = { enemySearch = it },
-                                                    placeholder = { Text("Search enemies…", fontSize = 10.sp) },
-                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).height(36.dp),
-                                                    textStyle = LocalTextStyle.current.copy(fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface),
-                                                    colors = OutlinedTextFieldDefaults.colors(
-                                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                        cursorColor = MaterialTheme.colorScheme.primary
-                                                    ),
-                                                    singleLine = true
+                                                    placeholder = "Search enemies…",
+                                                    fontSize = 10.sp,
+                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
                                                 )
                                                 val filtered = remember(enemySearch) {
                                                     val q = enemySearch.trim().lowercase()

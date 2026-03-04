@@ -37,6 +37,7 @@ import com.supermetroid.editor.ui.PatternThumbnailList
 import com.supermetroid.editor.ui.SoundListPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
+import com.supermetroid.editor.ui.EnemySpriteViewer
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
@@ -187,7 +188,7 @@ fun main() = application {
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
                 var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound, 4 = Sprites
-                var selectedSpritesBoss by remember { mutableStateOf(0) } // 0 = Phantoon
+                var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
@@ -378,34 +379,35 @@ fun main() = application {
                                     )
                                 }
                                 4 -> {
-                                    // Boss selector for sprite editing
+                                    val entries = com.supermetroid.editor.rom.EnemySpriteGraphics.EDITOR_ENEMIES
+                                    val grouped = entries.groupBy { it.category }
                                     Column(
-                                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                                        modifier = Modifier.fillMaxSize().padding(8.dp)
+                                            .verticalScroll(rememberScrollState()),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Text("Bosses", fontSize = 12.sp,
-                                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                        Spacer(Modifier.height(4.dp))
-                                        val bosses = listOf("Phantoon")
-                                        bosses.forEachIndexed { idx, name ->
-                                            Surface(
-                                                modifier = Modifier.fillMaxWidth()
-                                                    .clickable { selectedSpritesBoss = idx },
-                                                color = if (selectedSpritesBoss == idx) MaterialTheme.colorScheme.primaryContainer
-                                                        else MaterialTheme.colorScheme.surface,
-                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text(name, fontSize = 11.sp,
-                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                                    color = if (selectedSpritesBoss == idx) MaterialTheme.colorScheme.onPrimaryContainer
-                                                            else MaterialTheme.colorScheme.onSurface)
+                                        for ((category, items) in grouped) {
+                                            Text(category, fontSize = 12.sp,
+                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface)
+                                            Spacer(Modifier.height(2.dp))
+                                            for (entry in items) {
+                                                val idx = entries.indexOf(entry)
+                                                Surface(
+                                                    modifier = Modifier.fillMaxWidth()
+                                                        .clickable { selectedSpriteIdx = idx },
+                                                    color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.primaryContainer
+                                                            else MaterialTheme.colorScheme.surface,
+                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(entry.name, fontSize = 11.sp,
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.onPrimaryContainer
+                                                                else MaterialTheme.colorScheme.onSurface)
+                                                }
                                             }
+                                            Spacer(Modifier.height(8.dp))
                                         }
-                                        Spacer(Modifier.height(8.dp))
-                                        Text("More bosses coming soon",
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
                                 }
                             }
@@ -419,7 +421,7 @@ fun main() = application {
                         )
 
                         // ── Right canvas ──
-                        key(leftTab, tilesetSubTab, selectedSpritesBoss) {
+                        key(leftTab, tilesetSubTab, selectedSpriteIdx) {
                         when (leftTab) {
                             0 -> MapCanvas(
                                 room = selectedRoom,
@@ -455,11 +457,24 @@ fun main() = application {
                                 soundEditorState = soundEditorState,
                                 modifier = Modifier.fillMaxSize()
                             )
-                            4 -> PhantoonSpriteEditor(
-                                editorState = editorState,
-                                romParser = romParser,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            4 -> {
+                                val entries = com.supermetroid.editor.rom.EnemySpriteGraphics.EDITOR_ENEMIES
+                                val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
+                                if (selected.speciesId == 0xE4BF) {
+                                    PhantoonSpriteEditor(
+                                        editorState = editorState,
+                                        romParser = romParser,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    EnemySpriteViewer(
+                                        entry = selected,
+                                        romParser = romParser,
+                                        editorState = editorState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
                         }
                         }
                     }

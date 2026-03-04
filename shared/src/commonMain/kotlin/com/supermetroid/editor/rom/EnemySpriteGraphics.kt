@@ -67,6 +67,76 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             0xffe80070.toInt()      // 15: bright pink
         )
 
+        /**
+         * Known tile block addresses for supported enemies.
+         * Each entry: species ID → list of SpriteBlocks.
+         */
+        val ENEMY_TILE_BLOCKS = mapOf(
+            0xE4BF to PHANTOON_BLOCKS,
+        )
+
+        /**
+         * Defined enemy entries that appear in the sprite editor.
+         * @param speciesId Species pointer in bank $A0
+         * @param name Display name
+         * @param category "Boss" or "Enemy"
+         */
+        data class EnemySpriteEntry(
+            val speciesId: Int,
+            val name: String,
+            val category: String = "Enemy"
+        )
+
+        val EDITOR_ENEMIES = listOf(
+            EnemySpriteEntry(0xE4BF, "Phantoon", "Boss"),
+            EnemySpriteEntry(0xDCFF, "Zoomer"),
+            EnemySpriteEntry(0xDC7F, "Zeela"),
+            EnemySpriteEntry(0xD93F, "Sidehopper"),
+            EnemySpriteEntry(0xD7FF, "Skree"),
+            EnemySpriteEntry(0xCFFF, "Cacatac"),
+        )
+
+        /**
+         * Read a 16-color ARGB palette from a species header.
+         * Palette address = $(aiBank):(palPtr + 0x20), where:
+         *   - aiBank is at species header +$0C
+         *   - palPtr is at species header +$02
+         */
+        fun readEnemyPalette(romParser: RomParser, speciesId: Int): IntArray? {
+            val rom = romParser.getRomData()
+            val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+            if (headerPc < 0 || headerPc + 0x0D > rom.size) return null
+            val palPtr = (rom[headerPc + 2].toInt() and 0xFF) or
+                ((rom[headerPc + 3].toInt() and 0xFF) shl 8)
+            val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
+            val palSnesAddr = (aiBank shl 16) or ((palPtr + 0x20) and 0xFFFF)
+            val palPc = romParser.snesToPc(palSnesAddr)
+            if (palPc < 0 || palPc + 32 > rom.size) return null
+
+            val pal = IntArray(16)
+            pal[0] = 0x00000000
+            for (i in 1 until 16) {
+                val bgr = (rom[palPc + i * 2].toInt() and 0xFF) or
+                    ((rom[palPc + i * 2 + 1].toInt() and 0xFF) shl 8)
+                pal[i] = snesColorToArgb(bgr)
+            }
+            return pal
+        }
+
+        /**
+         * Read species header stats.
+         * @return Triple(tileDataSize, hp, damage) or null
+         */
+        fun readSpeciesStats(romParser: RomParser, speciesId: Int): Triple<Int, Int, Int>? {
+            val rom = romParser.getRomData()
+            val pc = romParser.snesToPc(0xA00000 or speciesId)
+            if (pc < 0 || pc + 8 > rom.size) return null
+            val tileSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
+            val hp = (rom[pc + 4].toInt() and 0xFF) or ((rom[pc + 5].toInt() and 0xFF) shl 8)
+            val damage = (rom[pc + 6].toInt() and 0xFF) or ((rom[pc + 7].toInt() and 0xFF) shl 8)
+            return Triple(tileSize, hp, damage)
+        }
+
         /** Extract a ≤16-color palette from an ARGB pixel array (index 0 = transparent). */
         fun extractPaletteFromArgb(pixels: IntArray): IntArray {
             val palette = IntArray(16)
