@@ -1787,7 +1787,7 @@ class EditorState {
     fun getEnemiesNear(pixelX: Int, pixelY: Int, radius: Int = 16): List<RomParser.EnemyEntry> =
         _workingEnemies.filter { kotlin.math.abs(it.x - pixelX) < radius && kotlin.math.abs(it.y - pixelY) < radius }
 
-    fun addEnemy(enemyId: Int, pixelX: Int, pixelY: Int, initParam: Int = 0, properties: Int = 0x0800) {
+    fun addEnemy(enemyId: Int, pixelX: Int, pixelY: Int, initParam: Int = 0, properties: Int = 0x2800) {
         val entry = RomParser.EnemyEntry(enemyId, pixelX, pixelY, initParam, properties)
         _workingEnemies.add(entry)
         val ec = EnemyChange("add", enemyId, pixelX, pixelY, initParam, properties)
@@ -2347,6 +2347,21 @@ class EditorState {
         }
         enemyFreePtr++
 
+        // Free space allocator for bank $B4 (enemy GFX sets).
+        // Must be computed ONCE and incremented — rescanning per-room fails
+        // because written GFX data contains 0xFF (species IDs, FFFF terminator)
+        // and 0x00 (palette high bytes), which a rescan treats as free space,
+        // causing subsequent rooms to overwrite earlier relocated GFX sets.
+        val bankB4End = romParser.snesToPc(0xB4FFFF) + 1
+        val bankB4Start = romParser.snesToPc(0xB48000)
+        var gfxFreePtr = bankB4End
+        while (gfxFreePtr > bankB4Start) {
+            val b = romData[gfxFreePtr - 1].toInt() and 0xFF
+            if (b != 0xFF) break
+            gfxFreePtr--
+        }
+        gfxFreePtr++
+
         // Free space tracker for level data banks ($C0-$CE).
         // Each bank is scanned from the end to find trailing 0xFF padding.
         val levelBankFree = mutableMapOf<Int, Int>()  // bank -> next free PC offset
@@ -2580,7 +2595,7 @@ class EditorState {
             }
 
             // Patch enemy population
-            if (hasEnemyEdits && room.enemySetPtr != 0 && room.enemySetPtr != 0xFFFF) {
+            if (hasEnemyEdits && room.enemySetPtr != 0 && room.enemySetPtr != 0xFFFF) run enemyPatch@{
                 val originalEnemies = romParser.parseEnemyPopulation(room.enemySetPtr)
                 val modified = originalEnemies.toMutableList()
                 for (ec in roomEdits.enemyChanges) {
@@ -2603,10 +2618,12 @@ class EditorState {
                         }
                     }
                 }
-                // +2 for the FFFF terminator word
-                val originalSize = originalEnemies.size * 16 + 2
-                val newSize = modified.size * 16 + 2
                 val enemyPc = romParser.snesToPc(0xA10000 or room.enemySetPtr)
+                val killCountPc = enemyPc + originalEnemies.size * 16 + 2
+                val killCount = if (killCountPc < romData.size) romData[killCountPc] else 0
+                // +3 = FFFF terminator (2) + kill count byte (1)
+                val originalSize = originalEnemies.size * 16 + 3
+                val newSize = modified.size * 16 + 3
 
                 val writePc: Int
                 if (newSize <= originalSize) {
@@ -2627,8 +2644,8 @@ class EditorState {
                     }
                     println("Room 0x$roomKey: relocated enemy set to 0x${newSnes.toString(16)}")
                 } else {
-                    println("WARN: Room 0x$roomKey no free space for expanded enemy set — skipped")
-                    continue
+                    println("WARN: Room 0x$roomKey no free space for expanded enemy set — skipped enemy patch")
+                    return@enemyPatch
                 }
 
                 fun writeU16(offset: Int, value: Int) {
@@ -2642,20 +2659,90 @@ class EditorState {
                     writeU16(off + 2, e.x)
                     writeU16(off + 4, e.y)
                     writeU16(off + 6, e.initParam)
-                    writeU16(off + 8, e.properties)
+                    writeU16(off + 8, e.properties or 0x2000)
                     writeU16(off + 10, e.extra1)
                     writeU16(off + 12, e.extra2)
                     writeU16(off + 14, e.extra3)
                     off += 16
                 }
-                // Terminator: 0xFFFF at Species position
                 writeU16(off, 0xFFFF)
                 off += 2
-                // Zero any leftover space if writing in-place
+                romData[off] = killCount
+                off++
                 if (writePc == enemyPc) {
                     while (off < enemyPc + originalSize) { romData[off] = 0; off++ }
                 }
                 roomsPatched.add(roomKey)
+            }
+
+            // Patch enemy GFX set (bank $B4) — ensure all species in the
+            // FINAL population have GFX entries (max 4 per SNES hardware).
+            if (hasEnemyEdits && room.enemyGfxPtr != 0 && room.enemyGfxPtr != 0xFFFF) run gfxPatch@{
+                val gfxEntries = romParser.parseEnemyGfxSet(room.enemyGfxPtr)
+                val existingSpecies = gfxEntries.map { it.speciesId }.toSet()
+
+                val finalPopulation = romParser.parseEnemyPopulation(room.enemySetPtr).toMutableList()
+                for (ec in roomEdits.enemyChanges) {
+                    when (ec.action) {
+                        "add" -> finalPopulation.add(RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties))
+                        "remove" -> finalPopulation.removeAll { it.id == ec.enemyId && it.x == ec.origX && it.y == ec.origY }
+                    }
+                }
+                val finalSpecies = finalPopulation.map { it.id }.toSet()
+                val neededSpecies = finalSpecies.filter { it !in existingSpecies }
+                if (neededSpecies.isEmpty()) return@gfxPatch
+
+                val maxPalIdx = gfxEntries.maxOfOrNull { it.paletteIndex and 0xFF } ?: 0
+                val newEntries = gfxEntries.toMutableList()
+                var nextPal = maxPalIdx + 1
+                for (specId in neededSpecies) {
+                    if (newEntries.size >= 4) {
+                        println("WARN: Room 0x$roomKey GFX set already has ${newEntries.size} entries (SNES max 4) — skipping species 0x${specId.toString(16)}")
+                        continue
+                    }
+                    newEntries.add(RomParser.EnemyGfxEntry(specId, nextPal))
+                    println("Room 0x$roomKey: added species 0x${specId.toString(16)} to GFX set (palette=$nextPal)")
+                    nextPal++
+                }
+                if (newEntries.size == gfxEntries.size) return@gfxPatch
+
+                val gfxPc = romParser.snesToPc(0xB40000 or room.enemyGfxPtr)
+                val originalGfxSize = gfxEntries.size * 4 + 2
+                val newGfxSize = newEntries.size * 4 + 2
+
+                val writeGfxPc: Int
+                if (newGfxSize <= originalGfxSize) {
+                    writeGfxPc = gfxPc
+                } else if (gfxFreePtr + newGfxSize <= bankB4End) {
+                    writeGfxPc = gfxFreePtr
+                    gfxFreePtr += newGfxSize
+                    val newGfxSnes = romParser.pcToSnes(writeGfxPc)
+                    val newGfxOffset = newGfxSnes and 0xFFFF
+                    val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+                    for (stateOffset in allStateOffsets) {
+                        val existingPtr = (romData[stateOffset + 10].toInt() and 0xFF) or
+                                ((romData[stateOffset + 11].toInt() and 0xFF) shl 8)
+                        if (existingPtr == room.enemyGfxPtr) {
+                            romData[stateOffset + 10] = (newGfxOffset and 0xFF).toByte()
+                            romData[stateOffset + 11] = ((newGfxOffset shr 8) and 0xFF).toByte()
+                        }
+                    }
+                    println("Room 0x$roomKey: relocated GFX set to 0x${newGfxSnes.toString(16)}")
+                } else {
+                    println("WARN: Room 0x$roomKey no free space in bank \$B4 for expanded GFX set")
+                    return@gfxPatch
+                }
+
+                var goff = writeGfxPc
+                for (ge in newEntries) {
+                    romData[goff] = (ge.speciesId and 0xFF).toByte()
+                    romData[goff + 1] = ((ge.speciesId shr 8) and 0xFF).toByte()
+                    romData[goff + 2] = (ge.paletteIndex and 0xFF).toByte()
+                    romData[goff + 3] = ((ge.paletteIndex shr 8) and 0xFF).toByte()
+                    goff += 4
+                }
+                romData[goff] = 0xFF.toByte()
+                romData[goff + 1] = 0xFF.toByte()
             }
 
             // Patch scroll data

@@ -109,8 +109,27 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             val palPtr = (rom[headerPc + 2].toInt() and 0xFF) or
                 ((rom[headerPc + 3].toInt() and 0xFF) shl 8)
             val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
-            val palSnesAddr = (aiBank shl 16) or ((palPtr + 0x20) and 0xFFFF)
-            val palPc = romParser.snesToPc(palSnesAddr)
+
+            // Enemy palette blocks can have multiple 32-byte rows.
+            // Row 1 (+0x20) is the standard sprite palette in many enemies,
+            // but some have only 1 row. Detect by checking for valid BGR555:
+            // valid BGR555 values have bit 15 clear (max 0x7FFF).
+            val row1Snes = (aiBank shl 16) or ((palPtr + 0x20) and 0xFFFF)
+            val row1Pc = romParser.snesToPc(row1Snes)
+            val row1Valid = row1Pc >= 0 && row1Pc + 32 <= rom.size && run {
+                (0 until 16).all { i ->
+                    val w = (rom[row1Pc + i * 2].toInt() and 0xFF) or
+                        ((rom[row1Pc + i * 2 + 1].toInt() and 0xFF) shl 8)
+                    w <= 0x7FFF
+                }
+            }
+
+            val palPc = if (row1Valid) {
+                row1Pc
+            } else {
+                val row0Snes = (aiBank shl 16) or (palPtr and 0xFFFF)
+                romParser.snesToPc(row0Snes)
+            }
             if (palPc < 0 || palPc + 32 > rom.size) return null
 
             val pal = IntArray(16)

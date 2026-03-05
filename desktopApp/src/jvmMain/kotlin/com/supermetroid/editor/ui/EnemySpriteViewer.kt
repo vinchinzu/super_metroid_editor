@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.rom.EnemySpriteGraphics
+import com.supermetroid.editor.rom.EnemySpritemap
 import com.supermetroid.editor.rom.RomParser
 import java.awt.image.BufferedImage
 
@@ -44,11 +45,23 @@ fun EnemySpriteViewer(
         EnemySpriteGraphics.readGraphicsBlock(rp, entry.speciesId)
     }
 
+    val tileData = remember(entry.speciesId) {
+        EnemySpriteGraphics.loadEnemyTileData(rp, entry.speciesId)
+    }
+
+    val assembledSprite = remember(entry.speciesId) {
+        val pal = palette ?: return@remember null
+        val td = tileData ?: return@remember null
+        val smap = EnemySpritemap(rp)
+        val defaultSmap = smap.findDefaultSpritemap(entry.speciesId) ?: return@remember null
+        smap.renderSpritemap(defaultSmap, td, pal)
+    }
+
     val tileSheet = remember(entry.speciesId) {
         val pal = palette ?: return@remember null
-        val tileData = EnemySpriteGraphics.loadEnemyTileData(rp, entry.speciesId) ?: return@remember null
+        val td = tileData ?: return@remember null
         val gfx = EnemySpriteGraphics(rp)
-        gfx.loadFromRaw(listOf(tileData))
+        gfx.loadFromRaw(listOf(td))
         gfx.renderSheet(pal)
     }
 
@@ -129,6 +142,56 @@ fun EnemySpriteViewer(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Assembled sprite preview (OAM spritemap assembly)
+        if (assembledSprite != null) {
+            val scale = maxOf(4, minOf(8, 128 / maxOf(assembledSprite.width, assembledSprite.height)))
+            val dispW = assembledSprite.width * scale
+            val dispH = assembledSprite.height * scale
+            val bitmap = remember(assembledSprite) {
+                val img = BufferedImage(assembledSprite.width, assembledSprite.height, BufferedImage.TYPE_INT_ARGB)
+                img.setRGB(0, 0, assembledSprite.width, assembledSprite.height, assembledSprite.pixels, 0, assembledSprite.width)
+                img.toComposeImageBitmap()
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Sprite [Assembled]", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Divider(modifier = Modifier.padding(vertical = 2.dp))
+
+                    val checkerSize = 4
+                    Box(
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.size(dispW.dp, dispH.dp)) {
+                            for (cy in 0 until dispH step checkerSize) {
+                                for (cx in 0 until dispW step checkerSize) {
+                                    val isLight = ((cx / checkerSize) + (cy / checkerSize)) % 2 == 0
+                                    drawRect(
+                                        color = if (isLight) Color(0xFF3A3A4A) else Color(0xFF2A2A3A),
+                                        topLeft = androidx.compose.ui.geometry.Offset(cx.toFloat(), cy.toFloat()),
+                                        size = androidx.compose.ui.geometry.Size(checkerSize.toFloat(), checkerSize.toFloat())
+                                    )
+                                }
+                            }
+                        }
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "${entry.name} Assembled Sprite",
+                            modifier = Modifier.size(dispW.dp, dispH.dp),
+                            filterQuality = androidx.compose.ui.graphics.FilterQuality.None
+                        )
+                    }
+                    Text("${assembledSprite.width}×${assembledSprite.height}px • ${assembledSprite.spritemap.entries.size} OAM entries",
+                        fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

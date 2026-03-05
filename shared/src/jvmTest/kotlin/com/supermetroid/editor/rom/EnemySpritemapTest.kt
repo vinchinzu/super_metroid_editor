@@ -1,0 +1,131 @@
+package com.supermetroid.editor.rom
+
+import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Test
+import java.io.File
+
+class EnemySpritemapTest {
+
+    private fun loadTestRom(): RomParser? {
+        val paths = listOf(
+            "/Users/kenny/code/super_metroid_dev/test-resources/Super Metroid (JU) [!].smc",
+            "test-resources/Super Metroid (JU) [!].smc"
+        )
+        for (p in paths) {
+            val f = File(p)
+            if (f.exists()) return RomParser.loadRom(f.absolutePath)
+        }
+        return null
+    }
+
+    @Test
+    fun `parse Zoomer spritemap from instruction list`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val zoomerSmap = smap.findDefaultSpritemap(0xDCFF)
+        assertNotNull(zoomerSmap, "Should find Zoomer spritemap")
+        assertEquals(4, zoomerSmap!!.entries.size, "Zoomer spritemap should have 4 OAM entries")
+
+        val has16x16 = zoomerSmap.entries.any { it.is16x16 }
+        val has8x8 = zoomerSmap.entries.any { !it.is16x16 }
+        assertTrue(has16x16, "Zoomer should have 16x16 tiles")
+        assertTrue(has8x8, "Zoomer should have 8x8 tiles")
+
+        // Tile numbers should be in the 0x100-0x1FF range (name table 1)
+        for (entry in zoomerSmap.entries) {
+            assertTrue(entry.tileNum in 0x100..0x1FF,
+                "Tile number 0x${entry.tileNum.toString(16)} should be in name table 1")
+        }
+    }
+
+    @Test
+    fun `parse Cacatac spritemap via JSR following`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val cacSmap = smap.findDefaultSpritemap(0xCFFF)
+        assertNotNull(cacSmap, "Should find Cacatac spritemap")
+        assertTrue(cacSmap!!.entries.size >= 4,
+            "Cacatac should have at least 4 OAM entries (has ${cacSmap.entries.size})")
+    }
+
+    @Test
+    fun `parse Skree spritemap via alternate instruction format`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val skreeSmap = smap.findDefaultSpritemap(0xD7FF)
+        assertNotNull(skreeSmap, "Should find Skree spritemap")
+        assertEquals(4, skreeSmap!!.entries.size, "Skree spritemap should have 4 OAM entries")
+    }
+
+    @Test
+    fun `render assembled sprites for supported enemies`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val enemies = mapOf(
+            0xDCFF to "Zoomer",
+            0xDC7F to "Zeela",
+            0xD7FF to "Skree",
+            0xCFFF to "Cacatac",
+        )
+
+        for ((speciesId, name) in enemies) {
+            val defaultSmap = smap.findDefaultSpritemap(speciesId)
+            assertNotNull(defaultSmap, "$name: should find default spritemap")
+
+            val palette = EnemySpriteGraphics.readEnemyPalette(rp, speciesId)
+            assertNotNull(palette, "$name: should read palette")
+
+            val tileData = EnemySpriteGraphics.loadEnemyTileData(rp, speciesId)
+            assertNotNull(tileData, "$name: should load tile data")
+
+            val assembled = smap.renderSpritemap(defaultSmap!!, tileData!!, palette!!)
+            assertNotNull(assembled, "$name: should render assembled sprite")
+
+            assertTrue(assembled!!.width > 0, "$name: width should be positive")
+            assertTrue(assembled.height > 0, "$name: height should be positive")
+
+            val nonTransparent = assembled.pixels.count { (it ushr 24) and 0xFF > 0 }
+            assertTrue(nonTransparent > 0, "$name: should have visible pixels")
+            assertTrue(nonTransparent.toFloat() / (assembled.width * assembled.height) > 0.2f,
+                "$name: should have >20% fill rate (has ${nonTransparent * 100 / (assembled.width * assembled.height)}%)")
+        }
+    }
+
+    @Test
+    fun `find animation frames for Zoomer`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val frames = smap.findAnimationFrames(0xDCFF)
+        assertTrue(frames.size >= 3, "Zoomer should have at least 3 animation frames (has ${frames.size})")
+
+        for ((i, frame) in frames.withIndex()) {
+            assertTrue(frame.duration in 1..120,
+                "Frame $i duration ${frame.duration} should be in valid range")
+            assertTrue(frame.spritemap.entries.isNotEmpty(),
+                "Frame $i should have spritemap entries")
+        }
+    }
+
+    @Test
+    fun `spritemap OAM entry values are reasonable`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val zoomerSmap = smap.findDefaultSpritemap(0xDCFF) ?: return
+        for (entry in zoomerSmap.entries) {
+            assertTrue(entry.xOffset in -128..128,
+                "X offset ${entry.xOffset} should be in reasonable range")
+            assertTrue(entry.yOffset in -128..128,
+                "Y offset ${entry.yOffset} should be in reasonable range")
+            assertTrue(entry.palRow in 0..7,
+                "Palette row ${entry.palRow} should be 0-7")
+            assertTrue(entry.tileNum in 0..511,
+                "Tile number ${entry.tileNum} should be 0-511 (9-bit)")
+        }
+    }
+}

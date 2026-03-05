@@ -835,6 +835,32 @@ class RomParser(internal val romData: ByteArray) {
         return entries
     }
 
+    // ─── Enemy GFX set parsing (bank $B4) ───────────────────────────
+
+    data class EnemyGfxEntry(val speciesId: Int, val paletteIndex: Int)
+
+    /**
+     * Parse the enemy GFX set. The enemyGfxPtr (from state data offset +10)
+     * points directly to the first entry (past the 7-byte debug name).
+     * Each entry is 4 bytes: species ID (2) + palette index (2).
+     * Terminated by species ID = 0xFFFF.
+     */
+    fun parseEnemyGfxSet(enemyGfxPtr: Int): List<EnemyGfxEntry> {
+        if (enemyGfxPtr == 0 || enemyGfxPtr == 0xFFFF) return emptyList()
+        val snesAddr = 0xB40000 or enemyGfxPtr
+        var pc = snesToPc(snesAddr)
+        val entries = mutableListOf<EnemyGfxEntry>()
+        var safety = 0
+        while (pc + 3 < romData.size && safety < 16) {
+            val id = readUInt16At(pc)
+            if (id == 0xFFFF) break
+            entries.add(EnemyGfxEntry(id, readUInt16At(pc + 2)))
+            pc += 4
+            safety++
+        }
+        return entries
+    }
+
     // ─── Door entry parsing ──────────────────────────────────────────
 
     /**
@@ -1088,10 +1114,10 @@ class RomParser(internal val romData: ByteArray) {
 
         fun scrollPlmName(plmId: Int): String? = when (plmId) {
             0xB703 -> "Scroll trigger"
-            0xB63B -> "Scroll ext (right)"
-            0xB647 -> "Scroll ext (up)"
-            0xB63F -> "Scroll ext (left)"
-            0xB643 -> "Scroll ext (down)"
+            0xB63B -> "Scroll ext →"
+            0xB647 -> "Scroll ext ↑"
+            0xB63F -> "Scroll ext ←"
+            0xB643 -> "Scroll ext ↓"
             else -> null
         }
 
@@ -1111,10 +1137,16 @@ class RomParser(internal val romData: ByteArray) {
         }
 
         fun scrollValueLabel(v: Int): String = when (v) {
-            0x00 -> "Red"
-            0x01 -> "Blue"
-            0x02 -> "Green"
+            0x00 -> "Red (lock)"
+            0x01 -> "Blue (unlock)"
+            0x02 -> "Green (gate)"
             else -> "?$v"
+        }
+
+        fun formatScrollCommand(screenIdx: Int, scrollVal: Int, roomWidth: Int): String {
+            val col = screenIdx % roomWidth
+            val row = screenIdx / roomWidth
+            return "Screen ($col,$row) → ${scrollValueLabel(scrollVal)}"
         }
 
         // Door cap colors matching the in-game door shield appearance
@@ -1227,6 +1259,7 @@ class RomParser(internal val romData: ByteArray) {
             0xD5FF to "Door Shutter 2 (variant 3)",
             // ── Common enemies ──
             0xD63F to "Waver",
+            0xD67F to "Metaree",
             0xD6BF to "Fireflea",
             0xD6FF to "Skultera",
             0xD73F to "Elevator",
@@ -1252,6 +1285,7 @@ class RomParser(internal val romData: ByteArray) {
             0xDABF to "Dessgeega (large)",
             0xDB3F to "Bang",
             0xDB4F to "Ship",
+            0xDB7F to "Skree (Norfair)",
             0xDBBF to "Yard",
             0xDBCF to "Kago",
             0xDBFF to "Reflec",
@@ -1327,6 +1361,7 @@ class RomParser(internal val romData: ByteArray) {
             0xEC3F to "Mother Brain (phase 1)",
             0xEC7F to "Mother Brain (phase 2)",
             // ── Special / Remains ──
+            0xED3F to "Torizo Corpse",
             0xED7F to "Hopper (remains)",
             0xEEBF to "Big Metroid",
             0xEEFF to "Torizo",
@@ -1355,15 +1390,10 @@ class RomParser(internal val romData: ByteArray) {
             0xF753 to "Space Pirate Mk.III (Maridia)",
             0xF793 to "Space Pirate Mk.III (Tourian)",
 
-            // Ceres enemies
-            0xE0BF to "Ceres Falling Debris",
-            0xE0FF to "Ceres Small Debris",
-            0xE13F to "Ceres Ridley",
-            0xE17F to "Ridley (Boss)",
-            0xE1BF to "Puyo",
+            // Ceres-only species (shared IDs like E0BF/E0FF/E17F/E27F
+            // are already mapped above as their main-game names)
             0xE1FF to "Ceres Smoke/Steam",
             0xE23F to "Ceres Door FX",
-            0xE27F to "Ceres Elevator Platform",
         )
 
         fun enemyName(id: Int): String = ENEMY_NAMES[id] ?: "${id.toString(16).uppercase().padStart(4, '0')}"

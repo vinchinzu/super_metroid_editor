@@ -1,0 +1,409 @@
+package com.supermetroid.editor.rom
+
+/**
+ * Parses OAM-based spritemaps for regular (non-boss) enemies and assembles
+ * them into renderable sprites.
+ *
+ * SM enemy sprites use OAM spritemaps stored in the enemy's AI bank.
+ * Each spritemap defines a list of OAM entries (8x8 or 16x16 tiles) at
+ * signed X/Y offsets from the enemy center.
+ *
+ * Spritemap format (per entry = 5 bytes):
+ *   Bytes 0-1 (LE word): [s___ ____ XXXX XXXX  __XX XXXX X___ ____]
+ *     - Bit 15: size flag (1 = 16x16, 0 = 8x8)
+ *     - Bits 8-0: signed 9-bit X displacement from center
+ *   Byte 2: signed 8-bit Y displacement from center
+ *   Bytes 3-4 (LE word): [VHoo pppn cccc cccc]
+ *     - V: vertical flip
+ *     - H: horizontal flip
+ *     - oo: OBJ priority
+ *     - ppp: palette row
+ *     - n: name table select (tile number bit 8)
+ *     - cccccccc: tile number low 8 bits
+ *
+ * The instruction list at $0F92,x uses 4-byte entries:
+ *   [timer(2)] [spritemap_ptr(2)]
+ * Entries with timer >= 0x8000 are control opcodes (skipped).
+ */
+class EnemySpritemap(private val romParser: RomParser) {
+
+    data class OamEntry(
+        val xOffset: Int,
+        val yOffset: Int,
+        val tileNum: Int,
+        val palRow: Int,
+        val hFlip: Boolean,
+        val vFlip: Boolean,
+        val is16x16: Boolean
+    )
+
+    data class Spritemap(
+        val entries: List<OamEntry>,
+        val snesAddress: Int
+    )
+
+    data class AnimationFrame(
+        val duration: Int,
+        val spritemap: Spritemap
+    )
+
+    data class AssembledSprite(
+        val width: Int,
+        val height: Int,
+        val pixels: IntArray,
+        val originX: Int,
+        val originY: Int,
+        val spritemap: Spritemap
+    )
+
+    /**
+     * Parse a spritemap at the given SNES address.
+     * @return parsed Spritemap or null if the data doesn't look valid
+     */
+    fun parseSpritemap(snesAddr: Int): Spritemap? {
+        val rom = romParser.getRomData()
+        val pc = romParser.snesToPc(snesAddr)
+        if (pc < 0 || pc + 2 > rom.size) return null
+
+        val count = readU16(rom, pc)
+        if (count !in 1..64) return null
+        if (pc + 2 + count * 5 > rom.size) return null
+
+        val entries = mutableListOf<OamEntry>()
+        for (i in 0 until count) {
+            val ePc = pc + 2 + i * 5
+            val xWord = readU16(rom, ePc)
+            val yByte = rom[ePc + 2].toInt() and 0xFF
+            val attr = readU16(rom, ePc + 3)
+
+            val is16x16 = (xWord and 0x8000) != 0
+            val xRaw9 = xWord and 0x01FF
+            val xOffset = if ((xRaw9 and 0x100) != 0) xRaw9 or 0xFFFFFF00.toInt() else xRaw9
+            val yOffset = if (yByte > 127) yByte - 256 else yByte
+
+            val tileNum = attr and 0x01FF
+            val palRow = (attr shr 9) and 7
+            val hFlip = (attr shr 14) and 1 != 0
+            val vFlip = (attr shr 15) and 1 != 0
+
+            entries.add(OamEntry(xOffset, yOffset, tileNum, palRow, hFlip, vFlip, is16x16))
+        }
+        return Spritemap(entries, snesAddr)
+    }
+
+    /**
+     * Find the first valid spritemap for an enemy species by tracing the
+     * init function's instruction list setup.
+     *
+     * Strategy:
+     * 1. Scan init function for `STA $0F92,x` (9D 92 0F)
+     * 2. Trace back to find the source value (immediate, table lookup, or Y register)
+     * 3. Follow the instruction list to find the first animation frame with a valid spritemap
+     */
+    fun findDefaultSpritemap(speciesId: Int): Spritemap? {
+        val rom = romParser.getRomData()
+        val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+        if (headerPc < 0 || headerPc + 0x3A > rom.size) return null
+
+        val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
+        val initAiPtr = readU16(rom, headerPc + 0x12)
+        val initPc = romParser.snesToPc((aiBank shl 16) or initAiPtr)
+        if (initPc < 0 || initPc + 20 > rom.size) return null
+
+        val instrListPtr = findInstructionListPointer(rom, initPc, aiBank) ?: return null
+        return findFirstSpritemap(rom, instrListPtr, aiBank)
+    }
+
+    /**
+     * Get all animation frames for a species (first direction/mode).
+     */
+    fun findAnimationFrames(speciesId: Int, maxFrames: Int = 32): List<AnimationFrame> {
+        val rom = romParser.getRomData()
+        val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+        if (headerPc < 0 || headerPc + 0x3A > rom.size) return emptyList()
+
+        val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
+        val initAiPtr = readU16(rom, headerPc + 0x12)
+        val initPc = romParser.snesToPc((aiBank shl 16) or initAiPtr)
+        if (initPc < 0 || initPc + 20 > rom.size) return emptyList()
+
+        val instrListPtr = findInstructionListPointer(rom, initPc, aiBank) ?: return emptyList()
+        return parseAnimationFrames(rom, instrListPtr, aiBank, maxFrames)
+    }
+
+    /**
+     * Render a spritemap into an ARGB pixel array using the given tile data and palette.
+     *
+     * @param spritemap the parsed spritemap to render
+     * @param tileData raw decompressed 4bpp tile bytes
+     * @param palette 16-color ARGB palette (index 0 = transparent)
+     * @return assembled sprite or null on failure
+     */
+    fun renderSpritemap(
+        spritemap: Spritemap,
+        tileData: ByteArray,
+        palette: IntArray
+    ): AssembledSprite? {
+        if (spritemap.entries.isEmpty()) return null
+
+        var minX = Int.MAX_VALUE
+        var maxX = Int.MIN_VALUE
+        var minY = Int.MAX_VALUE
+        var maxY = Int.MIN_VALUE
+
+        for (entry in spritemap.entries) {
+            val size = if (entry.is16x16) 16 else 8
+            minX = minOf(minX, entry.xOffset)
+            maxX = maxOf(maxX, entry.xOffset + size)
+            minY = minOf(minY, entry.yOffset)
+            maxY = maxOf(maxY, entry.yOffset + size)
+        }
+
+        val w = maxX - minX
+        val h = maxY - minY
+        if (w <= 0 || h <= 0) return null
+
+        val pixels = IntArray(w * h)
+
+        for (entry in spritemap.entries) {
+            val size = if (entry.is16x16) 16 else 8
+            val localTile = entry.tileNum and 0xFF
+
+            if (entry.is16x16) {
+                render16x16Tile(pixels, w, h, minX, minY, entry, localTile, tileData, palette)
+            } else {
+                render8x8Tile(pixels, w, h, minX, minY, entry, localTile, tileData, palette)
+            }
+        }
+
+        return AssembledSprite(w, h, pixels, -minX, -minY, spritemap)
+    }
+
+    private fun render8x8Tile(
+        pixels: IntArray, w: Int, h: Int,
+        originX: Int, originY: Int,
+        entry: OamEntry, localTile: Int,
+        tileData: ByteArray, palette: IntArray
+    ) {
+        val tileOffset = localTile * BYTES_PER_TILE
+        if (tileOffset + BYTES_PER_TILE > tileData.size) return
+
+        for (py in 0 until 8) {
+            for (px in 0 until 8) {
+                val srcX = if (entry.hFlip) 7 - px else px
+                val srcY = if (entry.vFlip) 7 - py else py
+                val ci = readPixelFromTile(tileData, tileOffset, srcX, srcY)
+                if (ci == 0) continue
+
+                val dx = entry.xOffset - originX + px
+                val dy = entry.yOffset - originY + py
+                if (dx in 0 until w && dy in 0 until h) {
+                    pixels[dy * w + dx] = palette[ci.coerceIn(0, palette.size - 1)] or (0xFF shl 24)
+                }
+            }
+        }
+    }
+
+    private fun render16x16Tile(
+        pixels: IntArray, w: Int, h: Int,
+        originX: Int, originY: Int,
+        entry: OamEntry, localTile: Int,
+        tileData: ByteArray, palette: IntArray
+    ) {
+        // 16x16 OBJ = 2x2 grid of 8x8 tiles:
+        // [N, N+1] top row
+        // [N+16, N+17] bottom row
+        val subTiles = intArrayOf(
+            localTile,      localTile + 1,
+            localTile + 16, localTile + 17
+        )
+        val subOffsets = arrayOf(
+            0 to 0, 8 to 0,
+            0 to 8, 8 to 8
+        )
+
+        for (si in 0 until 4) {
+            val subTile = subTiles[si]
+            val tileOffset = subTile * BYTES_PER_TILE
+            if (tileOffset + BYTES_PER_TILE > tileData.size) continue
+
+            val (subDx, subDy) = subOffsets[si]
+            // With flipping, the sub-tile positions are mirrored
+            val adjDx = if (entry.hFlip) 8 - subDx else subDx
+            val adjDy = if (entry.vFlip) 8 - subDy else subDy
+
+            for (py in 0 until 8) {
+                for (px in 0 until 8) {
+                    val srcX = if (entry.hFlip) 7 - px else px
+                    val srcY = if (entry.vFlip) 7 - py else py
+                    val ci = readPixelFromTile(tileData, tileOffset, srcX, srcY)
+                    if (ci == 0) continue
+
+                    val dx = entry.xOffset - originX + adjDx + px
+                    val dy = entry.yOffset - originY + adjDy + py
+                    if (dx in 0 until w && dy in 0 until h) {
+                        pixels[dy * w + dx] = palette[ci.coerceIn(0, palette.size - 1)] or (0xFF shl 24)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun readPixelFromTile(tileData: ByteArray, tileOffset: Int, px: Int, py: Int): Int {
+        val bit = 7 - px
+        val bp0 = (tileData[tileOffset + py * 2].toInt() shr bit) and 1
+        val bp1 = (tileData[tileOffset + py * 2 + 1].toInt() shr bit) and 1
+        val bp2 = (tileData[tileOffset + py * 2 + 16].toInt() shr bit) and 1
+        val bp3 = (tileData[tileOffset + py * 2 + 17].toInt() shr bit) and 1
+        return bp0 or (bp1 shl 1) or (bp2 shl 2) or (bp3 shl 3)
+    }
+
+    /**
+     * Scan the init function for `STA $0F92,x` and trace back to find the
+     * instruction list pointer value. Also follows JSR calls within the AI bank.
+     */
+    private fun findInstructionListPointer(rom: ByteArray, initPc: Int, aiBank: Int): Int? {
+        // First try the main init function
+        val result = scanForInstrListPtr(rom, initPc, aiBank)
+        if (result != null) return result
+
+        // If not found, follow JSR calls in the first 60 bytes
+        val jsrLimit = minOf(60, rom.size - initPc - 2)
+        for (i in 0 until jsrLimit) {
+            val pc = initPc + i
+            if (rom[pc].toInt() and 0xFF == 0x20) { // JSR abs
+                val jsrTarget = readU16(rom, pc + 1)
+                val jsrPc = romParser.snesToPc((aiBank shl 16) or jsrTarget)
+                if (jsrPc >= 0 && jsrPc + 10 < rom.size) {
+                    val jsrResult = scanForInstrListPtr(rom, jsrPc, aiBank)
+                    if (jsrResult != null) return jsrResult
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun scanForInstrListPtr(rom: ByteArray, startPc: Int, aiBank: Int): Int? {
+        val scanLimit = minOf(120, rom.size - startPc - 5)
+
+        for (i in 0 until scanLimit) {
+            val pc = startPc + i
+            // Look for STA $0F92,x = 9D 92 0F
+            if (rom[pc].toInt() and 0xFF != 0x9D) continue
+            if (rom[pc + 1].toInt() and 0xFF != 0x92) continue
+            if (rom[pc + 2].toInt() and 0xFF != 0x0F) continue
+
+            // Found STA $0F92,x. Trace back for the value source.
+
+            // Pattern 1: LDA #$xxxx (A9 xx xx) at i-3
+            if (i >= 3 && rom[pc - 3].toInt() and 0xFF == 0xA9) {
+                return readU16(rom, pc - 2)
+            }
+
+            // Pattern 2: LDA $xxxx,y (B9 xx xx) at i-3 — table lookup, read first entry
+            if (i >= 3 && rom[pc - 3].toInt() and 0xFF == 0xB9) {
+                val tableAddr = readU16(rom, pc - 2)
+                val tablePc = romParser.snesToPc((aiBank shl 16) or tableAddr)
+                if (tablePc >= 0 && tablePc + 1 < rom.size) {
+                    return readU16(rom, tablePc)
+                }
+            }
+
+            // Pattern 3: TYA (98) at i-1, preceded by LDY #$xxxx (A0 xx xx) nearby
+            if (i >= 1 && rom[pc - 1].toInt() and 0xFF == 0x98) {
+                for (j in 2..30) {
+                    if (i >= j && rom[pc - j].toInt() and 0xFF == 0xA0) {
+                        return readU16(rom, pc - j + 1)
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun findFirstSpritemap(rom: ByteArray, instrListPtr: Int, aiBank: Int): Spritemap? {
+        val ilPc = romParser.snesToPc((aiBank shl 16) or instrListPtr)
+        if (ilPc < 0) return null
+
+        // Format A: [timer(2), spritemap(2)] — standard
+        var offset = 0
+        for (frame in 0 until 32) {
+            if (ilPc + offset + 3 >= rom.size) break
+            val word0 = readU16(rom, ilPc + offset)
+            val word1 = readU16(rom, ilPc + offset + 2)
+            offset += 4
+
+            if (word0 == 0 && word1 == 0) break
+            if (word0 >= 0x8000) continue
+            if (word0 == 0) continue
+
+            val smapSnes = (aiBank shl 16) or word1
+            val smap = parseSpritemap(smapSnes)
+            if (smap != null) return smap
+        }
+
+        // Format B: [handler(2), timer(2)] — some enemies use this format where
+        // the handler pointer doubles as/contains spritemap data.
+        // Also try each word0 as a potential spritemap pointer.
+        offset = 0
+        for (frame in 0 until 32) {
+            if (ilPc + offset + 3 >= rom.size) break
+            val word0 = readU16(rom, ilPc + offset)
+            val word1 = readU16(rom, ilPc + offset + 2)
+            offset += 4
+
+            if (word0 == 0 && word1 == 0) break
+
+            // Try word0 as a spritemap pointer (handler-based format)
+            if (word0 > 0) {
+                val smapSnes = (aiBank shl 16) or word0
+                val smap = parseSpritemap(smapSnes)
+                if (smap != null) return smap
+            }
+        }
+
+        return null
+    }
+
+    private fun parseAnimationFrames(
+        rom: ByteArray, instrListPtr: Int, aiBank: Int, maxFrames: Int
+    ): List<AnimationFrame> {
+        val ilPc = romParser.snesToPc((aiBank shl 16) or instrListPtr)
+        if (ilPc < 0) return emptyList()
+
+        val frames = mutableListOf<AnimationFrame>()
+        val seenPtrs = mutableSetOf<Int>()
+        var offset = 0
+
+        for (frame in 0 until maxFrames) {
+            if (ilPc + offset + 3 >= rom.size) break
+            val word0 = readU16(rom, ilPc + offset)
+            val word1 = readU16(rom, ilPc + offset + 2)
+            offset += 4
+
+            if (word0 == 0 && word1 == 0) break
+            // GOTO opcode — stop to avoid infinite loop
+            if (word0 == 0x8000) break
+            if (word0 >= 0x8000) continue
+
+            if (word1 in seenPtrs) continue
+            seenPtrs.add(word1)
+
+            val smapSnes = (aiBank shl 16) or word1
+            val smap = parseSpritemap(smapSnes)
+            if (smap != null) {
+                frames.add(AnimationFrame(word0, smap))
+            }
+        }
+        return frames
+    }
+
+    private fun readU16(data: ByteArray, offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+    companion object {
+        const val BYTES_PER_TILE = 32
+    }
+}
