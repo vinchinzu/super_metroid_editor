@@ -1043,6 +1043,9 @@ class RomParser(internal val romData: ByteArray) {
         fun isStationPlm(plmId: Int): Boolean = STATION_PLMS.any { it.plmId == plmId }
         fun isGatePlm(plmId: Int): Boolean = plmId == 0xC836 || plmId == 0xC82A
         fun isDoorCapPlm(plmId: Int): Boolean = doorCapColor(plmId) != null
+        fun isScrollPlm(plmId: Int): Boolean =
+            plmId == 0xB703 || plmId == 0xB63B || plmId == 0xB647 ||
+            plmId == 0xB63F || plmId == 0xB643
 
         // ─── Door Cap PLM catalog ─────────────────────────────────
         data class DoorCapDef(val name: String, val color: String, val direction: String, val plmId: Int)
@@ -1079,7 +1082,39 @@ class RomParser(internal val romData: ByteArray) {
             stationNameForPlm(plmId)?.let { return it }
             gateNameForPlm(plmId, param)?.let { return it }
             doorCapNameForPlm(plmId)?.let { return it }
+            scrollPlmName(plmId)?.let { return it }
             return "PLM 0x${plmId.toString(16).uppercase().padStart(4, '0')}"
+        }
+
+        fun scrollPlmName(plmId: Int): String? = when (plmId) {
+            0xB703 -> "Scroll trigger"
+            0xB63B -> "Scroll ext (right)"
+            0xB647 -> "Scroll ext (up)"
+            0xB63F -> "Scroll ext (left)"
+            0xB643 -> "Scroll ext (down)"
+            else -> null
+        }
+
+        fun decodeScrollCommands(parser: RomParser, paramPtr: Int, roomWidth: Int): List<Triple<Int, Int, Int>> {
+            val snesAddr = 0x8F0000 or paramPtr
+            val pc = parser.snesToPc(snesAddr)
+            val commands = mutableListOf<Triple<Int, Int, Int>>()
+            var offset = 0
+            while (offset < 256 && pc + offset + 1 < parser.romData.size) {
+                val screenIdx = parser.romData[pc + offset].toInt() and 0xFF
+                if (screenIdx >= 0x80) break
+                val scrollVal = parser.romData[pc + offset + 1].toInt() and 0xFF
+                commands.add(Triple(screenIdx, screenIdx % roomWidth, scrollVal))
+                offset += 2
+            }
+            return commands
+        }
+
+        fun scrollValueLabel(v: Int): String = when (v) {
+            0x00 -> "Red"
+            0x01 -> "Blue"
+            0x02 -> "Green"
+            else -> "?$v"
         }
 
         // Door cap colors matching the in-game door shield appearance

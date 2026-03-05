@@ -52,6 +52,74 @@ The game decompresses the full block but only loads the first `tileDataSize` byt
 Multiple enemies can share the same GRAPHADR block with different tileDataSizes.
 Bosses (Phantoon, etc.) may use separate DMA-based tile loading instead of GRAPHADR.
 
+## Room Scroll System
+
+Super Metroid room scrolling has **three layers** that interact at runtime:
+
+### 1. Static Scroll Data (what our editor edits)
+
+Each room state has a `roomScrollsPtr` (offset +14 in 26-byte state data) pointing to data in bank $8F.
+One byte per screen (width * height), left-to-right, top-to-bottom order.
+
+| Value | Name | Behavior |
+|-------|------|----------|
+| $00 | Red | Camera CANNOT scroll to this screen (hard boundary) |
+| $01 | Blue | Camera CAN scroll to this screen normally |
+| $02 | Green | Camera CAN scroll, but conventionally used as "PLM-gated" — scroll PLMs toggle these |
+
+Special pointers: `$0000` = all Blue, `$0001` = all Green.
+
+**When loaded:** Static data is copied to RAM `$7E:CD20..CD51` at room load, BEFORE door ASM runs.
+
+### 2. Door ASM (runtime override on entry)
+
+Each door has a 2-byte `entryCode` (bytes 10-11 of the 12-byte door data block in bank $83).
+This is an ASM routine pointer in bank $8F. If non-zero, it runs AFTER static scrolls load.
+
+Door ASM typically writes directly to `$7E:CD20+X` to override specific screen scroll values,
+allowing different initial scroll states depending on which door Samus enters from.
+
+### 3. Scroll PLMs (runtime triggers during gameplay)
+
+PLM ID `$B703` (normal scroll trigger). Each places a "treadmill" block (BTS $46) at its position.
+When Samus walks over the treadmill block, the scroll PLM's command list fires.
+
+**Scroll command format** (bank $8F, pointed to by PLM param):
+```
+[screen_index, scroll_value] pairs, terminated by byte >= $80
+
+Example:  03 01 04 01 80
+  Screen[3] → Blue, Screen[4] → Blue, done
+```
+
+Related PLMs:
+- `$B63B` — rightwards extension (copies treadmill block rightward from the B703 PLM)
+- `$B647` — upwards extension (copies treadmill block upward)
+
+### Room Load Order
+
+1. Static scroll data → RAM $7E:CD20
+2. PLMs created (treadmill blocks placed, but not triggered yet)
+3. **Door ASM executes** (overrides scroll values)
+4. Gameplay begins — scroll PLMs trigger as Samus moves
+
+### Common Pitfall: Scroll PLMs fighting static data
+
+**If you change static scroll data (e.g., make screens Blue) but leave vanilla scroll PLMs in
+the room, those PLMs will dynamically set screens back to Red/Green at runtime!**
+
+Example (Parlor $92FD in a hack): Static data sets row 0 all Blue. But vanilla PLM at (52,14)
+has command `$93A5` which sets Screen 4 to RED. When Samus walks over that block, screen 4
+becomes un-scrollable — even though the editor shows it as Blue.
+
+**Fix:** Remove or modify scroll PLMs when changing a room's scroll behavior. Our editor shows
+scroll PLMs in the PLM list (IDs B703, B63B, B647) but does not yet decode their commands inline.
+
+### Scroll diagnostic test
+
+`ScrollSystemTest.kt` can dump all scroll data, scroll PLMs, their decoded commands, and door ASM
+for any room in any ROM. Use it to debug scroll issues.
+
 ## External References
 
 - **Kejardon's docs**: https://patrickjohnston.org/ASM/ROM%20data/Super%20Metroid/Kejardon's%20docs/
