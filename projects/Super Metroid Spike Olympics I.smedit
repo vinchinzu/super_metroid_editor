@@ -52094,6 +52094,54 @@
                     "properties": 2048,
                     "origX": 368,
                     "origY": 1152
+                },
+                {
+                    "action": "add",
+                    "enemyId": 54015,
+                    "x": 1136,
+                    "y": 1024,
+                    "properties": 2048
+                },
+                {
+                    "action": "remove",
+                    "enemyId": 54015,
+                    "x": 1136,
+                    "y": 1024,
+                    "properties": 2048,
+                    "origX": 1136,
+                    "origY": 1024
+                },
+                {
+                    "action": "add",
+                    "enemyId": 56383,
+                    "x": 448,
+                    "y": 1200,
+                    "properties": 2048
+                },
+                {
+                    "action": "remove",
+                    "enemyId": 56383,
+                    "x": 448,
+                    "y": 1200,
+                    "properties": 2048,
+                    "origX": 448,
+                    "origY": 1200
+                },
+                {
+                    "action": "add",
+                    "enemyId": 56511,
+                    "x": 448,
+                    "y": 1200,
+                    "properties": 2048
+                },
+                {
+                    "action": "remove",
+                    "enemyId": 56511,
+                    "x": 448,
+                    "y": 1200,
+                    "properties": 2048,
+                    "origX": 448,
+                    "origY": 1200
                 }
             ],
             "scrollChanges": [
@@ -85103,6 +85151,18 @@
         },
         {
             "id": "pattern_1772678750408",
+            "name": "test",
+            "cols": 2,
+            "rows": 2,
+            "cells": [
+                null,
+                null,
+                null,
+                null
+            ]
+        },
+        {
+            "id": "pattern_1772682440075",
             "name": "test",
             "cols": 2,
             "rows": 2,
