@@ -28,13 +28,6 @@ private val CRE_BITFLAG_NAMES = mapOf(
     0x05 to "Disable CRE tiles",
 )
 
-private val MUSIC_TRACK_NAMES = mapOf(
-    0x00 to "No change",
-    0x03 to "No music",
-    0x05 to "Song 1",
-    0x06 to "Song 2",
-    0x09 to "Song 3",
-)
 
 private val FX_TYPE_OPTIONS = listOf(
     0x00 to "None",
@@ -233,11 +226,15 @@ fun RoomPropertiesPanel(
         EditableIntRow("Tileset", editTileset, 0, 29) { editTileset = it; syncStateDataToState() }
 
         // Editable: Music
-        val trackName = SpcData.KNOWN_TRACKS.firstOrNull { it.songSet == editMusicData && it.playIndex == editMusicTrack }?.name
-        EditableHexRow("Music Set", editMusicData, 1) { editMusicData = it; syncStateDataToState() }
-        EditableHexRow("Play Index", editMusicTrack, 1,
-            suffix = if (trackName != null) " — $trackName" else (MUSIC_TRACK_NAMES[editMusicTrack]?.let { " — $it" } ?: "")
-        ) { editMusicTrack = it; syncStateDataToState() }
+        MusicDropdown(
+            musicData = editMusicData,
+            musicTrack = editMusicTrack,
+            onMusicChange = { data, track ->
+                editMusicData = data
+                editMusicTrack = track
+                syncStateDataToState()
+            }
+        )
 
         // Read-only pointers
         PropertyRow("Level Data", snesAddr24(levelDataPtr))
@@ -341,6 +338,100 @@ fun RoomPropertiesPanel(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+// ── Music Dropdown ────────────────────────────────────────────────
+
+private data class MusicOption(
+    val songSet: Int,
+    val playIndex: Int,
+    val label: String
+)
+
+private val MUSIC_OPTIONS: List<MusicOption> by lazy {
+    val options = mutableListOf(
+        MusicOption(0x00, 0x00, "No change"),
+        MusicOption(0x00, 0x03, "No music (silence)"),
+    )
+    for (track in SpcData.KNOWN_TRACKS) {
+        val hexLabel = String.format("%02X:%02X", track.songSet, track.playIndex)
+        val area = if (track.area.isNotEmpty()) " [${track.area}]" else ""
+        options.add(MusicOption(track.songSet, track.playIndex, "${track.name}$area ($hexLabel)"))
+    }
+    options
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MusicDropdown(
+    musicData: Int,
+    musicTrack: Int,
+    onMusicChange: (Int, Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = MUSIC_OPTIONS.firstOrNull { it.songSet == musicData && it.playIndex == musicTrack }
+    val displayText = current?.label ?: String.format("Custom (%02X:%02X)", musicData, musicTrack)
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Music", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(100.dp))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.weight(1f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor()
+                    .clickable { expanded = true },
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.extraSmall
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        displayText,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1
+                    )
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                }
+            }
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
+            ) {
+                for (option in MUSIC_OPTIONS) {
+                    val isSelected = option.songSet == musicData && option.playIndex == musicTrack
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                option.label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            onMusicChange(option.songSet, option.playIndex)
+                            expanded = false
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -551,7 +642,7 @@ private fun EditableScrollGrid(
         }
         Spacer(modifier = Modifier.height(2.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((code, lbl) in listOf(0x00 to "Red (hidden)", 0x01 to "Blue (explorable)", 0x02 to "Green (show floor)")) {
+            for ((code, lbl) in listOf(0x00 to "Red (hidden)", 0x01 to "Blue (explorable)", 0x02 to "Green (PLM-gated)")) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     Box(modifier = Modifier.size(8.dp).background(SCROLL_COLORS[code]!!, MaterialTheme.shapes.extraSmall))
                     Text(lbl, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

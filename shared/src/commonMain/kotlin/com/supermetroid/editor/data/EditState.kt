@@ -185,11 +185,14 @@ data class SmPatch(
 /**
  * Custom tileset graphics data (base64-encoded raw 4bpp bytes).
  * URE (area-specific) keyed by tileset ID; CRE (common) is shared.
+ * Enemy/boss sprite overrides are stored as base64-encoded PNG bytes keyed by species ID hex string (e.g. "E4BF").
  */
 @Serializable
 data class TilesetGfxData(
-    val varGfx: MutableMap<String, String> = mutableMapOf(),  // key = tilesetId, value = base64
-    var creGfx: String? = null                                 // base64, shared across all tilesets
+    val varGfx: MutableMap<String, String> = mutableMapOf(),         // key = tilesetId, value = base64 raw 4bpp
+    var creGfx: String? = null,                                       // base64 raw 4bpp, shared
+    val enemyGfx: MutableMap<String, String> = mutableMapOf(),       // key = speciesId hex, value = base64 PNG bytes
+    val spriteTileBlocks: MutableMap<String, String> = mutableMapOf() // key = "boss:N" (e.g. "phantoon:0"), value = base64 raw 4bpp
 )
 
 /**

@@ -425,6 +425,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     ITEMS("Items", "I", 0xCCFFCC00),       // gold/yellow
     // Enemies (from enemy population data in bank $A1)
     ENEMIES("Enemies", "E", 0xCCFF6644),   // orange-red
+    // Scroll PLMs (B703, B63B, B647 — runtime scroll triggers)
+    SCROLL_PLMS("Scroll Triggers", "St", 0xCCFF8040),  // orange
     // Per-screen scroll colors (Red/Blue/Green)
     SCROLLS("Scroll Colors", "Sc", 0x60FFFFFF),
 }
@@ -1356,10 +1358,10 @@ fun MapCanvas(
                                     onDismissRequest = { showSavePatternDialog = false },
                                     title = { Text("Save Selection as Pattern", fontSize = 14.sp) },
                                     text = {
-                                        OutlinedTextField(
+                                        AppOutlinedTextField(
                                             value = patName,
                                             onValueChange = { patName = it },
-                                            label = { Text("Pattern name") },
+                                            label = "Pattern name",
                                             singleLine = true,
                                             modifier = Modifier.fillMaxWidth()
                                         )
@@ -1618,7 +1620,6 @@ fun MapCanvas(
                                                     fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
                                             } else {
                                                 val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                                val fieldStyle = LocalTextStyle.current.copy(fontSize = 10.sp)
 
                                                 // Helper: 0x00–0xFF dropdown
                                                 @Composable
@@ -1689,17 +1690,16 @@ fun MapCanvas(
                                                         DropdownMenu(
                                                             expanded = destDropExpanded,
                                                             onDismissRequest = { destDropExpanded = false; destRoomSearch = "" },
-                                                            modifier = Modifier.requiredSizeIn(maxHeight = 400.dp)
+                                                            modifier = Modifier.width(220.dp).requiredSizeIn(maxHeight = 400.dp)
                                                         ) {
-                                                            OutlinedTextField(
-                                                                value = destRoomSearch,
-                                                                onValueChange = { destRoomSearch = it },
-                                                                placeholder = { Text("Search…", fontSize = 10.sp) },
-                                                                singleLine = true,
-                                                                textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                                    .fillMaxWidth().height(32.dp)
-                                                            )
+                                            AppTextInput(
+                                                value = destRoomSearch,
+                                                onValueChange = { destRoomSearch = it },
+                                                placeholder = "Search…",
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    .fillMaxWidth()
+                                            )
                                                             val filteredRooms = if (destRoomSearch.isBlank()) rooms
                                                                 else rooms.filter { it.name.contains(destRoomSearch, ignoreCase = true) ||
                                                                     it.id.contains(destRoomSearch, ignoreCase = true) }
@@ -1783,7 +1783,7 @@ fun MapCanvas(
                                                     var distText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.distFromDoor.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = distText,
                                                         onValueChange = { v ->
                                                             distText = v
@@ -1791,8 +1791,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(distFromDoor = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
@@ -1829,7 +1829,7 @@ fun MapCanvas(
                                                     var scrollText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = scrollText,
                                                         onValueChange = { v ->
                                                             scrollText = v
@@ -1837,8 +1837,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(2.dp))
@@ -1847,7 +1847,7 @@ fun MapCanvas(
                                                     var asmText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.entryCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
-                                                    OutlinedTextField(
+                                                    AppTextInput(
                                                         value = asmText,
                                                         onValueChange = { v ->
                                                             asmText = v
@@ -1855,8 +1855,8 @@ fun MapCanvas(
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(entryCode = it))
                                                             }
                                                         },
-                                                        modifier = Modifier.weight(1f).height(36.dp),
-                                                        textStyle = fieldStyle, singleLine = true
+                                                        modifier = Modifier.weight(1f),
+                                                        fontSize = 10.sp, monospace = true
                                                     )
                                                 }
                                             }
@@ -1902,13 +1902,35 @@ fun MapCanvas(
                                         }
                                         for (plm in otherPlms) {
                                             val pName = RomParser.plmDisplayName(plm.id, plm.param)
+                                            val canRemove = RomParser.isStationPlm(plm.id) || RomParser.isGatePlm(plm.id)
+                                                    || RomParser.doorCapColor(plm.id) != null || RomParser.isScrollPlm(plm.id)
                                             Row(
                                                 modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Text(pName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                if (RomParser.isStationPlm(plm.id) || RomParser.isGatePlm(plm.id) || RomParser.doorCapColor(plm.id) != null) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(pName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    if (RomParser.isScrollPlm(plm.id) && plm.id == 0xB703 && romParser != null) {
+                                                        val rw = roomHeader?.width ?: 0
+                                                        if (rw > 0) {
+                                                            val cmds = RomParser.decodeScrollCommands(
+                                                                romParser,
+                                                                plm.param, rw
+                                                            )
+                                                            for ((screenIdx, _, scrollVal) in cmds) {
+                                                                val col = screenIdx % rw
+                                                                val row = screenIdx / rw
+                                                                Text(
+                                                                    "  [$screenIdx] (x=$col,y=$row) → ${RomParser.scrollValueLabel(scrollVal)}",
+                                                                    fontSize = 8.sp,
+                                                                    color = MaterialTheme.colorScheme.outline
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if (canRemove) {
                                                     Text(
                                                         "✕",
                                                         modifier = Modifier
@@ -2098,6 +2120,86 @@ fun MapCanvas(
                                             }
                                         }
 
+                                        // Add Scroll Trigger button + dropdown
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        var addScrollExpanded by remember { mutableStateOf(false) }
+                                        Box {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth().height(28.dp)
+                                                    .clickable { addScrollExpanded = true },
+                                                shape = MaterialTheme.shapes.small,
+                                                color = Color(0xFFFF8040).copy(alpha = 0.2f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp).fillMaxHeight(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text("+ Add Scroll Trigger", fontSize = 10.sp,
+                                                        color = Color(0xFFFF8040))
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = addScrollExpanded,
+                                                onDismissRequest = { addScrollExpanded = false }
+                                            ) {
+                                                val existingScrollCmds = editorState.workingPlms
+                                                    ?.filter { it.id == 0xB703 }
+                                                    ?.map { it.param }
+                                                    ?.distinct()
+                                                    ?.sorted()
+                                                    ?: emptyList()
+                                                if (existingScrollCmds.isNotEmpty()) {
+                                                    Text("Use existing command:", fontSize = 9.sp,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.Bold)
+                                                    for (cmdPtr in existingScrollCmds) {
+                                                        val rw = roomHeader?.width ?: 1
+                                                        val cmdLabel = if (romParser != null && rw > 0) {
+                                                            val cmds = RomParser.decodeScrollCommands(romParser, cmdPtr, rw)
+                                                            cmds.joinToString(", ") { (sIdx, _, sv) ->
+                                                                "[$sIdx]→${RomParser.scrollValueLabel(sv)}"
+                                                            }
+                                                        } else ""
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Column {
+                                                                    Text("\$${cmdPtr.toString(16).uppercase().padStart(4, '0')}", fontSize = 10.sp)
+                                                                    if (cmdLabel.isNotEmpty()) {
+                                                                        Text(cmdLabel, fontSize = 8.sp,
+                                                                            color = MaterialTheme.colorScheme.outline)
+                                                                    }
+                                                                }
+                                                            },
+                                                            onClick = {
+                                                                addScrollExpanded = false
+                                                                editorState.addPlm(0xB703, propsBlockX, propsBlockY, cmdPtr)
+                                                            },
+                                                            modifier = Modifier.height(if (cmdLabel.isNotEmpty()) 40.dp else 28.dp)
+                                                        )
+                                                    }
+                                                    Divider()
+                                                }
+                                                Text("Extensions:", fontSize = 9.sp,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold)
+                                                for ((plmId, label) in listOf(
+                                                    0xB63B to "Extend Right",
+                                                    0xB647 to "Extend Up"
+                                                )) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(label, fontSize = 10.sp) },
+                                                        onClick = {
+                                                            addScrollExpanded = false
+                                                            editorState.addPlm(plmId, propsBlockX, propsBlockY, 0x8000)
+                                                        },
+                                                        modifier = Modifier.height(28.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
                                         // ─── Enemies at/near this tile ───
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Divider()
@@ -2165,18 +2267,16 @@ fun MapCanvas(
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text("X:", fontSize = 9.sp)
-                                                        OutlinedTextField(
+                                                        AppTextInput(
                                                             value = editX, onValueChange = { editX = it },
-                                                            modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                            singleLine = true
+                                                            modifier = Modifier.width(60.dp),
+                                                            fontSize = 10.sp, monospace = true
                                                         )
                                                         Text("Y:", fontSize = 9.sp)
-                                                        OutlinedTextField(
+                                                        AppTextInput(
                                                             value = editY, onValueChange = { editY = it },
-                                                            modifier = Modifier.width(60.dp).height(32.dp),
-                                                            textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                            singleLine = true
+                                                            modifier = Modifier.width(60.dp),
+                                                            fontSize = 10.sp, monospace = true
                                                         )
                                                     }
                                                     Spacer(modifier = Modifier.height(4.dp))
@@ -2218,11 +2318,10 @@ fun MapCanvas(
                                                         ) {
                                                             Text(label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                                 modifier = Modifier.width(60.dp))
-                                                            OutlinedTextField(
+                                                            AppTextInput(
                                                                 value = value, onValueChange = onValueChange,
-                                                                modifier = Modifier.weight(1f).height(30.dp),
-                                                                textStyle = LocalTextStyle.current.copy(fontSize = 9.sp),
-                                                                singleLine = true
+                                                                modifier = Modifier.weight(1f),
+                                                                fontSize = 9.sp, monospace = true, height = 28.dp
                                                             )
                                                         }
                                                     }
@@ -2295,13 +2394,12 @@ fun MapCanvas(
                                                 onDismissRequest = { addEnemyExpanded = false },
                                                 modifier = Modifier.requiredSizeIn(maxHeight = 400.dp, maxWidth = 250.dp)
                                             ) {
-                                                OutlinedTextField(
+                                                AppTextInput(
                                                     value = enemySearch,
                                                     onValueChange = { enemySearch = it },
-                                                    placeholder = { Text("Search enemies…", fontSize = 10.sp) },
-                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).height(36.dp),
-                                                    textStyle = LocalTextStyle.current.copy(fontSize = 10.sp),
-                                                    singleLine = true
+                                                    placeholder = "Search enemies…",
+                                                    fontSize = 10.sp,
+                                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
                                                 )
                                                 val filtered = remember(enemySearch) {
                                                     val q = enemySearch.trim().lowercase()
@@ -2500,7 +2598,7 @@ private fun buildCompositeImage(
         val scrollColors = arrayOf(
             java.awt.Color(200, 40, 40, 40),   // Red (hidden)
             java.awt.Color(40, 80, 200, 40),    // Blue (explorable)
-            java.awt.Color(40, 160, 50, 40),    // Green (show floor)
+            java.awt.Color(40, 160, 50, 40),    // Green (PLM-gated)
         )
         val scrollBorderColors = arrayOf(
             java.awt.Color(200, 40, 40, 120),
@@ -2673,6 +2771,34 @@ private fun buildCompositeImage(
             g2.color = java.awt.Color(0, 0, 0, 200)
             g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
             g2.color = badgeBorder
+            g2.drawRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = java.awt.Color.WHITE
+            g2.drawString(name, bx + 3, by + fm.ascent + 1)
+        }
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF)
+    }
+
+    // Draw scroll PLM badges (positioned at PLM block coordinates)
+    if (activeOverlays.contains(TileOverlay.SCROLL_PLMS) && data.plmEntries.isNotEmpty()) {
+        val g2 = g as java.awt.Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        val labelFont = java.awt.Font("SansSerif", java.awt.Font.BOLD, 9)
+        g.font = labelFont
+        val fm = g.fontMetrics
+        val scrollBadgeColor = java.awt.Color(0xFF, 0x80, 0x40)
+        for (plm in data.plmEntries) {
+            if (!RomParser.isScrollPlm(plm.id)) continue
+            val name = RomParser.scrollPlmName(plm.id) ?: continue
+            val cx = plm.x * 16 + 8
+            val cy = plm.y * 16 + 8
+            val textWidth = fm.stringWidth(name)
+            val badgeW = textWidth + 6
+            val badgeH = fm.height + 2
+            val bx = cx - badgeW / 2
+            val by = cy - badgeH / 2
+            g2.color = java.awt.Color(0, 0, 0, 200)
+            g2.fillRoundRect(bx, by, badgeW, badgeH, 4, 4)
+            g2.color = scrollBadgeColor
             g2.drawRoundRect(bx, by, badgeW, badgeH, 4, 4)
             g2.color = java.awt.Color.WHITE
             g2.drawString(name, bx + 3, by + fm.ascent + 1)

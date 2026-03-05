@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import java.awt.image.BufferedImage
 import java.util.LinkedList
 
-enum class PixelTool { PENCIL, ERASER, FILL, EYEDROPPER }
+enum class PixelTool { PENCIL, ERASER, FILL, EYEDROPPER, SELECT }
 
 private data class PixelEdit(val tileNum: Int, val x: Int, val y: Int, val oldIdx: Int, val newIdx: Int)
 
@@ -323,6 +323,7 @@ fun TilePixelEditor(
                                     }
                                     PixelTool.FILL -> floodFill(px, py)
                                     PixelTool.EYEDROPPER -> eyedrop(px, py)
+                                    PixelTool.SELECT -> {} // SELECT not used in TilePixelEditor
                                 }
                             }
                             .onPointerEvent(PointerEventType.Move) { event ->

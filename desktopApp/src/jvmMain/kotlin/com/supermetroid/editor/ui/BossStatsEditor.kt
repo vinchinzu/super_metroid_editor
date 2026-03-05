@@ -51,18 +51,17 @@ private fun dmgField(key: String, label: String, id: Int, default: Int) =
     BossStatField(key, label, id, 6, default)
 
 // ─── Boss definitions with vanilla defaults ──────────────────────
-// Species IDs verified against SMILE enemy data + ROM parser ENEMY_NAMES.
+// Species IDs verified against Kraid's room enemy set ($A1:9EB5) and ROM binary.
+// Kraid uses bank $A0 IDs in the E2xx range; D2BF is Squeept (Norfair enemy), not Kraid.
 // HP/damage defaults are vanilla values (read from ROM at export; these are fallbacks).
 
 // Vanilla defaults verified against test ROM ($A0 bank enemy stat blocks).
 val BOSS_DEFS = listOf(
     BossDef("Kraid", Color(0xFF8BC34A), "K", listOf(
-        hpField("kraid_hp", "Kraid HP", 0xD2BF, 300),
-        dmgField("kraid_contact", "Contact Damage", 0xD2BF, 50),
-        hpField("kraid_claw_hp", "Claw HP", 0xD33F, 900),
-        dmgField("kraid_claw", "Claw Damage", 0xD33F, 120),
-        dmgField("kraid_ceiling_spike", "Ceiling Spike Damage", 0xD2FF, 60),
-        dmgField("kraid_belly_spike", "Belly Spike Damage", 0xD37F, 100),
+        hpField("kraid_hp", "Kraid HP", 0xE2BF, 1000),
+        dmgField("kraid_contact", "Contact Damage", 0xE2BF, 20),
+        dmgField("kraid_belly_spike", "Belly Spike Damage", 0xE33F, 10),
+        dmgField("kraid_claw", "Flying Claw Damage", 0xE3FF, 10),
     )),
     BossDef("Phantoon", Color(0xFF9C27B0), "Ph", listOf(
         hpField("phantoon_hp", "Phantoon HP", 0xE4BF, 2500),

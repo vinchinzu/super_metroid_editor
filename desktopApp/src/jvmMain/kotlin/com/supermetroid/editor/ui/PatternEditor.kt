@@ -181,29 +181,29 @@ private fun CreatePatternDialog(
         title = { Text("New Pattern", fontSize = 14.sp) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                AppOutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("Name", fontSize = 11.sp) },
+                    label = "Name",
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                    singleLine = true
+                    singleLine = true,
+                    fontSize = 12.sp
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    AppOutlinedTextField(
                         value = colsText,
                         onValueChange = { colsText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Width", fontSize = 11.sp) },
+                        label = "Width",
                         modifier = Modifier.weight(1f),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                        singleLine = true
+                        singleLine = true,
+                        fontSize = 12.sp
                     )
-                    OutlinedTextField(
+                    AppOutlinedTextField(
                         value = rowsText,
                         onValueChange = { rowsText = it.filter { c -> c.isDigit() } },
-                        label = { Text("Height", fontSize = 11.sp) },
+                        label = "Height",
                         modifier = Modifier.weight(1f),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                        singleLine = true
+                        singleLine = true,
+                        fontSize = 12.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -990,9 +990,9 @@ fun PatternEditorCanvas(
             onDismissRequest = { showRenameDialog = false },
             title = { Text("Rename Pattern", fontSize = 14.sp) },
             text = {
-                OutlinedTextField(
+                AppOutlinedTextField(
                     value = newName, onValueChange = { newName = it },
-                    label = { Text("Name") }, singleLine = true,
+                    label = "Name", singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             },
@@ -1018,13 +1018,13 @@ fun PatternEditorCanvas(
             title = { Text("Resize Pattern", fontSize = 14.sp) },
             text = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    AppOutlinedTextField(
                         value = newW, onValueChange = { newW = it.filter { c -> c.isDigit() } },
-                        label = { Text("Width") }, modifier = Modifier.weight(1f), singleLine = true
+                        label = "Width", modifier = Modifier.weight(1f), singleLine = true
                     )
-                    OutlinedTextField(
+                    AppOutlinedTextField(
                         value = newH, onValueChange = { newH = it.filter { c -> c.isDigit() } },
-                        label = { Text("Height") }, modifier = Modifier.weight(1f), singleLine = true
+                        label = "Height", modifier = Modifier.weight(1f), singleLine = true
                     )
                 }
             },
