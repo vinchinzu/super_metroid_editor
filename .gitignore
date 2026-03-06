@@ -34,6 +34,10 @@ dist/
 # Logs
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
 # ROM files (don't commit ROMs)
 *.smc
 *.sfc
@@ -41,3 +45,9 @@ dist/
 *.wav
 # But keep test-resources directory structure
 !test-resources/.gitkeep
+
+# Emulator data (save states, exported nav/route data)
+*.state
+*.sha
+export/
+custom_integrations/

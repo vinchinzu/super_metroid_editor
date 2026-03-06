@@ -38,6 +38,8 @@ import com.supermetroid.editor.ui.SoundListPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.EnemySpriteViewer
+import com.supermetroid.editor.ui.EmulatorWorkspace
+import com.supermetroid.editor.ui.EmulatorWorkspaceState
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.KraidSpriteEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
@@ -48,6 +50,7 @@ import androidx.compose.ui.input.key.*
 import java.io.File
 
 fun main() = application {
+    val launchConfig = remember { EditorLaunchConfig.fromEnvironment() }
     val roomRepository = remember { RoomRepository() }
     var romParser by remember { mutableStateOf<RomParser?>(null) }
     var romFileName by remember { mutableStateOf<String?>(null) }
@@ -77,16 +80,18 @@ fun main() = application {
     // Load rooms on startup
     LaunchedEffect(Unit) {
         rooms = roomRepository.getAllRooms()
-        
-        // Auto-load last ROM if available
-        val lastRomPath = RomPreferences.getLastRomPath()
-        if (lastRomPath != null) {
+
+        // Auto-load requested ROM first, then fall back to last ROM if available.
+        val bootRomPath = launchConfig.romPath ?: RomPreferences.getLastRomPath()
+        if (bootRomPath != null) {
             try {
-                romParser = RomParser.loadRom(lastRomPath)
-                romFileName = File(lastRomPath).nameWithoutExtension
-                editorState.initForRom(lastRomPath)
+                romParser = RomParser.loadRom(bootRomPath)
+                romFileName = File(bootRomPath).nameWithoutExtension
+                RomPreferences.setLastRomPath(bootRomPath)
+                editorState.initForRom(bootRomPath)
                 if (selectedRoom == null) {
-                    selectedRoom = pickDefaultRoom(rooms, lastRomPath)
+                    selectedRoom = rooms.firstOrNull { it.handle == launchConfig.roomHandle }
+                        ?: pickDefaultRoom(rooms, bootRomPath)
                 }
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
@@ -194,14 +199,32 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound, 4 = Sprites
+                var leftTab by remember { mutableStateOf(if (launchConfig.openEmulatorWorkspace) 5 else 0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound, 4 = Sprites
                 var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
+                val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
                 var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
+                    if (leftTab == 5) {
+                        EmulatorWorkspace(
+                            room = selectedRoom,
+                            rooms = rooms,
+                            romParser = romParser,
+                            editorState = editorState,
+                            workspaceState = emulatorWorkspaceState,
+                            launchConfig = launchConfig,
+                            onRoomSelected = { room ->
+                                selectedRoom = room
+                                val romPath = RomPreferences.getLastRomPath()
+                                if (romPath != null) saveLastRoom(romPath, room)
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        return@BoxWithConstraints
+                    }
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
@@ -238,6 +261,10 @@ fun main() = application {
                                 Tab(selected = leftTab == 4, onClick = { leftTab = 4 },
                                     modifier = Modifier.height(32.dp)) {
                                     Text("Sprites", fontSize = 11.sp)
+                                }
+                                Tab(selected = leftTab == 5, onClick = { leftTab = 5 },
+                                    modifier = Modifier.height(32.dp)) {
+                                    Text("Emu", fontSize = 11.sp)
                                 }
                             }
 

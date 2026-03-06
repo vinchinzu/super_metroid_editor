@@ -5,6 +5,19 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
+private fun defaultNavExportDir(): String {
+    val configured = System.getenv("SMEDIT_NAV_EXPORT_DIR")?.trim()
+    if (!configured.isNullOrEmpty()) return configured
+    val cwd = File(System.getProperty("user.dir")).absoluteFile
+    val editorDir = when {
+        cwd.name == "super_metroid_editor" -> cwd
+        File(cwd, "super_metroid_rl/super_metroid_editor").isDirectory ->
+            File(cwd, "super_metroid_rl/super_metroid_editor")
+        else -> cwd
+    }
+    return File(editorDir, "export/sm_nav").absolutePath
+}
+
 @Serializable
 data class WindowConfig(
     val x: Int = -1,
@@ -18,6 +31,8 @@ data class AppSettings(
     val lastRomPath: String? = null,
     val window: WindowConfig = WindowConfig(),
     val lastRoomPerRom: Map<String, String> = emptyMap(),
+    val emulatorNavExportDir: String = defaultNavExportDir(),
+    val emulatorFollowLiveRoom: Boolean = true,
 )
 
 object AppConfig {

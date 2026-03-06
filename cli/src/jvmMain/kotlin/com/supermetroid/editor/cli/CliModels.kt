@@ -54,6 +54,10 @@ data class DoorExport(
     val isElevator: Boolean,
     val doorCapColor: String?,
     val requiredAbility: String?,
+    val screenX: Int? = null,
+    val screenY: Int? = null,
+    val sourceBlockX: Int? = null,
+    val sourceBlockY: Int? = null,
 )
 
 @Serializable

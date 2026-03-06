@@ -25,6 +25,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.RectangleShape
@@ -36,6 +39,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,7 @@ import com.supermetroid.editor.rom.RoomRenderData
 import java.awt.image.BufferedImage
 import java.awt.RenderingHints
 import javax.imageio.ImageIO
+import kotlin.math.roundToInt
 
 private object EnemySpriteCache {
     private val cache = mutableMapOf<String, BufferedImage?>()
@@ -64,6 +70,22 @@ private object EnemySpriteCache {
             val stream = EnemySpriteCache::class.java.getResourceAsStream("/enemies/$hexId.png")
             stream?.use { ImageIO.read(it) }
         }
+    }
+}
+
+private object OverlaySpriteCache {
+    private var samusMarker: ImageBitmap? = null
+    private var loaded = false
+
+    fun samusMarker(): ImageBitmap? {
+        if (!loaded) {
+            loaded = true
+            samusMarker = OverlaySpriteCache::class.java
+                .getResourceAsStream("/markers/samus_stand.png")
+                ?.use { ImageIO.read(it) }
+                ?.toComposeImageBitmap()
+        }
+        return samusMarker
     }
 }
 
@@ -463,6 +485,7 @@ fun MapCanvas(
     romParser: RomParser?,
     editorState: EditorState? = null,
     rooms: List<RoomInfo> = emptyList(),
+    emulatorOverlay: RoomMapOverlay? = null,
     modifier: Modifier = Modifier
 ) {
     val zoomState = remember { mutableStateOf(1f) }
@@ -973,9 +996,12 @@ fun MapCanvas(
                             val hScrollState = rememberScrollState()
                             val vScrollState = rememberScrollState()
                             val coroutineScope = rememberCoroutineScope()
+                            val samusMarker = remember { OverlaySpriteCache.samusMarker() }
                             var isDragging by remember { mutableStateOf(false) }
                             var lastDragX by remember { mutableStateOf(0f) }
                             var lastDragY by remember { mutableStateOf(0f) }
+                            var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+                            var lastCenteredKey by remember { mutableStateOf<String?>(null) }
                             
                             var isPainting by remember { mutableStateOf(false) }
                             
@@ -1016,14 +1042,31 @@ fun MapCanvas(
                                 compositeImage
                             }
                             val editBitmap = remember(compositeForEdit) { compositeForEdit.toComposeImageBitmap() }
-                            
+                            val focusPoint = emulatorOverlay?.focusPoint
+                            val centerKey = remember(room.id, focusPoint) {
+                                if (focusPoint == null) null
+                                else "${room.id}:${focusPoint.x.roundToInt()}:${focusPoint.y.roundToInt()}"
+                            }
+
                             LaunchedEffect(Unit) { mapFocusReq.requestFocus() }
+                            LaunchedEffect(centerKey, viewportSize, hScrollState.maxValue, vScrollState.maxValue, zoomLevel, density) {
+                                val point = focusPoint ?: return@LaunchedEffect
+                                if (centerKey == null || lastCenteredKey == centerKey || viewportSize == IntSize.Zero) return@LaunchedEffect
+                                if (hScrollState.maxValue <= 0 && vScrollState.maxValue <= 0) return@LaunchedEffect
+                                val targetX = (point.x * zoomLevel * density) - (viewportSize.width / 2f)
+                                val targetY = (point.y * zoomLevel * density) - (viewportSize.height / 2f)
+                                hScrollState.scrollTo(targetX.roundToInt().coerceIn(0, hScrollState.maxValue))
+                                vScrollState.scrollTo(targetY.roundToInt().coerceIn(0, vScrollState.maxValue))
+                                lastCenteredKey = centerKey
+                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .onSizeChanged { viewportSize = it }
                                     .onPointerEvent(PointerEventType.Scroll) { event ->
                                         val ne = event.nativeEvent as? MouseEvent
                                         val isZoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
+                                        val isHorizontalPan = ne?.isShiftDown == true
                                         val sd = event.changes.first().scrollDelta
                                         if (isZoom) {
                                             val mousePos = event.changes.first().position
@@ -1038,8 +1081,11 @@ fun MapCanvas(
                                                 vScrollState.scrollTo(newScrollY)
                                             }
                                         } else coroutineScope.launch {
-                                            hScrollState.scrollTo((hScrollState.value + sd.x).toInt().coerceIn(0, hScrollState.maxValue))
-                                            vScrollState.scrollTo((vScrollState.value + sd.y).toInt().coerceIn(0, vScrollState.maxValue))
+                                            val scrollSpeed = 50f
+                                            val horizontalDelta = if (isHorizontalPan && sd.x == 0f) sd.y else sd.x
+                                            val verticalDelta = if (isHorizontalPan && sd.x == 0f) 0f else sd.y
+                                            hScrollState.scrollTo((hScrollState.value + (horizontalDelta * scrollSpeed).toInt()).coerceIn(0, hScrollState.maxValue))
+                                            vScrollState.scrollTo((vScrollState.value + (verticalDelta * scrollSpeed).toInt()).coerceIn(0, vScrollState.maxValue))
                                         }
                                     }
                                     .onPointerEvent(PointerEventType.Press) { event ->
@@ -1155,6 +1201,113 @@ fun MapCanvas(
                                             .requiredHeight((data.height * zoomLevel).dp),
                                         contentScale = ContentScale.FillBounds
                                     )
+                                    if (emulatorOverlay != null) {
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val scaleX = if (data.width == 0) 1f else size.width / data.width.toFloat()
+                                            val scaleY = if (data.height == 0) 1f else size.height / data.height.toFloat()
+
+                                            fun drawPolyline(
+                                                points: List<LocalRoomPoint>,
+                                                color: Color,
+                                                strokeWidth: Float,
+                                                dashed: Boolean = false,
+                                            ) {
+                                                if (points.size < 2) return
+                                                val path = Path().apply {
+                                                    moveTo(points.first().x * scaleX, points.first().y * scaleY)
+                                                    for (point in points.drop(1)) {
+                                                        lineTo(point.x * scaleX, point.y * scaleY)
+                                                    }
+                                                }
+                                                drawPath(
+                                                    path = path,
+                                                    color = color,
+                                                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                                        width = strokeWidth,
+                                                        pathEffect = if (dashed) {
+                                                            PathEffect.dashPathEffect(floatArrayOf(14f, 10f))
+                                                        } else {
+                                                            null
+                                                        },
+                                                    ),
+                                                )
+                                            }
+
+                                            fun drawSamusMarker(center: androidx.compose.ui.geometry.Offset) {
+                                                val spriteHeight = 30f * scaleY
+                                                val spriteWidth = if (samusMarker != null) {
+                                                    spriteHeight * (samusMarker.width.toFloat() / samusMarker.height.toFloat())
+                                                } else {
+                                                    16f * scaleX
+                                                }
+                                                drawCircle(
+                                                    color = Color(0x66040A12),
+                                                    radius = 7f * maxOf(scaleX, scaleY),
+                                                    center = center,
+                                                )
+                                                if (samusMarker != null) {
+                                                    drawImage(
+                                                        image = samusMarker,
+                                                        dstOffset = IntOffset(
+                                                            (center.x - spriteWidth / 2f).roundToInt(),
+                                                            (center.y - spriteHeight + (5f * scaleY)).roundToInt(),
+                                                        ),
+                                                        dstSize = IntSize(
+                                                            spriteWidth.roundToInt(),
+                                                            spriteHeight.roundToInt(),
+                                                        ),
+                                                    )
+                                                    return
+                                                }
+                                                val unit = 0.9f * maxOf(scaleX, scaleY)
+                                                val origin = androidx.compose.ui.geometry.Offset(center.x - 6f * unit, center.y - 8f * unit)
+                                                val suit = Color(0xFFFFC54A)
+                                                val visor = Color(0xFF77E8E2)
+                                                val outline = Color(0xFF1A2330)
+                                                val orange = Color(0xFFFF8B3D)
+                                                val red = Color(0xFFC63E33)
+                                                drawRect(outline, origin + androidx.compose.ui.geometry.Offset(4f * unit, 0f), androidx.compose.ui.geometry.Size(4f * unit, 1f * unit))
+                                                drawRect(suit, origin + androidx.compose.ui.geometry.Offset(3f * unit, 1f * unit), androidx.compose.ui.geometry.Size(6f * unit, 3f * unit))
+                                                drawRect(visor, origin + androidx.compose.ui.geometry.Offset(4f * unit, 2f * unit), androidx.compose.ui.geometry.Size(3f * unit, 1.3f * unit))
+                                                drawRect(orange, origin + androidx.compose.ui.geometry.Offset(2f * unit, 4f * unit), androidx.compose.ui.geometry.Size(7f * unit, 5f * unit))
+                                                drawRect(red, origin + androidx.compose.ui.geometry.Offset(1f * unit, 5f * unit), androidx.compose.ui.geometry.Size(2f * unit, 2f * unit))
+                                                drawRect(visor, origin + androidx.compose.ui.geometry.Offset(9f * unit, 5.1f * unit), androidx.compose.ui.geometry.Size(2.5f * unit, 1.4f * unit))
+                                                drawRect(suit, origin + androidx.compose.ui.geometry.Offset(3f * unit, 9f * unit), androidx.compose.ui.geometry.Size(2f * unit, 4f * unit))
+                                                drawRect(suit, origin + androidx.compose.ui.geometry.Offset(6f * unit, 9f * unit), androidx.compose.ui.geometry.Size(2f * unit, 4f * unit))
+                                            }
+
+                                            drawPolyline(emulatorOverlay.plannedRoute, Color(0x55FFF8D6), 8f)
+                                            drawPolyline(emulatorOverlay.plannedRoute, Color(0xFFFFD166), 4.5f)
+                                            drawPolyline(
+                                                emulatorOverlay.liveTrace,
+                                                color = Color(0xFF68D391),
+                                                strokeWidth = 4f,
+                                            )
+
+                                            emulatorOverlay.startAnchor?.let { point ->
+                                                drawCircle(
+                                                    color = Color(0xFFFFD166),
+                                                    radius = 8f,
+                                                    center = androidx.compose.ui.geometry.Offset(point.x * scaleX, point.y * scaleY),
+                                                )
+                                            }
+                                            emulatorOverlay.targetAnchor?.let { point ->
+                                                drawCircle(
+                                                    color = Color(0xFFFF8C42),
+                                                    radius = 8f,
+                                                    center = androidx.compose.ui.geometry.Offset(point.x * scaleX, point.y * scaleY),
+                                                )
+                                            }
+                                            emulatorOverlay.currentPosition?.let { point ->
+                                                val center = androidx.compose.ui.geometry.Offset(point.x * scaleX, point.y * scaleY)
+                                                drawSamusMarker(center)
+                                            }
+                                        }
+                                    }
                                     // Ghost cursor preview: render actual tile graphics
                                     if (editorState != null && editorState.hoverBlockX >= 0 && editorState.brush != null &&
                                         editorState.activeTool == EditorTool.PAINT) {
