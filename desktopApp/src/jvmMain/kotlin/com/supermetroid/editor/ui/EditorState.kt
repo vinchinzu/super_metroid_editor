@@ -439,6 +439,116 @@ class EditorState {
         dirty = true
     }
 
+    // ── Kraid sprite editing ────────────────────────────────────────
+
+    private var kraidSpritemap: com.supermetroid.editor.rom.KraidSpritemap? = null
+    private var kraidSheetGfx: com.supermetroid.editor.rom.EnemySpriteGraphics? = null
+    private var kraidSheetPalette: IntArray? = null
+
+    fun getKraidSpritemap(romParser: com.supermetroid.editor.rom.RomParser): com.supermetroid.editor.rom.KraidSpritemap? {
+        kraidSpritemap?.let { return it }
+        val sm = com.supermetroid.editor.rom.KraidSpritemap(romParser)
+        val b64 = project.customGfx.spriteTileBlocks["kraid:0"]
+        val loaded = if (b64 != null) {
+            try {
+                val custom = java.util.Base64.getDecoder().decode(b64)
+                sm.loadWithCustomTiles(custom)
+            } catch (_: Exception) { sm.load() }
+        } else {
+            sm.load()
+        }
+        if (!loaded) return null
+        kraidSpritemap = sm
+        return sm
+    }
+
+    fun renderKraidFullBody(romParser: com.supermetroid.editor.rom.RomParser): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderFullBody()
+    }
+
+    fun renderKraidBodyTilemap(
+        romParser: com.supermetroid.editor.rom.RomParser,
+        def: com.supermetroid.editor.rom.KraidSpritemap.BodyTilemapDef
+    ): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderBodyTilemap(def)
+    }
+
+    fun renderKraidBigSprmap(
+        romParser: com.supermetroid.editor.rom.RomParser,
+        def: com.supermetroid.editor.rom.KraidSpritemap.ComponentDef
+    ): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderBigSprmap(def)
+    }
+
+    fun getKraidPalette(romParser: com.supermetroid.editor.rom.RomParser): IntArray? {
+        return getKraidSpritemap(romParser)?.getPalette()
+    }
+
+    fun applyKraidComponentEdits(
+        sprite: com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite,
+        editedPixels: IntArray
+    ) {
+        val sm = kraidSpritemap ?: return
+        sm.applyEdits(sprite, editedPixels)
+        val tiles = sm.getTileData() ?: return
+        val b64 = java.util.Base64.getEncoder().encodeToString(tiles)
+        project.customGfx.spriteTileBlocks["kraid:0"] = b64
+        dirty = true
+        kraidSpritemap = null
+    }
+
+    fun loadKraidTileSheet(
+        romParser: com.supermetroid.editor.rom.RomParser
+    ): Triple<IntArray, Int, Int>? {
+        val gfx = com.supermetroid.editor.rom.EnemySpriteGraphics(romParser)
+        val b64 = project.customGfx.spriteTileBlocks["kraid:0"]
+        val loaded = if (b64 != null) {
+            try {
+                val custom = java.util.Base64.getDecoder().decode(b64)
+                gfx.loadFromRaw(listOf(custom))
+                true
+            } catch (_: Exception) { false }
+        } else {
+            false
+        }
+        if (!loaded) {
+            if (!gfx.load(com.supermetroid.editor.rom.EnemySpriteGraphics.KRAID_BLOCKS)) return null
+        }
+
+        val sm = getKraidSpritemap(romParser) ?: return null
+        val palette = sm.getPalette() ?: return null
+        kraidSheetGfx = gfx
+        kraidSheetPalette = palette
+        val result = gfx.renderSheet(palette, cols = 16) ?: return null
+        return Triple(result.first, result.second, result.third)
+    }
+
+    fun getKraidSheetPalette(): IntArray? = kraidSheetPalette
+
+    fun applyKraidTileSheetEdits(pixels: IntArray, w: Int, h: Int) {
+        val gfx = kraidSheetGfx ?: return
+        val palette = kraidSheetPalette ?: return
+        gfx.importFromArgb(pixels, w, h, palette, cols = 16)
+        val rawBlocks = gfx.getRawBlocks() ?: return
+        for ((i, raw) in rawBlocks.withIndex()) {
+            val b64 = java.util.Base64.getEncoder().encodeToString(raw)
+            project.customGfx.spriteTileBlocks["kraid:$i"] = b64
+        }
+        dirty = true
+        kraidSpritemap = null
+    }
+
+    fun hasCustomKraidTileSheet(): Boolean =
+        project.customGfx.spriteTileBlocks.containsKey("kraid:0")
+
+    fun resetKraidTileSheet() {
+        project.customGfx.spriteTileBlocks.remove("kraid:0")
+        kraidSheetGfx = null
+        kraidSheetPalette = null
+        kraidSpritemap = null
+        dirty = true
+    }
+
     private fun writePng(filePath: String, pixels: IntArray, w: Int, h: Int): Boolean {
         return try {
             val img = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
@@ -1404,6 +1514,7 @@ class EditorState {
     }
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
+    internal fun setRoomIdForTest(id: Int) { currentRoomId = id }
 
     // ─── Working level data ─────────────────────────────────────
 
@@ -1713,18 +1824,33 @@ class EditorState {
     private fun autoAssignParam(plmId: Int, param: Int): Int = when {
         param == 0 && RomParser.isItemPlm(plmId) -> {
             val usedIndices = mutableSetOf<Int>()
+            // Replay add/remove history to find NET used params (not ghost entries)
             for ((_, roomEdits) in project.rooms) {
+                val netItems = mutableListOf<Triple<Int, Int, Int>>() // (plmId, xy, param)
                 for (change in roomEdits.plmChanges) {
-                    if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+                    val xy = (change.x shl 16) or change.y
+                    if (change.action == "add") {
+                        netItems.add(Triple(change.plmId, xy, change.param))
+                    } else if (change.action == "remove") {
+                        netItems.removeAll { it.first == change.plmId && it.second == xy }
+                    }
+                }
+                for ((_, _, p) in netItems) {
+                    if (p > 0) usedIndices.add(p)
                 }
             }
+            // Include vanilla item params from current room
             for (plm in _workingPlms) {
                 if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
             }
+            // Vanilla items use 0x00-0x50; search 0x51-0x1FF (431 slots)
             var idx = 0x51
-            while (idx in usedIndices && idx <= 0x7F) idx++
-            if (idx > 0x7F) { idx = 0x9B; while (idx in usedIndices && idx <= 0x9F) idx++ }
-            if (idx > 0x9F) 0x06 else idx
+            while (idx in usedIndices && idx <= 0x1FF) idx++
+            if (idx > 0x1FF) {
+                println("WARN: item collection bit pool exhausted (>431 items)")
+                idx = 0x200
+            }
+            idx
         }
         plmId == 0xB76F && param == 0x8000 -> {
             val usedSaveIndices = mutableSetOf<Int>()
@@ -2811,7 +2937,36 @@ class EditorState {
             }
         }
 
-        if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) return null
+        // Apply Kraid sprite tile patches (raw 4bpp → LZ5 compress → write to $B9)
+        for ((i, block) in com.supermetroid.editor.rom.EnemySpriteGraphics.KRAID_BLOCKS.withIndex()) {
+            val b64 = gfxData.spriteTileBlocks["kraid:$i"]
+            if (b64 == null) continue
+            println("[EXPORT] Kraid block $i: found ${b64.length} b64 chars")
+            try {
+                val rawBytes = java.util.Base64.getDecoder().decode(b64)
+                val compressed = lz5Compress(rawBytes)
+                val (_, origSize) = romParser.decompressLZ2WithSize(block.snesAddress)
+                println("[EXPORT] Kraid block $i: ${compressed.size}/$origSize bytes")
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, block.pcAddress, compressed.size)
+                    for (j in compressed.size until origSize) romData[block.pcAddress + j] = 0xFF.toByte()
+                    gfxPatched++
+                    println("[EXPORT] Patched Kraid sprite tile block $i at PC=0x${block.pcAddress.toString(16)}")
+                } else {
+                    println("[EXPORT] WARN: Kraid sprite block $i compressed size ${compressed.size} exceeds original $origSize — skipped")
+                }
+            } catch (e: Exception) {
+                println("[EXPORT] WARN: Kraid sprite block $i patch failed: ${e.message}")
+            }
+        }
+
+        if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) {
+            val orig = java.io.File(romPath)
+            val out = java.io.File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
+            out.writeBytes(romData)
+            println("Exported (vanilla copy, no edits): ${out.absolutePath}")
+            return out.absolutePath
+        }
 
         // ─── Export verification pass ───────────────────────────────
         // Re-read all modified data from the export copy and validate.

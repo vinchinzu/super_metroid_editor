@@ -129,3 +129,11 @@ for any room in any ROM. Use it to debug scroll issues.
 - **VG Resource SM ripping project**: https://archive.vg-resource.com/thread-23505.html — GRAPHADR discovery, tilemap format, frame pointer arrays
 - **SM decompilation (snesrev/sm)**: ~/code/sm/ — C structs for DoorDef, PlmSetup, etc.
 - **SPC sound data**: `SpcData.KNOWN_TRACKS` maps songSet+playIndex to track names
+
+## Item Collection Bits (param field)
+
+Each item PLM's `param` field maps to a bit in `item_bit_array` ($7E:D870, 64 bytes = 512 bits). When collected, the bit is set via `PrepareBitAccess` ($80:818E): `param & 7` → bit position, `param >> 3` → byte index. On room load, items whose bit is already set self-delete.
+
+**Critical constraint**: Every item PLM across the entire ROM must have a unique `param`. If two items share a param, collecting one marks both as collected — the other vanishes on room reload.
+
+Vanilla items use params 0x00–0x50. The editor assigns from 0x51–0x1FF (431 slots). The `autoAssignParam` function must compute used params from the NET state (replaying add/remove history), not from all historical "add" entries — ghost entries from removed items would falsely exhaust the pool.

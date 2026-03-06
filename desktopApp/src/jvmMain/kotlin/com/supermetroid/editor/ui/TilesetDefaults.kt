@@ -117,34 +117,29 @@ data class SmPatchWrite(val offset: Long, val bytes: List<Int>)
  */
 val HARDCODED_PATCHES: List<SmPatch> = listOf(
     // ── Instant Respawn on Death ──
-    // Hooks the game-over state transition at $82:DCF4 (vanilla: JSL $88829E).
-    // Based on sm_practice_hack cutscenes.asm: load save, set game mode $06,
-    // then PLA×3 to pop the JSL return and JML $82896E to skip the rest of
-    // the death handler. Returning via RTL would continue executing the death
-    // handler with WRAM corrupted by the save load, causing a freeze.
+    // Replaces the body of GameState_19_SamusNoHealth ($82:DC83, PC 0x15C83)
+    // — the FIRST death state, right after one frame of gameplay runs.
+    // At this point hardware/WRAM are still clean (no death animation has run).
+    // Approach verified against the Kaizo Possible 1.01 IPS patch.
+    //
+    // Old approach (broken): hooked $82:DCF4 inside state 25 (too late —
+    // HDMA/IRQ disabled, palettes zeroed, display blanked → freeze on load).
     SmPatch(id = "hex_instant_respawn", name = "Instant Respawn on Death",
         description = "Skip Game Over screen — instantly reload last save point on death. Great for Kaizo hack testing.",
         enabled = false, writes = mutableListOf(
-            // Payload at PC $2FF000 (SNES $DF:F000) — 36 bytes
-            PatchWrite(0x2FF000, listOf(
-                0xC2, 0x20,             // REP #$20       ; 16-bit A
-                0xAD, 0x52, 0x09,       // LDA $0952      ; current save file
-                0x22, 0x85, 0x80, 0x81, // JSL $818085    ; load save from SRAM
-                0xB0, 0x13,             // BCS +19        ; if corrupt → fallback
+            // Inline at PC 0x15C83 (SNES $82:DC83) — 23 bytes
+            // Replaces GameState_19 body (palette save + death setup).
+            // A is already 16-bit from the caller.
+            PatchWrite(0x15C83, listOf(
                 0x22, 0x17, 0xBE, 0x82, // JSL $82BE17    ; cancel sound effects
+                0xAD, 0x52, 0x09,       // LDA $0952      ; current save slot
+                0x22, 0x85, 0x80, 0x81, // JSL $818085    ; load save from SRAM
+                0x22, 0x8C, 0x85, 0x80, // JSL $80858C    ; LoadMirrorOfExploredMapTiles
                 0xA9, 0x06, 0x00,       // LDA #$0006     ; game mode = load from save
                 0x8D, 0x98, 0x09,       // STA $0998      ; set game mode
-                0xE2, 0x20,             // SEP #$20       ; 8-bit A
-                0x68,                   // PLA             ; pop JSL return (low)
-                0x68,                   // PLA             ; pop JSL return (high)
-                0x68,                   // PLA             ; pop JSL return (bank)
-                0x5C, 0x6E, 0x89, 0x82, // JML $82896E   ; skip to end of frame
-                // fallback: resume vanilla game-over screen
-                0xE2, 0x20,             // SEP #$20       ; 8-bit A
-                0x5C, 0x9E, 0x82, 0x88  // JML $88829E   ; vanilla game-over handler
-            )),
-            // Hook at $82:DCF4 (PC 0x15CF4): JSL $DFF000
-            PatchWrite(0x15CF4, listOf(0x22, 0x00, 0xF0, 0xDF))
+                0x28,                   // PLP             ; restore processor flags
+                0x60                    // RTS             ; return to game loop
+            ))
         )),
 
     // ── Hyper Beam ──

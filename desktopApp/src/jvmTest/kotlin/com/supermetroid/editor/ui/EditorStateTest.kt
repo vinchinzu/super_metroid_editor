@@ -1,6 +1,7 @@
 package com.supermetroid.editor.ui
 
 import com.supermetroid.editor.data.PatternCell
+import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.TilePattern
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -815,6 +816,105 @@ class EditorStateTest {
             assertEquals(55, b.primaryIndex)
             assertEquals(0xA, b.blockTypeAt(0, 0))
             assertEquals(3, b.btsAt(0, 0))
+        }
+    }
+
+    // ── Item collection bit assignment ────────────────────────────
+
+    @Nested
+    inner class CollectionBitAssignment {
+
+        private val MISSILE_VISIBLE = 0xEEDB
+        private val ETANK_VISIBLE = 0xEED7
+        private val SPRING_VISIBLE = 0xEF03
+
+        @BeforeEach
+        fun setUpRoom() {
+            state.setRoomIdForTest(0x91F8)
+        }
+
+        @Test
+        fun `new items get unique collection bit params`() {
+            state.addPlm(MISSILE_VISIBLE, 10, 10, 0)
+            state.addPlm(MISSILE_VISIBLE, 20, 20, 0)
+            state.addPlm(ETANK_VISIBLE, 30, 30, 0)
+
+            val params = state.workingPlms
+                .filter { it.id in setOf(MISSILE_VISIBLE, ETANK_VISIBLE) }
+                .map { it.param }
+
+            assertEquals(3, params.size)
+            assertEquals(params.toSet().size, params.size, "All params should be unique")
+            assertTrue(params.all { it >= 0x51 }, "Params should be >= 0x51")
+        }
+
+        @Test
+        fun `removing and re-adding items does not exhaust the param pool`() {
+            // Simulate many add/remove cycles (the bug that caused param=0x0006)
+            for (i in 0 until 60) {
+                state.addPlm(MISSILE_VISIBLE, i, 0, 0)
+            }
+            // Remove them all
+            for (i in 0 until 60) {
+                state.removePlm(i, 0, MISSILE_VISIBLE)
+            }
+            // Now add a fresh item — should get a valid param, not a fallback
+            state.addPlm(SPRING_VISIBLE, 5, 5, 0)
+
+            val plm = state.workingPlms.find { it.id == SPRING_VISIBLE && it.x == 5 && it.y == 5 }
+            assertNotNull(plm)
+            assertTrue(plm!!.param >= 0x51, "Param should be in valid range, got 0x${plm.param.toString(16)}")
+            assertNotEquals(0x06, plm.param, "Must not fall back to vanilla param 0x0006")
+        }
+
+        @Test
+        fun `items across multiple rooms get unique params`() {
+            state.setRoomIdForTest(0x91F8)
+            state.addPlm(MISSILE_VISIBLE, 10, 10, 0)
+            state.addPlm(ETANK_VISIBLE, 20, 20, 0)
+
+            val room1Params = state.workingPlms
+                .filter { it.id in setOf(MISSILE_VISIBLE, ETANK_VISIBLE) }
+                .map { it.param }.toSet()
+
+            // Switch to a different room
+            state.setRoomIdForTest(0x92FD)
+            state.addPlm(SPRING_VISIBLE, 5, 5, 0)
+
+            val room2Param = state.workingPlms
+                .find { it.id == SPRING_VISIBLE && it.x == 5 && it.y == 5 }!!.param
+
+            assertFalse(room2Param in room1Params,
+                "Room 2 param 0x${room2Param.toString(16)} must not collide with room 1 params")
+        }
+
+        @Test
+        fun `net state computation ignores ghost add entries`() {
+            // Add 50 items then remove them all — ghost entries fill change log
+            for (i in 0 until 50) {
+                state.addPlm(MISSILE_VISIBLE, i, 0, 0)
+            }
+            for (i in 0 until 50) {
+                state.removePlm(i, 0, MISSILE_VISIBLE)
+            }
+
+            // Add 50 MORE items — should all get unique params if net state is used
+            val addedParams = mutableSetOf<Int>()
+            for (i in 0 until 50) {
+                state.addPlm(MISSILE_VISIBLE, i, 10, 0)
+                val plm = state.workingPlms.find { it.id == MISSILE_VISIBLE && it.x == i && it.y == 10 }
+                assertNotNull(plm, "PLM at ($i, 10) should exist")
+                assertTrue(plm!!.param >= 0x51, "Param 0x${plm.param.toString(16)} should be >= 0x51")
+                assertFalse(plm.param in addedParams, "Param 0x${plm.param.toString(16)} should not be a duplicate")
+                addedParams.add(plm.param)
+            }
+        }
+
+        @Test
+        fun `explicit param is preserved when nonzero`() {
+            state.addPlm(MISSILE_VISIBLE, 10, 10, 0x42)
+            val plm = state.workingPlms.find { it.id == MISSILE_VISIBLE && it.x == 10 && it.y == 10 }
+            assertEquals(0x42, plm!!.param, "Explicit nonzero param should be preserved")
         }
     }
 

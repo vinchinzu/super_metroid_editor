@@ -316,6 +316,18 @@ class TileGraphics(private val romParser: RomParser) {
     /** Number of CRE tiles. */
     fun getCreTileCount(): Int = TOTAL_TILES - getCreOffset()
 
+    /**
+     * Overwrite raw 4bpp tile data at a given tile index.
+     * Used to inject boss-specific tiles (e.g. Kraid at 0x100) into the
+     * combined VRAM tile array, mimicking what the game's AI does at runtime.
+     */
+    fun injectRawTileData(startTileIndex: Int, data: ByteArray) {
+        val dst = rawTileData ?: return
+        val byteOffset = startTileIndex * BYTES_PER_TILE
+        val copyLen = minOf(data.size, dst.size - byteOffset)
+        if (copyLen > 0) System.arraycopy(data, 0, dst, byteOffset, copyLen)
+    }
+
     /** Force tileset to re-load from ROM on next call. */
     fun invalidateCache() { cachedTilesetId = -1; rawTileData = null; metatiles = null; cachedPalette = null }
 
