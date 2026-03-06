@@ -184,34 +184,40 @@ class RoomExporter(
         // Without level data we can't validate doors against collision grid,
         // so emit all parsed doors unfiltered
         if (!hasLevelData) {
-            return doorEntries.map { door -> makeDoorExport(door, room, caps) }
+            return doorEntries.map { door -> makeDoorExport(door, room, caps, null) }
         }
 
-        // Count type-9 block clusters on each room edge to detect over-reads
-        val edgeDoorCounts = countEdgeDoors(collisionGrid)
+        val edgeDoorAnchors = findEdgeDoorAnchors(collisionGrid)
 
         // Track how many doors we've emitted per direction
         val directionCounts = mutableMapOf<Int, Int>()
 
         return doorEntries.mapNotNull { door ->
             val dir = door.direction and 0x03
+            val emittedForDir = directionCounts.getOrDefault(dir, 0)
+            val anchor = when (dir) {
+                0 -> edgeDoorAnchors.right.getOrNull(emittedForDir)
+                1 -> edgeDoorAnchors.left.getOrNull(emittedForDir)
+                2 -> edgeDoorAnchors.bottom.getOrNull(emittedForDir)
+                3 -> edgeDoorAnchors.top.getOrNull(emittedForDir)
+                else -> null
+            }
 
             // Elevators bypass collision validation — the elevator platform may
             // not use type-9 blocks even though the door transition is real
             if (!door.isElevator) {
-                val emittedForDir = directionCounts.getOrDefault(dir, 0)
                 val maxForDir = when (dir) {
-                    0 -> edgeDoorCounts.right
-                    1 -> edgeDoorCounts.left
-                    2 -> edgeDoorCounts.bottom
-                    3 -> edgeDoorCounts.top
+                    0 -> edgeDoorAnchors.right.size
+                    1 -> edgeDoorAnchors.left.size
+                    2 -> edgeDoorAnchors.bottom.size
+                    3 -> edgeDoorAnchors.top.size
                     else -> 0
                 }
                 if (emittedForDir >= maxForDir) return@mapNotNull null
             }
 
             directionCounts[dir] = directionCounts.getOrDefault(dir, 0) + 1
-            makeDoorExport(door, room, caps)
+            makeDoorExport(door, room, caps, anchor)
         }
     }
 
@@ -219,6 +225,7 @@ class RoomExporter(
         door: RomParser.DoorEntry,
         room: Room,
         caps: List<CapInfo>,
+        anchor: DoorAnchor?,
     ): DoorExport {
         val destId = door.destRoomPtr
         val destInfo = roomInfoById[destId]
@@ -231,49 +238,70 @@ class RoomExporter(
             isElevator = door.isElevator,
             doorCapColor = matchedCap?.let { colorName(it.color) },
             requiredAbility = matchedCap?.let { abilityForColor(it.color) },
+            screenX = door.screenX,
+            screenY = door.screenY,
+            sourceBlockX = anchor?.x,
+            sourceBlockY = anchor?.y,
         )
     }
 
-    private data class EdgeDoorCounts(val left: Int, val right: Int, val top: Int, val bottom: Int)
+    private data class DoorAnchor(val x: Int, val y: Int)
+
+    private data class EdgeDoorAnchors(
+        val left: List<DoorAnchor>,
+        val right: List<DoorAnchor>,
+        val top: List<DoorAnchor>,
+        val bottom: List<DoorAnchor>,
+    )
 
     /**
      * Count distinct door clusters on each room edge by scanning for type-9 blocks.
      * A "cluster" is a contiguous vertical run (left/right edges) or horizontal run
      * (top/bottom edges) of door blocks. Each cluster = one physical door.
      */
-    private fun countEdgeDoors(collisionGrid: List<List<Int>>): EdgeDoorCounts {
+    private fun findEdgeDoorAnchors(collisionGrid: List<List<Int>>): EdgeDoorAnchors {
         val rows = collisionGrid.size
         val cols = if (rows > 0) collisionGrid[0].size else 0
-        if (rows == 0 || cols == 0) return EdgeDoorCounts(0, 0, 0, 0)
+        if (rows == 0 || cols == 0) return EdgeDoorAnchors(emptyList(), emptyList(), emptyList(), emptyList())
 
-        val left = countVerticalClusters(collisionGrid, rows, col = 0)
-        val right = countVerticalClusters(collisionGrid, rows, col = cols - 1)
-        val top = countHorizontalClusters(collisionGrid, cols, row = 0)
-        val bottom = countHorizontalClusters(collisionGrid, cols, row = rows - 1)
+        val left = verticalClusters(collisionGrid, rows, col = 0)
+        val right = verticalClusters(collisionGrid, rows, col = cols - 1)
+        val top = horizontalClusters(collisionGrid, cols, row = 0)
+        val bottom = horizontalClusters(collisionGrid, cols, row = rows - 1)
 
-        return EdgeDoorCounts(left, right, top, bottom)
+        return EdgeDoorAnchors(left, right, top, bottom)
     }
 
-    private fun countVerticalClusters(grid: List<List<Int>>, rows: Int, col: Int): Int {
-        var clusters = 0
-        var inCluster = false
+    private fun verticalClusters(grid: List<List<Int>>, rows: Int, col: Int): List<DoorAnchor> {
+        val anchors = mutableListOf<DoorAnchor>()
+        var start: Int? = null
         for (r in 0 until rows) {
             val isDoor = grid[r][col] == 9
-            if (isDoor && !inCluster) { clusters++; inCluster = true }
-            if (!isDoor) inCluster = false
+            if (isDoor && start == null) start = r
+            if (!isDoor && start != null) {
+                val end = r - 1
+                anchors.add(DoorAnchor(x = col, y = (start + end) / 2))
+                start = null
+            }
         }
-        return clusters
+        if (start != null) anchors.add(DoorAnchor(x = col, y = (start + rows - 1) / 2))
+        return anchors
     }
 
-    private fun countHorizontalClusters(grid: List<List<Int>>, cols: Int, row: Int): Int {
-        var clusters = 0
-        var inCluster = false
+    private fun horizontalClusters(grid: List<List<Int>>, cols: Int, row: Int): List<DoorAnchor> {
+        val anchors = mutableListOf<DoorAnchor>()
+        var start: Int? = null
         for (c in 0 until cols) {
             val isDoor = grid[row][c] == 9
-            if (isDoor && !inCluster) { clusters++; inCluster = true }
-            if (!isDoor) inCluster = false
+            if (isDoor && start == null) start = c
+            if (!isDoor && start != null) {
+                val end = c - 1
+                anchors.add(DoorAnchor(x = (start + end) / 2, y = row))
+                start = null
+            }
         }
-        return clusters
+        if (start != null) anchors.add(DoorAnchor(x = (start + cols - 1) / 2, y = row))
+        return anchors
     }
 
     /**
