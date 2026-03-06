@@ -1462,7 +1462,11 @@ class EditorState {
         if (file.exists()) {
             try {
                 project = json.decodeFromString(SmEditProject.serializer(), file.readText())
-                println("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms)")
+                val enabledPatches = project.patches.filter { it.enabled }
+                println("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms, ${project.patches.size} patches)")
+                if (enabledPatches.isNotEmpty()) {
+                    println("  Enabled patches: ${enabledPatches.joinToString { "'${it.name}'" }}")
+                }
             } catch (e: Exception) {
                 println("Failed to load project: ${e.message}")
                 project = SmEditProject(romPath = romPath)
@@ -2221,7 +2225,12 @@ class EditorState {
 
     // ─── Project file I/O ───────────────────────────────────────
 
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        encodeDefaults = true
+    }
 
     /**
      * Save project to .smedit file. When romParser is provided, also export
@@ -2282,6 +2291,7 @@ class EditorState {
     fun exportToRom(romParser: RomParser): String? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        saveProject(romParser)
         println("[EXPORT] Starting export — romPath=$romPath, romSize=${romParser.getRomData().size}")
         println("[EXPORT] Project spriteTileBlocks keys: ${project.customGfx.spriteTileBlocks.keys}")
         val romData = romParser.getRomData().copyOf()
@@ -2291,8 +2301,12 @@ class EditorState {
         // that patches write into otherwise-empty banks (e.g. skip_intro
         // writes custom ASM into bank $A1 free space).
         var patchesApplied = 0
+        val enabledCount = project.patches.count { it.enabled }
+        val disabledCount = project.patches.size - enabledCount
+        println("[EXPORT] Patches: $enabledCount enabled, $disabledCount disabled (${project.patches.size} total)")
         for (patch in project.patches) {
             if (!patch.enabled) continue
+            println("[EXPORT] Applying patch: '${patch.name}' [${patch.id}] configType=${patch.configType ?: "hex"}")
             if (patch.configType == "ceres_escape_seconds") {
                 val totalSecs = (patch.configValue ?: 60).coerceIn(15, 600)
                 val mins = totalSecs / 60
@@ -2304,8 +2318,10 @@ class EditorState {
                     romData[off] = secsBcd.toByte()
                     romData[off + 1] = minsBcd.toByte()
                 }
+                println("[EXPORT]   Ceres timer: ${mins}m${secs}s")
             } else if (patch.configType == "beam_damage") {
                 val data = patch.configData ?: continue
+                var beamCount = 0
                 for (beam in ALL_BEAMS) {
                     val dmg = data[beam.key] ?: continue
                     val charged = dmg * 3
@@ -2319,9 +2335,12 @@ class EditorState {
                         romData[pcCharged] = (charged and 0xFF).toByte()
                         romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
                     }
+                    beamCount++
                 }
+                println("[EXPORT]   Beam damage: $beamCount beams modified")
             } else if (patch.configType == "boss_stats") {
                 val data = patch.configData ?: continue
+                var fieldCount = 0
                 for (field in ALL_BOSS_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = romParser.snesToPc(field.snesAddress) + field.offset
@@ -2329,9 +2348,12 @@ class EditorState {
                         romData[pc] = (value and 0xFF).toByte()
                         romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
                     }
+                    fieldCount++
                 }
+                println("[EXPORT]   Boss stats: $fieldCount fields modified")
             } else if (patch.configType == "phantoon") {
                 val data = patch.configData ?: continue
+                var fieldCount = 0
                 for (field in ALL_PHANTOON_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = romParser.snesToPc(field.snesAddress)
@@ -2339,9 +2361,12 @@ class EditorState {
                         romData[pc] = (value and 0xFF).toByte()
                         romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
                     }
+                    fieldCount++
                 }
+                println("[EXPORT]   Phantoon behavior: $fieldCount fields modified")
             } else if (patch.configType == "enemy_stats") {
                 val data = patch.configData ?: continue
+                var modCount = 0
                 for (e in ENEMY_DEFS) {
                     val hp = data["${e.key}_hp"]
                     val dmg = data["${e.key}_dmg"]
@@ -2352,6 +2377,7 @@ class EditorState {
                             romData[pc] = (hp and 0xFF).toByte()
                             romData[pc + 1] = ((hp shr 8) and 0xFF).toByte()
                         }
+                        modCount++
                     }
                     if (dmg != null) {
                         val pc = romParser.snesToPc(snesAddr) + 6
@@ -2359,10 +2385,13 @@ class EditorState {
                             romData[pc] = (dmg and 0xFF).toByte()
                             romData[pc + 1] = ((dmg shr 8) and 0xFF).toByte()
                         }
+                        modCount++
                     }
                 }
+                println("[EXPORT]   Enemy stats: $modCount values modified")
             } else if (patch.configType == "controller_config") {
                 val data = patch.configData ?: continue
+                var slotCount = 0
                 for (slot in CONTROLLER_SLOTS) {
                     val value = data[slot.key] ?: continue
                     val off = CONTROLLER_TABLE_PC + slot.tableIndex * 2
@@ -2370,16 +2399,20 @@ class EditorState {
                         romData[off] = (value and 0xFF).toByte()
                         romData[off + 1] = ((value shr 8) and 0xFF).toByte()
                     }
+                    slotCount++
                 }
+                println("[EXPORT]   Controller config: $slotCount buttons remapped")
             } else if (patch.configType == "boss_defeated" || patch.configType == "hyper_beam") {
-                // These are handled by the combined per-frame hook below
+                println("[EXPORT]   (deferred to combined per-frame hook)")
             } else {
+                val totalBytes = patch.writes.sumOf { it.bytes.size }
                 for (write in patch.writes) {
                     val off = write.offset.toInt()
                     for ((i, b) in write.bytes.withIndex()) {
                         if (off + i < romData.size) romData[off + i] = b.toByte()
                     }
                 }
+                println("[EXPORT]   Hex writes: ${patch.writes.size} records, $totalBytes bytes")
             }
             patchesApplied++
         }
@@ -2398,6 +2431,7 @@ class EditorState {
                 if (patch.configType == "hyper_beam") hyperBeam = true
             }
             if (enabledBosses.isNotEmpty() || hyperBeam) {
+                println("[EXPORT] Per-frame hook active: bosses=${enabledBosses.ifEmpty { "none" }}, hyperBeam=$hyperBeam")
                 val code = mutableListOf<Int>()
                 // Chain to original: JSL $8289EF
                 code.addAll(listOf(0x22, 0xEF, 0x89, 0x82))
@@ -2457,6 +2491,9 @@ class EditorState {
                     val addr = 0x1096E + i
                     if (addr < romData.size) romData[addr] = b.toByte()
                 }
+                println("[EXPORT]   Per-frame hook: ${code.size} bytes at \$DF:F040, hook at \$82:896E")
+            } else {
+                println("[EXPORT] Per-frame hook: not needed (no boss flags or hyper beam)")
             }
         }
 
