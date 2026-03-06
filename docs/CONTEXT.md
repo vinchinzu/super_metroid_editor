@@ -2,7 +2,7 @@ SM Source / Binary Documentation:
 - Review .md files in this folder + .txt files for more context
 - Review "Super Metroid Mod 3.0.80/SMMM_black.html"
 - ~/code/super_metroid/smile/
-- ~/code/sm/ (documented C code/structs)
+- ~/code/super_metroid/sm/ (documented C code/structs)
 
 ## Available Docs in docs/
 
@@ -34,7 +34,8 @@ Key fields for the sprite editor:
 | +$06 | 2 | Damage | |
 | +$08 | 2 | Width | Hitbox half-width in pixels |
 | +$0A | 2 | Height | Hitbox half-height in pixels |
-| +$0C | 1 | aiBank | Bank for AI routines AND palette data |
+| +$0C | 1 | aiBank | Bank for AI routines, palette, AND spritemap data |
+| +$12 | 2 | initAI | Init function pointer (in aiBank) — sets up instruction list |
 | +$14 | 2 | parts | Number of sub-pieces (0 = 1 part) |
 | +$36 | 2 | GRAPHADR offset | 16-bit LE offset of compressed tile data |
 | +$38 | 1 | GRAPHADR bank | Bank byte for compressed tile data |
@@ -44,7 +45,14 @@ Key fields for the sprite editor:
 | +$3E | 2 | Name ptr | Bank $B4 |
 
 ### Palette formula
-`palette_data = $(aiBank):(palPtr + 0x20)` — 32 bytes of BGR555 colors.
+The palette block starts at `$(aiBank):(palPtr)`. Some enemies store multiple 32-byte palette
+rows (row 0 = base/shared colors, row 1 = sprite colors). Others have only a single row.
+
+**Auto-detection heuristic**: check if data at `palPtr + 0x20` is valid BGR555 (all 16 words
+<= 0x7FFF). If so, use row 1 (+0x20). Otherwise, use row 0 (palPtr directly). This correctly
+handles both multi-row enemies (Zoomer, Skree) and single-row enemies (Zeela, Sidehopper, Cacatac).
+
+See `EnemySpriteGraphics.readEnemyPalette()` for implementation.
 
 ### Tile data loading
 `GRAPHADR = $(bank at +$38):(offset at +$36-37)` points to an LZ5-compressed block.
@@ -92,9 +100,11 @@ Example:  03 01 04 01 80
   Screen[3] → Blue, Screen[4] → Blue, done
 ```
 
-Related PLMs:
-- `$B63B` — rightwards extension (copies treadmill block rightward from the B703 PLM)
-- `$B647` — upwards extension (copies treadmill block upward)
+Related PLMs (treadmill extensions — widen a B703 trigger's hitbox):
+- `$B63B` — rightward extension
+- `$B63F` — leftward extension
+- `$B643` — downward extension
+- `$B647` — upward extension
 
 ### Room Load Order
 
@@ -113,12 +123,124 @@ has command `$93A5` which sets Screen 4 to RED. When Samus walks over that block
 becomes un-scrollable — even though the editor shows it as Blue.
 
 **Fix:** Remove or modify scroll PLMs when changing a room's scroll behavior. Our editor shows
-scroll PLMs in the PLM list (IDs B703, B63B, B647) but does not yet decode their commands inline.
+scroll PLMs on a dedicated "Scroll Triggers" overlay (orange badges), lets you remove them via
+the tile properties panel, and decodes their scroll commands inline (e.g., "Screen (4,0) → Red (lock)").
+The "Add Scroll Trigger" dropdown lets you reuse existing commands or add treadmill extensions.
 
 ### Scroll diagnostic test
 
 `ScrollSystemTest.kt` can dump all scroll data, scroll PLMs, their decoded commands, and door ASM
 for any room in any ROM. Use it to debug scroll issues.
+
+## Enemy Population Export
+
+### Data format (bank $A1)
+16 bytes per entry (8 × 16-bit words), terminated by `FFFF` + 1-byte kill count.
+See `rom_data_format.md` §Enemy Population Set for field layout.
+
+### Properties word (offset 8-9 of each entry)
+- **Bit 13 (0x2000)**: CRITICAL — assigns initial spritemap pointer during
+  `InitializeEnemies`. Without it, `spritemap_pointer` stays 0 → reads garbage
+  from WRAM → crash or severe graphical corruption. Our export forces this bit on.
+- **Bit 11 (0x0800)**: `kEnemyProps_ProcessedOffscreen` — process instructions off-screen.
+- **Bit 10 (0x0400)**: `kEnemyProps_Tangible` — can be hit by Samus.
+- **Bit 0 (0x0001)**: Used by some enemies for orientation.
+- Default for new enemies: `0x2800` (bits 13 + 11).
+- Vanilla entries commonly use `0x2800`, `0x2001`, or `0x2000`.
+
+Engine source (`sm_a0.c:InitializeEnemies`):
+```c
+E->spritemap_pointer = 0;
+if ((E->properties & 0x2000) != 0) {
+    E->spritemap_pointer = addr_kSpritemap_Nothing_A4;
+}
+```
+
+### Kill count byte
+One byte after the `FFFF` terminator. The game reads it to determine how many enemies
+must be killed for room-clear events. Must be preserved during relocation.
+
+### Enemy GFX set (bank $B4) — HARD LIMIT: 4 entries
+
+The `enemyGfxPtr` (state data offset +10) points directly to entries (past the 7-byte debug name).
+Each entry: `species_id(2) + vram_dst(2)`. Terminated by `FFFF`.
+
+**Hardware constraint**: `ProcessEnemyTilesets` in `sm_a0.c` writes to fixed 4-slot arrays
+(`enemy_def_ptr[4]`, `enemy_gfxdata_tiles_index[4]`, `enemy_gfxdata_vram_ptr[4]`). A 5th
+entry overflows these arrays and corrupts adjacent RAM — guaranteed crash.
+
+The `vram_dst` low byte is the palette index: `LOBYTE(vram_dst) + 8` selects the CGRAM row
+for the enemy's palette (rows 8-15 are OBJ palettes on SNES). The high bits of `vram_dst`
+can contain VRAM offset flags for enemies with `tile_data_size & 0x8000`.
+
+**Export safeguards**:
+1. GFX entries are only added for species in the FINAL population (after all add/remove
+   changes are applied), not for species that were added then removed.
+2. The 4-entry limit is enforced; species beyond the limit are skipped with a warning.
+3. `LoadEnemyGfxIndexes` handles missing GFX entries gracefully (palette defaults to row 5,
+   tiles index defaults to 0) — the enemy draws with wrong graphics but doesn't crash.
+
+**Free space allocation**: Bank $B4 free space is scanned ONCE before the room loop and tracked
+with a persistent `gfxFreePtr` that increments after each allocation (same pattern as bank $A1
+`enemyFreePtr`). The backward scan also absorbs the last vanilla GFX set's `FFFF` terminator
+(both bytes are 0xFF), so a +2 guard is applied after the scan to preserve it. Without this,
+the engine reads past the terminator into our new data, loading garbage species and VRAM values.
+
+**Vanilla species without GFX entries**: Some species exist in a room's vanilla population but
+intentionally have NO GFX entry (e.g. Elevator in room $9938, Phantoon in $CD13). They work via
+`LoadEnemyGfxIndexes` defaults (palette row 13, tiles index 0). The export only adds GFX entries
+for species the user is adding — `neededSpecies = (finalSpecies - vanillaSpecies) - existingGfx`.
+Adding unneeded entries causes `ProcessEnemyTilesets` to decompress + DMA tile data to VRAM $7000+,
+corrupting the room's designed VRAM layout.
+
+## OAM Spritemap Assembly (EnemySpritemap.kt)
+
+Regular enemies use OAM spritemaps (unlike Phantoon which uses BG2 tilemaps). The
+`EnemySpritemap` class finds and parses these, assembling tiles into the final sprite.
+
+### Spritemap data format
+Each spritemap has a 2-byte entry count, then 5 bytes per OAM entry:
+
+| Byte(s) | Format | Contents |
+|---------|--------|----------|
+| 0-1 | LE word | `s_______ XXXXXXXX` — bit 15 = size (1=16x16, 0=8x8), bits 8-0 = signed 9-bit X offset |
+| 2 | signed byte | Y offset from enemy center |
+| 3-4 | LE word | `VHooPPPn cccccccc` — V/H flip, priority, palette row, name table select, tile number |
+
+### Finding spritemaps from species headers
+The init function at `$(aiBank):$(initAI)` sets up the instruction list pointer (`$0F92,x`).
+`EnemySpritemap.findInstructionListPointer()` traces the init code using pattern matching:
+- `LDA #imm; STA $0F92,x` — direct pointer
+- `LDA abs,y; STA $0F92,x` — direction table lookup (first entry used)
+- `TYA; STA $0F92,x` — value from Y register
+- JSR following — scans subroutine calls for the patterns above
+
+The instruction list uses 4-byte entries `[word0, word1]`. Two formats exist:
+- **Standard**: word0 < 0x8000 → `[timer, spritemap_ptr]`
+- **Handler-based**: word0 >= 0x8000 → `[handler_ptr, timer]` (handler parsed as spritemap)
+
+### Tile numbering
+Tile numbers in spritemaps include the SNES name table select bit (bit 8). For rendering:
+`local_tile_index = tile_number & 0xFF` maps into the decompressed tile data.
+16x16 sprites use a 2x2 grid: tiles `[N, N+1, N+16, N+17]` in the 16-tile-wide VRAM layout.
+
+### Current coverage
+Working: Zoomer, Zeela, Skree, Cacatac (auto-detected via init tracing).
+Not yet: Sidehopper (nested JSR with computed values), Waver (different AI structure).
+Phantoon uses BG2 tilemaps (PhantoonSpritemap.kt), not OAM spritemaps.
+
+## Enemy Sprite Tests
+
+- `EnemySpriteRenderTest.kt` — palette auto-detection, tile data decompression, render validation,
+  known stats verification for all editor enemies. Also validates Phantoon palette via `readEnemyPalette`.
+- `EnemyExportDiagTest.kt` — enemy population roundtrip, GFX set parsing, properties bit 0x2000
+  enforcement, kill count byte verification, GFX set final-population logic (vs. raw change list),
+  4-entry GFX hardware limit enforcement, B4 free space terminator guard, vanilla species skip,
+  multi-room relocation overlap prevention.
+- `EnemySpritemapTest.kt` — OAM spritemap parsing, instruction list tracing, assembled sprite
+  rendering (Zoomer, Zeela, Skree, Cacatac), animation frame extraction, OAM entry validation.
+- `PhantoonSpritemapRoundtripTest.kt` — Phantoon-specific: body render pixel-perfect match against
+  reference PNG, edit roundtrip (paint → applyEdits → re-render), pixel-to-tile mapping.
 
 ## External References
 

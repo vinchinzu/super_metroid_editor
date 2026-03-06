@@ -1712,7 +1712,16 @@ fun MapCanvas(
                                                                         destDropExpanded = false
                                                                         destRoomSearch = ""
                                                                         if (rid != currentDoor.destRoomPtr) {
-                                                                            editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
+                                                                            val match = romParser?.findVanillaDoorMatch(
+                                                                                rid, currentDoor.direction,
+                                                                                currentDoor.screenX, currentDoor.screenY
+                                                                            )
+                                                                            editorState.updateDoor(propsBts,
+                                                                                currentDoor.copy(
+                                                                                    destRoomPtr = rid,
+                                                                                    entryCode = match?.entryCode ?: 0,
+                                                                                    doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                                                ))
                                                                         }
                                                                     },
                                                                     modifier = Modifier.height(26.dp)
@@ -1767,13 +1776,25 @@ fun MapCanvas(
 
                                                 // Screen X (0x00–0xFF)
                                                 ByteDropdown("Screen X:", currentDoor.screenX) { v ->
-                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenX = v))
+                                                    val match = romParser?.findVanillaDoorMatch(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(
+                                                        screenX = v,
+                                                        entryCode = match?.entryCode ?: currentDoor.entryCode,
+                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                    ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
                                                 // Screen Y (0x00–0xFF)
                                                 ByteDropdown("Screen Y:", currentDoor.screenY) { v ->
-                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenY = v))
+                                                    val match = romParser?.findVanillaDoorMatch(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(
+                                                        screenY = v,
+                                                        entryCode = match?.entryCode ?: currentDoor.entryCode,
+                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                    ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -1823,9 +1844,9 @@ fun MapCanvas(
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                                // Scroll/Entry ASM pointers (advanced)
+                                                // Door cap position / Entry ASM pointers (advanced)
                                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                    Text("Scroll:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    Text("Door Cap:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
                                                     var scrollText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
@@ -1919,10 +1940,8 @@ fun MapCanvas(
                                                                 plm.param, rw
                                                             )
                                                             for ((screenIdx, _, scrollVal) in cmds) {
-                                                                val col = screenIdx % rw
-                                                                val row = screenIdx / rw
                                                                 Text(
-                                                                    "  [$screenIdx] (x=$col,y=$row) → ${RomParser.scrollValueLabel(scrollVal)}",
+                                                                    "  ${RomParser.formatScrollCommand(screenIdx, scrollVal, rw)}",
                                                                     fontSize = 8.sp,
                                                                     color = MaterialTheme.colorScheme.outline
                                                                 )
@@ -2149,44 +2168,50 @@ fun MapCanvas(
                                                     ?.sorted()
                                                     ?: emptyList()
                                                 if (existingScrollCmds.isNotEmpty()) {
-                                                    Text("Use existing command:", fontSize = 9.sp,
+                                                    Text("Reuse command from this room:", fontSize = 9.sp,
                                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                                         color = MaterialTheme.colorScheme.primary,
                                                         fontWeight = FontWeight.Bold)
                                                     for (cmdPtr in existingScrollCmds) {
                                                         val rw = roomHeader?.width ?: 1
-                                                        val cmdLabel = if (romParser != null && rw > 0) {
-                                                            val cmds = RomParser.decodeScrollCommands(romParser, cmdPtr, rw)
-                                                            cmds.joinToString(", ") { (sIdx, _, sv) ->
-                                                                "[$sIdx]→${RomParser.scrollValueLabel(sv)}"
-                                                            }
-                                                        } else ""
+                                                        val cmdLines = if (romParser != null && rw > 0) {
+                                                            RomParser.decodeScrollCommands(romParser, cmdPtr, rw)
+                                                                .map { (sIdx, _, sv) -> RomParser.formatScrollCommand(sIdx, sv, rw) }
+                                                        } else emptyList()
+                                                        val itemHeight = (28 + cmdLines.size * 14).coerceAtMost(80)
                                                         DropdownMenuItem(
                                                             text = {
                                                                 Column {
-                                                                    Text("\$${cmdPtr.toString(16).uppercase().padStart(4, '0')}", fontSize = 10.sp)
-                                                                    if (cmdLabel.isNotEmpty()) {
-                                                                        Text(cmdLabel, fontSize = 8.sp,
-                                                                            color = MaterialTheme.colorScheme.outline)
+                                                                    for (line in cmdLines) {
+                                                                        Text(line, fontSize = 9.sp)
                                                                     }
+                                                                    Text("ptr \$${cmdPtr.toString(16).uppercase().padStart(4, '0')}",
+                                                                        fontSize = 7.sp,
+                                                                        color = MaterialTheme.colorScheme.outline)
                                                                 }
                                                             },
                                                             onClick = {
                                                                 addScrollExpanded = false
                                                                 editorState.addPlm(0xB703, propsBlockX, propsBlockY, cmdPtr)
                                                             },
-                                                            modifier = Modifier.height(if (cmdLabel.isNotEmpty()) 40.dp else 28.dp)
+                                                            modifier = Modifier.heightIn(min = itemHeight.dp)
                                                         )
                                                     }
                                                     Divider()
                                                 }
-                                                Text("Extensions:", fontSize = 9.sp,
+                                                Text("Treadmill extensions:", fontSize = 9.sp,
                                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                                     color = MaterialTheme.colorScheme.primary,
                                                     fontWeight = FontWeight.Bold)
+                                                Text("Widens an adjacent trigger's hitbox",
+                                                    fontSize = 7.sp,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 0.dp),
+                                                    color = MaterialTheme.colorScheme.outline)
                                                 for ((plmId, label) in listOf(
-                                                    0xB63B to "Extend Right",
-                                                    0xB647 to "Extend Up"
+                                                    0xB63B to "→ Extend Right",
+                                                    0xB63F to "← Extend Left",
+                                                    0xB647 to "↑ Extend Up",
+                                                    0xB643 to "↓ Extend Down"
                                                 )) {
                                                     DropdownMenuItem(
                                                         text = { Text(label, fontSize = 10.sp) },

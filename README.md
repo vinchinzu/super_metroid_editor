@@ -21,12 +21,22 @@ Tile Editor
   <img src="screenshots/smedit_tile_pixel_editor.png" width="44%" alt="Tile Editor" />
 </p>
 
-Patches
+<p>
+  <img src="screenshots/smedit_slopes.png" width="54%" alt="Slopes" />
+  <img src="screenshots/smedit_sound.png" width="44%" alt="Sound" />
+</p>
+
+Sprite Editor
 
 <p>
-  <img src="screenshots/smedit_patches_beams.png" width="60%" alt="Patches" />
-  <img src="screenshots/smedit_patches_boss_stats.png" width="38%" alt="Patches" />
+  <img src="screenshots/smedit_phantoon_sprite_editor.png" width="48%" alt="Sprite Editor" />
+  <img src="screenshots/smedit_phantoon_sprite_editor_edited.png" width="48%" alt="Sprite Editor" />
 </p>
+<p>
+  <img src="screenshots/smedit_phantoon_edited_01.png" width="48%" alt="Sprite Editor" />
+  <img src="screenshots/smedit_phantoon_edited_03.png" width="48%" alt="Sprite Editor" />
+</p>
+
 
 
 Misc
