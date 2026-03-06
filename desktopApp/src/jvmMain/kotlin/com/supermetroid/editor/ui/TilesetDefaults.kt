@@ -347,6 +347,46 @@ val BOSS_FLAG_DEFS = listOf(
     BossFlagDef("botwoon",  "Botwoon",            0xD82C, 0x01),
 )
 
+// ─── Controller Configuration ──────────────────────────────────
+
+/** Config patch: Controller button mapping. */
+val CONTROLLER_CONFIG_PATCH = SmPatch(
+    id = "config_controller",
+    name = "Controller Configuration",
+    description = "Remap the default button assignments for Shot, Jump, Dash, Item Select/Cancel, and Aim.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "controller_config"
+)
+
+data class ControllerSlot(val key: String, val name: String, val tableIndex: Int, val defaultButton: Int)
+
+/** The 7 configurable actions in the order they appear in the ROM table at $82:F575 (PC 0x017575). */
+val CONTROLLER_SLOTS = listOf(
+    ControllerSlot("shot",        "Shot",        0, 0x0040),
+    ControllerSlot("jump",        "Jump",        1, 0x0080),
+    ControllerSlot("dash",        "Dash (Run)",  2, 0x8000),
+    ControllerSlot("item_select", "Item Select", 3, 0x2000),
+    ControllerSlot("item_cancel", "Item Cancel", 4, 0x4000),
+    ControllerSlot("angle_down",  "Angle Down",  5, 0x0020),
+    ControllerSlot("angle_up",    "Angle Up",    6, 0x0010),
+)
+
+data class SnesButton(val name: String, val bitmask: Int)
+
+val SNES_BUTTONS = listOf(
+    SnesButton("A",      0x0080),
+    SnesButton("B",      0x8000),
+    SnesButton("X",      0x0040),
+    SnesButton("Y",      0x4000),
+    SnesButton("L",      0x0020),
+    SnesButton("R",      0x0010),
+    SnesButton("Select", 0x2000),
+)
+
+/** PC offset of the 7×2-byte default button table in the ROM. */
+const val CONTROLLER_TABLE_PC = 0x017575
+
 /**
  * Build the ASM payload + hook for boss-defeated flags at export time.
  * Routine lives at $DF:F040 (PC $2FF040). Hooks the per-frame main loop

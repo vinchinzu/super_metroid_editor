@@ -182,6 +182,12 @@ fun main() = application {
                             },
                             enabled = romParser != null
                         ) { Text("Export ROM") }
+                        Button(
+                            onClick = {
+                                romParser?.let { editorState.exportToIps(it) }
+                            },
+                            enabled = romParser != null
+                        ) { Text("Export IPS") }
                     }
                 }
                 

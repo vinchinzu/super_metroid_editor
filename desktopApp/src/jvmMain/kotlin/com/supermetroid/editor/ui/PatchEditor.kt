@@ -245,6 +245,7 @@ fun PatchEditorCanvas(
             "phantoon" -> PhantoonEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
             "enemy_stats" -> EnemyStatsEditor(patch, editorState, romParser, Modifier.weight(1f).fillMaxWidth())
             "boss_defeated" -> BossDefeatedEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
+            "controller_config" -> ControllerConfigEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
             else -> PatchHexEditor(patch, editorState, Modifier.weight(1f).fillMaxWidth())
         }
     }
@@ -399,6 +400,103 @@ private fun CeresEscapeTimeConfig(
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ControllerConfigEditor(
+    patch: SmPatch,
+    editorState: EditorState,
+    modifier: Modifier
+) {
+    val data = patch.configData ?: mutableMapOf()
+
+    Column(modifier = modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text(
+            "Remap the default controller buttons. Changes apply to new saves and the options menu default.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "ROM table: \$82:F575 (PC 0x017575) — 7 slots × 2 bytes",
+            fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(16.dp))
+
+        for (slot in CONTROLLER_SLOTS) {
+            val current = data[slot.key] ?: slot.defaultButton
+            val defaultName = SNES_BUTTONS.find { it.bitmask == slot.defaultButton }?.name ?: "?"
+            var expanded by remember(slot.key) { mutableStateOf(false) }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Text(
+                    slot.name,
+                    fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.width(100.dp)
+                )
+                Box {
+                    Surface(
+                        modifier = Modifier.width(120.dp).height(32.dp)
+                            .clickable { expanded = true },
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val btnName = SNES_BUTTONS.find { it.bitmask == current }?.name ?: "0x${current.toString(16)}"
+                            Text(btnName, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("▼", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        for (btn in SNES_BUTTONS) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(btn.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        if (btn.bitmask == slot.defaultButton) {
+                                            Text("(default)", fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    expanded = false
+                                    editorState.setPatchConfigData(patch.id, slot.key, btn.bitmask)
+                                },
+                                modifier = Modifier.height(32.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "default: $defaultName",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(
+            onClick = {
+                for (slot in CONTROLLER_SLOTS) {
+                    editorState.setPatchConfigData(patch.id, slot.key, slot.defaultButton)
+                }
+            },
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+        ) { Text("Reset to Defaults", fontSize = 11.sp) }
     }
 }
 

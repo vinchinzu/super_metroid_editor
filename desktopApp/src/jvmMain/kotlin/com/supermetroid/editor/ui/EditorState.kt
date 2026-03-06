@@ -1219,7 +1219,7 @@ class EditorState {
         val ordered = mutableListOf<SmPatch>()
 
         // 1. GUI config patches (featured at top)
-        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CERES_ESCAPE_PATCH)) {
+        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CONTROLLER_CONFIG_PATCH, CERES_ESCAPE_PATCH)) {
             if (guiPatch.id !in existingIds) {
                 ordered.add(SmPatch(
                     id = guiPatch.id,
@@ -2361,6 +2361,16 @@ class EditorState {
                         }
                     }
                 }
+            } else if (patch.configType == "controller_config") {
+                val data = patch.configData ?: continue
+                for (slot in CONTROLLER_SLOTS) {
+                    val value = data[slot.key] ?: continue
+                    val off = CONTROLLER_TABLE_PC + slot.tableIndex * 2
+                    if (off + 1 < romData.size) {
+                        romData[off] = (value and 0xFF).toByte()
+                        romData[off + 1] = ((value shr 8) and 0xFF).toByte()
+                    }
+                }
             } else if (patch.configType == "boss_defeated" || patch.configType == "hyper_beam") {
                 // These are handled by the combined per-frame hook below
             } else {
@@ -3052,6 +3062,60 @@ class EditorState {
         out.writeBytes(romData)
         println("Exported: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)")
         return out.absolutePath
+    }
+
+    /**
+     * Export an IPS patch by diffing the patched ROM against the original.
+     * Reuses [exportToRom] to build the patched data, then generates IPS records
+     * for every changed byte range.
+     */
+    fun exportToIps(romParser: RomParser): String? {
+        val romPath = project.romPath
+        if (romPath.isEmpty()) return null
+
+        val original = romParser.getRomData()
+        val smcPath = exportToRom(romParser) ?: return null
+        val patched = File(smcPath).readBytes()
+
+        if (original.size != patched.size) {
+            println("[IPS] ROM size mismatch: ${original.size} vs ${patched.size}")
+            return null
+        }
+
+        val ipsData = buildIpsPatch(original, patched)
+        val orig = File(romPath)
+        val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}_edited.ips")
+        ipsFile.writeBytes(ipsData)
+        println("Exported IPS: ${ipsFile.absolutePath} (${ipsData.size} bytes)")
+        return ipsFile.absolutePath
+    }
+
+    private fun buildIpsPatch(original: ByteArray, patched: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write("PATCH".toByteArray(Charsets.US_ASCII))
+
+        var i = 0
+        val len = minOf(original.size, patched.size)
+        while (i < len) {
+            if (original[i] != patched[i]) {
+                val start = i
+                while (i < len && original[i] != patched[i] && (i - start) < 0xFFFF) i++
+                val size = i - start
+
+                // IPS record: 3-byte offset, 2-byte size, data
+                out.write((start shr 16) and 0xFF)
+                out.write((start shr 8) and 0xFF)
+                out.write(start and 0xFF)
+                out.write((size shr 8) and 0xFF)
+                out.write(size and 0xFF)
+                out.write(patched, start, size)
+            } else {
+                i++
+            }
+        }
+
+        out.write("EOF".toByteArray(Charsets.US_ASCII))
+        return out.toByteArray()
     }
 
     private fun lz5Compress(data: ByteArray) = LZ5Compressor.compress(data)
