@@ -108,6 +108,17 @@ class EditorState {
     var hoverTileWord by mutableStateOf(0)
         private set
 
+    /** Transient status message shown in the bottom bar (auto-clears). */
+    var statusMessage by mutableStateOf("")
+        private set
+    var statusMessageTimestamp by mutableStateOf(0L)
+        private set
+
+    fun postStatus(msg: String) {
+        statusMessage = msg
+        statusMessageTimestamp = System.currentTimeMillis()
+    }
+
     /** TileGraphics for rendering brush preview. Set when room loads. */
     var tileGraphics: TileGraphics? = null
         private set
@@ -1202,13 +1213,16 @@ class EditorState {
 
     fun getSelectedPatch(): SmPatch? = project.patches.find { it.id == selectedPatchId }
 
-    /** Ensure all default patches exist; loads bundled IPS + hardcoded hex demos. */
+    private var patchesSeeded = false
+
+    /** Ensure all default patches exist; loads bundled IPS + hardcoded hex demos. Idempotent. */
     fun seedDefaultPatches() {
+        if (patchesSeeded) return
+        patchesSeeded = true
         // Remove legacy/duplicate patches from old configs
         val removed = project.patches.removeAll { it.id in LEGACY_PATCH_IDS }
         if (removed) {
             if (selectedPatchId in LEGACY_PATCH_IDS) selectedPatchId = null
-            dirty = true
             patchVersion++
         }
 
@@ -1257,7 +1271,7 @@ class EditorState {
             added = ordered.size
         }
 
-        if (added > 0) { dirty = true; patchVersion++ }
+        if (added > 0) { patchVersion++ }
     }
 
     // ─── Tile selection ─────────────────────────────────────────
@@ -1475,6 +1489,7 @@ class EditorState {
             project = SmEditProject(romPath = romPath)
         }
         dirty = false
+        patchesSeeded = false
         tileGraphics = null
         workingLevelData = null
         originalLevelData = null
@@ -1655,8 +1670,8 @@ class EditorState {
                 }
             }
         }
-        // Bump version so map renders from working data immediately
-        editVersion++
+        // Bump render version without marking room as user-edited
+        _editVersionState.value++
     }
 
     fun readBlockWord(bx: Int, by: Int): Int {
@@ -2248,10 +2263,11 @@ class EditorState {
             File(projectFilePath).writeText(json.encodeToString(SmEditProject.serializer(), project))
             dirty = false
             println("Project saved: $projectFilePath")
+            postStatus("Project saved: $projectFilePath")
             romParser?.let { exportCustomGfxPngs(it) }
             PatternLibrary.saveAll(project.patterns)
             true
-        } catch (e: Exception) { println("Save failed: ${e.message}"); false }
+        } catch (e: Exception) { println("Save failed: ${e.message}"); postStatus("Save failed: ${e.message}"); false }
     }
 
     /** Export custom tileset graphics as PNGs to project folder. Folder is per-ROM so projects don't overwrite each other. */
@@ -3214,7 +3230,9 @@ class EditorState {
         val orig = File(romPath)
         val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
         out.writeBytes(romData)
-        println("Exported: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)")
+        val msg = "Exported ROM: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)"
+        println(msg)
+        postStatus(msg)
         return out.absolutePath
     }
 
@@ -3240,7 +3258,9 @@ class EditorState {
         val orig = File(romPath)
         val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}_edited.ips")
         ipsFile.writeBytes(ipsData)
-        println("Exported IPS: ${ipsFile.absolutePath} (${ipsData.size} bytes)")
+        val msg = "Exported IPS: ${ipsFile.absolutePath} (${ipsData.size} bytes)"
+        println(msg)
+        postStatus(msg)
         return ipsFile.absolutePath
     }
 

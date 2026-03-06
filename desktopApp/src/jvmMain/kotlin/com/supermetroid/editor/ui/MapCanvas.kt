@@ -2,6 +2,7 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -14,7 +15,6 @@ import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.SaveAlt
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,8 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.window.Popup
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -456,7 +454,7 @@ private fun TileMetaIcon(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun MapCanvas(
     room: RoomInfo?,
@@ -478,6 +476,7 @@ fun MapCanvas(
     val mapFocusReq = remember { FocusRequester() }
     Card(
         modifier = modifier,
+        shape = RectangleShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()
@@ -562,22 +561,22 @@ fun MapCanvas(
                 val editVersion = editorState?.editVersion ?: 0
                 
                 // ─── Compact toolbar ─────────────────────────────
-                Row(
+                FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Zoom
-                    Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp, modifier = Modifier.width(32.dp))
+                    Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp,
+                        modifier = Modifier.width(32.dp).alignByBaseline())
                     Slider(
                         value = zoomLevel,
                         onValueChange = { zoomState.value = it; mapFocusReq.requestFocus() },
                         valueRange = 0.25f..4f,
                         steps = 14,
-                        modifier = Modifier.width(80.dp)
+                        modifier = Modifier.width(80.dp).height(28.dp)
                     )
                     
                     // Grid toggle
@@ -585,7 +584,7 @@ fun MapCanvas(
                         selected = showGrid,
                         onClick = { showGrid = !showGrid; mapFocusReq.requestFocus() },
                         label = { Text("Grid", fontSize = 9.sp) },
-                        modifier = Modifier.height(24.dp)
+                        modifier = Modifier.height(28.dp)
                     )
                     
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
@@ -659,12 +658,8 @@ fun MapCanvas(
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.SELECT,
                             onClick = { editorState.activeTool = EditorTool.SELECT; mapFocusReq.requestFocus() },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(Icons.Default.SelectAll, contentDescription = null, modifier = Modifier.size(14.dp))
-                                }
-                            },
-                            modifier = Modifier.height(24.dp)
+                            label = { Icon(Icons.Default.SelectAll, contentDescription = "Select (Q)", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.PAINT,
@@ -676,42 +671,26 @@ fun MapCanvas(
                                 }
                                 mapFocusReq.requestFocus()
                             },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(14.dp))
-                                }
-                            },
-                            modifier = Modifier.height(24.dp)
+                            label = { Icon(Icons.Default.Brush, contentDescription = "Paint (D)", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.FILL,
                             onClick = { editorState.activeTool = EditorTool.FILL; mapFocusReq.requestFocus() },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(Icons.Default.FormatColorFill, contentDescription = null, modifier = Modifier.size(14.dp))
-                                }
-                            },
-                            modifier = Modifier.height(24.dp)
+                            label = { Icon(Icons.Default.FormatColorFill, contentDescription = "Fill (G)", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.ERASE,
                             onClick = { editorState.activeTool = EditorTool.ERASE; mapFocusReq.requestFocus() },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
-                                }
-                            },
-                            modifier = Modifier.height(24.dp)
+                            label = { Icon(Icons.Outlined.Delete, contentDescription = "Erase (E)", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp)
                         )
                         FilterChip(
                             selected = editorState.activeTool == EditorTool.SAMPLE,
                             onClick = { editorState.activeTool = EditorTool.SAMPLE; mapFocusReq.requestFocus() },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Icon(Icons.Default.Colorize, contentDescription = null, modifier = Modifier.size(14.dp))
-                                }
-                            },
-                            modifier = Modifier.height(24.dp)
+                            label = { Icon(Icons.Default.Colorize, contentDescription = "Sample (I)", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp)
                         )
                         
                         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
@@ -819,115 +798,6 @@ fun MapCanvas(
                                     modifier = Modifier.size(16.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
-                        }
-
-                        Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // Brush info + hover tile info
-                        val brush = editorState.brush
-                        if (brush != null) {
-                            val bt = brush.blockType
-                            Text(
-                                "${brush.cols}×${brush.rows}" +
-                                    " #${brush.primaryIndex}" +
-                                    " 0x${bt.toString(16).uppercase()} ${blockTypeName(bt)}" +
-                                    (if (brush.hFlip) " H" else "") +
-                                    (if (brush.vFlip) " V" else ""),
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        // Hover tile info (always visible when hovering)
-                        if (editorState.hoverBlockX >= 0) {
-                            val hw = editorState.hoverTileWord
-                            val hIdx = hw and 0x3FF
-                            val hType = (hw shr 12) and 0xF
-                            Text(
-                                "#$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        // ─── Room warnings ────────────────────────────
-                        val warnings = remember(editorState.editVersion) {
-                            val w = mutableListOf<String>()
-                            val plms = editorState.workingPlms
-                            val upgradeItemCount = plms.count { RomParser.isUpgradeItemPlm(it.id) }
-                            val uniqueUpgradeTypes = plms
-                                .filter { RomParser.isUpgradeItemPlm(it.id) }
-                                .map { it.id }
-                                .distinct()
-                                .size
-                            if (uniqueUpgradeTypes > 4) {
-                                w.add("$uniqueUpgradeTypes unique upgrade items in room (engine limit: 4 graphics slots). " +
-                                    "Items will display incorrect sprites. Expansion items (ETank/Missile/Super/PBomb) are unaffected.")
-                            } else if (upgradeItemCount > 4 && uniqueUpgradeTypes > 1) {
-                                w.add("$upgradeItemCount upgrade item PLMs with $uniqueUpgradeTypes unique types (4 graphics slots). " +
-                                    "Graphics may cycle unexpectedly between items.")
-                            }
-                            val totalPlms = plms.size
-                            if (totalPlms > 48) {
-                                w.add("$totalPlms PLMs in room. High PLM counts may cause instability.")
-                            }
-                            val totalEnemies = editorState.workingEnemies.size
-                            if (totalEnemies > 24) {
-                                w.add("$totalEnemies enemies in room. High enemy counts may cause slowdown or instability.")
-                            }
-                            w
-                        }
-                        if (warnings.isNotEmpty()) {
-                            Spacer(modifier = Modifier.weight(1f))
-                            var warningPopupExpanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(
-                                    onClick = { warningPopupExpanded = !warningPopupExpanded },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Warning,
-                                        contentDescription = "Warnings",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = Color(0xFFE6A700)
-                                    )
-                                }
-                                if (warningPopupExpanded) {
-                                    Popup(
-                                        alignment = Alignment.TopEnd,
-                                        onDismissRequest = { warningPopupExpanded = false },
-                                        offset = IntOffset(0, 32)
-                                    ) {
-                                        Surface(
-                                            shape = MaterialTheme.shapes.medium,
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            shadowElevation = 8.dp,
-                                            modifier = Modifier.widthIn(max = 340.dp)
-                                        ) {
-                                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    modifier = Modifier.fillMaxWidth()
-                                                ) {
-                                                    Text("Room Warnings", fontSize = 12.sp,
-                                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                                                    Text("✕", modifier = Modifier.clickable { warningPopupExpanded = false }.padding(4.dp),
-                                                        fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                                for (warning in warnings) {
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        Icon(Icons.Default.Warning, contentDescription = null,
-                                                            modifier = Modifier.size(14.dp),
-                                                            tint = Color(0xFFE6A700))
-                                                        Text(warning, fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }

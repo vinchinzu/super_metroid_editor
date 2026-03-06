@@ -40,7 +40,11 @@ import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.EnemySpriteViewer
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.KraidSpriteEditor
+import com.supermetroid.editor.ui.blockTypeName
 import com.supermetroid.editor.ui.LocalSwingWindow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import kotlinx.coroutines.delay
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.RoomPropertiesPanel
@@ -427,68 +431,140 @@ fun main() = application {
                             }
                         )
 
-                        // ── Right canvas ──
-                        key(leftTab, tilesetSubTab, selectedSpriteIdx) {
-                        when (leftTab) {
-                            0 -> MapCanvas(
-                                room = selectedRoom,
-                                romParser = romParser,
-                                editorState = editorState,
-                                rooms = rooms,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            1 -> {
-                                if (tilesetSubTab == 1) {
-                                    PatternEditorCanvas(
+                        // ── Right canvas + status bar ──
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                key(leftTab, tilesetSubTab, selectedSpriteIdx) {
+                                when (leftTab) {
+                                    0 -> MapCanvas(
+                                        room = selectedRoom,
+                                        romParser = romParser,
+                                        editorState = editorState,
+                                        rooms = rooms,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    1 -> {
+                                        if (tilesetSubTab == 1) {
+                                            PatternEditorCanvas(
+                                                editorState = editorState,
+                                                romParser = romParser,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            TilesetCanvas(
+                                                romParser = romParser,
+                                                editorState = editorState,
+                                                tilesetEditorState = tilesetEditorState,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                    2 -> PatchEditorCanvas(
                                         editorState = editorState,
                                         romParser = romParser,
                                         modifier = Modifier.fillMaxSize()
                                     )
-                                } else {
-                                    TilesetCanvas(
+                                    3 -> SoundEditorCanvas(
                                         romParser = romParser,
                                         editorState = editorState,
-                                        tilesetEditorState = tilesetEditorState,
+                                        soundEditorState = soundEditorState,
                                         modifier = Modifier.fillMaxSize()
                                     )
+                                    4 -> {
+                                        val entries = com.supermetroid.editor.rom.EnemySpriteGraphics.EDITOR_ENEMIES
+                                        val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
+                                        if (selected.speciesId == 0xE4BF) {
+                                            PhantoonSpriteEditor(
+                                                editorState = editorState,
+                                                romParser = romParser,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else if (selected.speciesId == 0xE2BF) {
+                                            KraidSpriteEditor(
+                                                editorState = editorState,
+                                                romParser = romParser,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            EnemySpriteViewer(
+                                                entry = selected,
+                                                romParser = romParser,
+                                                editorState = editorState,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
                                 }
                             }
-                            2 -> PatchEditorCanvas(
-                                editorState = editorState,
-                                romParser = romParser,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            3 -> SoundEditorCanvas(
-                                romParser = romParser,
-                                editorState = editorState,
-                                soundEditorState = soundEditorState,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            4 -> {
-                                val entries = com.supermetroid.editor.rom.EnemySpriteGraphics.EDITOR_ENEMIES
-                                val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
-                                if (selected.speciesId == 0xE4BF) {
-                                    PhantoonSpriteEditor(
-                                        editorState = editorState,
-                                        romParser = romParser,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else if (selected.speciesId == 0xE2BF) {
-                                    KraidSpriteEditor(
-                                        editorState = editorState,
-                                        romParser = romParser,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    EnemySpriteViewer(
-                                        entry = selected,
-                                        romParser = romParser,
-                                        editorState = editorState,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+
+                            // ─── Bottom status bar ───────────────────────
+                            if (editorState != null) {
+                                val es = editorState!!
+                                val statusTs = es.statusMessageTimestamp
+                                var showTransient by remember { mutableStateOf(false) }
+                                LaunchedEffect(statusTs) {
+                                    if (statusTs > 0L) {
+                                        showTransient = true
+                                        delay(4000)
+                                        showTransient = false
+                                    }
+                                }
+
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    shape = androidx.compose.ui.graphics.RectangleShape,
+                                    modifier = Modifier.fillMaxWidth().height(24.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        val monoFont = FontFamily.Monospace
+                                        if (showTransient && es.statusMessage.isNotEmpty()) {
+                                            Text(
+                                                es.statusMessage,
+                                                fontSize = 9.sp,
+                                                fontFamily = monoFont,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        } else if (leftTab == 0 && es.hoverBlockX >= 0) {
+                                            val hx = es.hoverBlockX
+                                            val hy = es.hoverBlockY
+                                            val hw = es.hoverTileWord
+                                            val hIdx = hw and 0x3FF
+                                            val hType = (hw shr 12) and 0xF
+                                            val chunkX = hx / 16
+                                            val chunkY = hy / 16
+                                            Text(
+                                                "chunk($chunkX,$chunkY)  tile($hx,$hy)  #$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
+                                                fontSize = 9.sp,
+                                                fontFamily = monoFont,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        } else {
+                                            Spacer(Modifier.width(1.dp))
+                                        }
+
+                                        val brush = es.brush
+                                        if (leftTab == 0 && brush != null) {
+                                            val bt = brush.blockType
+                                            Text(
+                                                "${brush.cols}×${brush.rows} #${brush.primaryIndex} 0x${bt.toString(16).uppercase()} ${blockTypeName(bt)}" +
+                                                    (if (brush.hFlip) " H" else "") +
+                                                    (if (brush.vFlip) " V" else ""),
+                                                fontSize = 9.sp,
+                                                fontFamily = monoFont,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        }
                         }
                     }
                 }

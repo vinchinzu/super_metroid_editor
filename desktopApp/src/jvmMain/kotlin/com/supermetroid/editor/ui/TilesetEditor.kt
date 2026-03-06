@@ -84,7 +84,7 @@ fun TilesetListPanel(
         if (romParser != null && tilesetEditorState.gridData == null) loadTileset(tilesetId)
     }
 
-    Card(modifier = modifier, elevation = CardDefaults.cardElevation(2.dp)) {
+    Card(modifier = modifier, shape = androidx.compose.ui.graphics.RectangleShape, elevation = CardDefaults.cardElevation(2.dp)) {
         Column(modifier = Modifier.fillMaxSize()) {
             Text(
                 "Tilesets",
@@ -177,6 +177,7 @@ fun TilesetCanvas(
 
     Card(
         modifier = modifier,
+        shape = androidx.compose.ui.graphics.RectangleShape,
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
