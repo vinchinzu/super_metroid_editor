@@ -117,34 +117,29 @@ data class SmPatchWrite(val offset: Long, val bytes: List<Int>)
  */
 val HARDCODED_PATCHES: List<SmPatch> = listOf(
     // ── Instant Respawn on Death ──
-    // Hooks the game-over state transition at $82:DCF4 (vanilla: JSL $88829E).
-    // Based on sm_practice_hack cutscenes.asm: load save, set game mode $06,
-    // then PLA×3 to pop the JSL return and JML $82896E to skip the rest of
-    // the death handler. Returning via RTL would continue executing the death
-    // handler with WRAM corrupted by the save load, causing a freeze.
+    // Replaces the body of GameState_19_SamusNoHealth ($82:DC83, PC 0x15C83)
+    // — the FIRST death state, right after one frame of gameplay runs.
+    // At this point hardware/WRAM are still clean (no death animation has run).
+    // Approach verified against the Kaizo Possible 1.01 IPS patch.
+    //
+    // Old approach (broken): hooked $82:DCF4 inside state 25 (too late —
+    // HDMA/IRQ disabled, palettes zeroed, display blanked → freeze on load).
     SmPatch(id = "hex_instant_respawn", name = "Instant Respawn on Death",
         description = "Skip Game Over screen — instantly reload last save point on death. Great for Kaizo hack testing.",
         enabled = false, writes = mutableListOf(
-            // Payload at PC $2FF000 (SNES $DF:F000) — 36 bytes
-            PatchWrite(0x2FF000, listOf(
-                0xC2, 0x20,             // REP #$20       ; 16-bit A
-                0xAD, 0x52, 0x09,       // LDA $0952      ; current save file
-                0x22, 0x85, 0x80, 0x81, // JSL $818085    ; load save from SRAM
-                0xB0, 0x13,             // BCS +19        ; if corrupt → fallback
+            // Inline at PC 0x15C83 (SNES $82:DC83) — 23 bytes
+            // Replaces GameState_19 body (palette save + death setup).
+            // A is already 16-bit from the caller.
+            PatchWrite(0x15C83, listOf(
                 0x22, 0x17, 0xBE, 0x82, // JSL $82BE17    ; cancel sound effects
+                0xAD, 0x52, 0x09,       // LDA $0952      ; current save slot
+                0x22, 0x85, 0x80, 0x81, // JSL $818085    ; load save from SRAM
+                0x22, 0x8C, 0x85, 0x80, // JSL $80858C    ; LoadMirrorOfExploredMapTiles
                 0xA9, 0x06, 0x00,       // LDA #$0006     ; game mode = load from save
                 0x8D, 0x98, 0x09,       // STA $0998      ; set game mode
-                0xE2, 0x20,             // SEP #$20       ; 8-bit A
-                0x68,                   // PLA             ; pop JSL return (low)
-                0x68,                   // PLA             ; pop JSL return (high)
-                0x68,                   // PLA             ; pop JSL return (bank)
-                0x5C, 0x6E, 0x89, 0x82, // JML $82896E   ; skip to end of frame
-                // fallback: resume vanilla game-over screen
-                0xE2, 0x20,             // SEP #$20       ; 8-bit A
-                0x5C, 0x9E, 0x82, 0x88  // JML $88829E   ; vanilla game-over handler
-            )),
-            // Hook at $82:DCF4 (PC 0x15CF4): JSL $DFF000
-            PatchWrite(0x15CF4, listOf(0x22, 0x00, 0xF0, 0xDF))
+                0x28,                   // PLP             ; restore processor flags
+                0x60                    // RTS             ; return to game loop
+            ))
         )),
 
     // ── Hyper Beam ──
@@ -351,6 +346,46 @@ val BOSS_FLAG_DEFS = listOf(
     BossFlagDef("croc",     "Crocomire",          0xD82A, 0x04),
     BossFlagDef("botwoon",  "Botwoon",            0xD82C, 0x01),
 )
+
+// ─── Controller Configuration ──────────────────────────────────
+
+/** Config patch: Controller button mapping. */
+val CONTROLLER_CONFIG_PATCH = SmPatch(
+    id = "config_controller",
+    name = "Controller Configuration",
+    description = "Remap the default button assignments for Shot, Jump, Dash, Item Select/Cancel, and Aim.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "controller_config"
+)
+
+data class ControllerSlot(val key: String, val name: String, val tableIndex: Int, val defaultButton: Int)
+
+/** The 7 configurable actions in the order they appear in the ROM table at $82:F575 (PC 0x017575). */
+val CONTROLLER_SLOTS = listOf(
+    ControllerSlot("shot",        "Shot",        0, 0x0040),
+    ControllerSlot("jump",        "Jump",        1, 0x0080),
+    ControllerSlot("dash",        "Dash (Run)",  2, 0x8000),
+    ControllerSlot("item_select", "Item Select", 3, 0x2000),
+    ControllerSlot("item_cancel", "Item Cancel", 4, 0x4000),
+    ControllerSlot("angle_down",  "Angle Down",  5, 0x0020),
+    ControllerSlot("angle_up",    "Angle Up",    6, 0x0010),
+)
+
+data class SnesButton(val name: String, val bitmask: Int)
+
+val SNES_BUTTONS = listOf(
+    SnesButton("A",      0x0080),
+    SnesButton("B",      0x8000),
+    SnesButton("X",      0x0040),
+    SnesButton("Y",      0x4000),
+    SnesButton("L",      0x0020),
+    SnesButton("R",      0x0010),
+    SnesButton("Select", 0x2000),
+)
+
+/** PC offset of the 7×2-byte default button table in the ROM. */
+const val CONTROLLER_TABLE_PC = 0x017575
 
 /**
  * Build the ASM payload + hook for boss-defeated flags at export time.

@@ -251,3 +251,31 @@ Phantoon uses BG2 tilemaps (PhantoonSpritemap.kt), not OAM spritemaps.
 - **VG Resource SM ripping project**: https://archive.vg-resource.com/thread-23505.html — GRAPHADR discovery, tilemap format, frame pointer arrays
 - **SM decompilation (snesrev/sm)**: ~/code/sm/ — C structs for DoorDef, PlmSetup, etc.
 - **SPC sound data**: `SpcData.KNOWN_TRACKS` maps songSet+playIndex to track names
+
+## Item Collection Bits (param field)
+
+Each item PLM's `param` field maps to a bit in `item_bit_array` ($7E:D870, 64 bytes = 512 bits). When collected, the bit is set via `PrepareBitAccess` ($80:818E): `param & 7` → bit position, `param >> 3` → byte index. On room load, items whose bit is already set self-delete.
+
+**Critical constraint**: Every item PLM across the entire ROM must have a unique `param`. If two items share a param, collecting one marks both as collected — the other vanishes on room reload.
+
+Vanilla items use params 0x00–0x50. The editor assigns from 0x51–0x1FF (431 slots). The `autoAssignParam` function must compute used params from the NET state (replaying add/remove history), not from all historical "add" entries — ghost entries from removed items would falsely exhaust the pool.
+
+## Controller Configuration
+
+Default button mapping table at SNES $82:F575 (PC 0x017575), 7 slots × 2 bytes:
+
+| Slot | Action | Default | Bitmask |
+|------|--------|---------|---------|
+| 0 | Shot | X | 0x0040 |
+| 1 | Jump | A | 0x0080 |
+| 2 | Dash | B | 0x8000 |
+| 3 | Item Select | Select | 0x2000 |
+| 4 | Item Cancel | Y | 0x4000 |
+| 5 | Angle Down | L | 0x0020 |
+| 6 | Angle Up | R | 0x0010 |
+
+Assignable SNES buttons: A(0x0080), B(0x8000), X(0x0040), Y(0x4000), L(0x0020), R(0x0010), Select(0x2000). The WRAM address table (`off_82F54A` at $82:F54A) maps these slots to runtime addresses $7E:09B2–09BE. The options menu reads/writes this table via `OptionsMenuFunc8` and `LoadControllerOptionsFromControllerBindings`.
+
+## IPS Patch Export
+
+IPS format: 5-byte header "PATCH", records of [3-byte offset, 2-byte size, data bytes], 3-byte footer "EOF". RLE records use size=0 followed by [2-byte run length, 1-byte fill value]. Export diffs the patched ROM against the original vanilla ROM to produce only the changed byte ranges.

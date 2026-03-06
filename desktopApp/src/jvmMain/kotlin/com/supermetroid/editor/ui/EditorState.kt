@@ -439,6 +439,116 @@ class EditorState {
         dirty = true
     }
 
+    // ── Kraid sprite editing ────────────────────────────────────────
+
+    private var kraidSpritemap: com.supermetroid.editor.rom.KraidSpritemap? = null
+    private var kraidSheetGfx: com.supermetroid.editor.rom.EnemySpriteGraphics? = null
+    private var kraidSheetPalette: IntArray? = null
+
+    fun getKraidSpritemap(romParser: com.supermetroid.editor.rom.RomParser): com.supermetroid.editor.rom.KraidSpritemap? {
+        kraidSpritemap?.let { return it }
+        val sm = com.supermetroid.editor.rom.KraidSpritemap(romParser)
+        val b64 = project.customGfx.spriteTileBlocks["kraid:0"]
+        val loaded = if (b64 != null) {
+            try {
+                val custom = java.util.Base64.getDecoder().decode(b64)
+                sm.loadWithCustomTiles(custom)
+            } catch (_: Exception) { sm.load() }
+        } else {
+            sm.load()
+        }
+        if (!loaded) return null
+        kraidSpritemap = sm
+        return sm
+    }
+
+    fun renderKraidFullBody(romParser: com.supermetroid.editor.rom.RomParser): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderFullBody()
+    }
+
+    fun renderKraidBodyTilemap(
+        romParser: com.supermetroid.editor.rom.RomParser,
+        def: com.supermetroid.editor.rom.KraidSpritemap.BodyTilemapDef
+    ): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderBodyTilemap(def)
+    }
+
+    fun renderKraidBigSprmap(
+        romParser: com.supermetroid.editor.rom.RomParser,
+        def: com.supermetroid.editor.rom.KraidSpritemap.ComponentDef
+    ): com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite? {
+        return getKraidSpritemap(romParser)?.renderBigSprmap(def)
+    }
+
+    fun getKraidPalette(romParser: com.supermetroid.editor.rom.RomParser): IntArray? {
+        return getKraidSpritemap(romParser)?.getPalette()
+    }
+
+    fun applyKraidComponentEdits(
+        sprite: com.supermetroid.editor.rom.KraidSpritemap.AssembledSprite,
+        editedPixels: IntArray
+    ) {
+        val sm = kraidSpritemap ?: return
+        sm.applyEdits(sprite, editedPixels)
+        val tiles = sm.getTileData() ?: return
+        val b64 = java.util.Base64.getEncoder().encodeToString(tiles)
+        project.customGfx.spriteTileBlocks["kraid:0"] = b64
+        dirty = true
+        kraidSpritemap = null
+    }
+
+    fun loadKraidTileSheet(
+        romParser: com.supermetroid.editor.rom.RomParser
+    ): Triple<IntArray, Int, Int>? {
+        val gfx = com.supermetroid.editor.rom.EnemySpriteGraphics(romParser)
+        val b64 = project.customGfx.spriteTileBlocks["kraid:0"]
+        val loaded = if (b64 != null) {
+            try {
+                val custom = java.util.Base64.getDecoder().decode(b64)
+                gfx.loadFromRaw(listOf(custom))
+                true
+            } catch (_: Exception) { false }
+        } else {
+            false
+        }
+        if (!loaded) {
+            if (!gfx.load(com.supermetroid.editor.rom.EnemySpriteGraphics.KRAID_BLOCKS)) return null
+        }
+
+        val sm = getKraidSpritemap(romParser) ?: return null
+        val palette = sm.getPalette() ?: return null
+        kraidSheetGfx = gfx
+        kraidSheetPalette = palette
+        val result = gfx.renderSheet(palette, cols = 16) ?: return null
+        return Triple(result.first, result.second, result.third)
+    }
+
+    fun getKraidSheetPalette(): IntArray? = kraidSheetPalette
+
+    fun applyKraidTileSheetEdits(pixels: IntArray, w: Int, h: Int) {
+        val gfx = kraidSheetGfx ?: return
+        val palette = kraidSheetPalette ?: return
+        gfx.importFromArgb(pixels, w, h, palette, cols = 16)
+        val rawBlocks = gfx.getRawBlocks() ?: return
+        for ((i, raw) in rawBlocks.withIndex()) {
+            val b64 = java.util.Base64.getEncoder().encodeToString(raw)
+            project.customGfx.spriteTileBlocks["kraid:$i"] = b64
+        }
+        dirty = true
+        kraidSpritemap = null
+    }
+
+    fun hasCustomKraidTileSheet(): Boolean =
+        project.customGfx.spriteTileBlocks.containsKey("kraid:0")
+
+    fun resetKraidTileSheet() {
+        project.customGfx.spriteTileBlocks.remove("kraid:0")
+        kraidSheetGfx = null
+        kraidSheetPalette = null
+        kraidSpritemap = null
+        dirty = true
+    }
+
     private fun writePng(filePath: String, pixels: IntArray, w: Int, h: Int): Boolean {
         return try {
             val img = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
@@ -1109,7 +1219,7 @@ class EditorState {
         val ordered = mutableListOf<SmPatch>()
 
         // 1. GUI config patches (featured at top)
-        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CERES_ESCAPE_PATCH)) {
+        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CONTROLLER_CONFIG_PATCH, CERES_ESCAPE_PATCH)) {
             if (guiPatch.id !in existingIds) {
                 ordered.add(SmPatch(
                     id = guiPatch.id,
@@ -1352,7 +1462,11 @@ class EditorState {
         if (file.exists()) {
             try {
                 project = json.decodeFromString(SmEditProject.serializer(), file.readText())
-                println("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms)")
+                val enabledPatches = project.patches.filter { it.enabled }
+                println("Loaded project: ${file.absolutePath} (${project.rooms.size} rooms, ${project.patches.size} patches)")
+                if (enabledPatches.isNotEmpty()) {
+                    println("  Enabled patches: ${enabledPatches.joinToString { "'${it.name}'" }}")
+                }
             } catch (e: Exception) {
                 println("Failed to load project: ${e.message}")
                 project = SmEditProject(romPath = romPath)
@@ -1405,6 +1519,7 @@ class EditorState {
     }
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
+    internal fun setRoomIdForTest(id: Int) { currentRoomId = id }
 
     // ─── Working level data ─────────────────────────────────────
 
@@ -1714,18 +1829,33 @@ class EditorState {
     private fun autoAssignParam(plmId: Int, param: Int): Int = when {
         param == 0 && RomParser.isItemPlm(plmId) -> {
             val usedIndices = mutableSetOf<Int>()
+            // Replay add/remove history to find NET used params (not ghost entries)
             for ((_, roomEdits) in project.rooms) {
+                val netItems = mutableListOf<Triple<Int, Int, Int>>() // (plmId, xy, param)
                 for (change in roomEdits.plmChanges) {
-                    if (change.action == "add" && change.param > 0) usedIndices.add(change.param)
+                    val xy = (change.x shl 16) or change.y
+                    if (change.action == "add") {
+                        netItems.add(Triple(change.plmId, xy, change.param))
+                    } else if (change.action == "remove") {
+                        netItems.removeAll { it.first == change.plmId && it.second == xy }
+                    }
+                }
+                for ((_, _, p) in netItems) {
+                    if (p > 0) usedIndices.add(p)
                 }
             }
+            // Include vanilla item params from current room
             for (plm in _workingPlms) {
                 if (RomParser.isItemPlm(plm.id) && plm.param > 0) usedIndices.add(plm.param)
             }
+            // Vanilla items use 0x00-0x50; search 0x51-0x1FF (431 slots)
             var idx = 0x51
-            while (idx in usedIndices && idx <= 0x7F) idx++
-            if (idx > 0x7F) { idx = 0x9B; while (idx in usedIndices && idx <= 0x9F) idx++ }
-            if (idx > 0x9F) 0x06 else idx
+            while (idx in usedIndices && idx <= 0x1FF) idx++
+            if (idx > 0x1FF) {
+                println("WARN: item collection bit pool exhausted (>431 items)")
+                idx = 0x200
+            }
+            idx
         }
         plmId == 0xB76F && param == 0x8000 -> {
             val usedSaveIndices = mutableSetOf<Int>()
@@ -2096,7 +2226,12 @@ class EditorState {
 
     // ─── Project file I/O ───────────────────────────────────────
 
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; coerceInputValues = true; encodeDefaults = true }
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        encodeDefaults = true
+    }
 
     /**
      * Save project to .smedit file. When romParser is provided, also export
@@ -2161,6 +2296,7 @@ class EditorState {
     fun exportToRom(romParser: RomParser): String? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
+        saveProject(romParser)
         println("[EXPORT] Starting export — romPath=$romPath, romSize=${romParser.getRomData().size}")
         println("[EXPORT] Project spriteTileBlocks keys: ${project.customGfx.spriteTileBlocks.keys}")
         val romData = romParser.getRomData().copyOf()
@@ -2170,8 +2306,12 @@ class EditorState {
         // that patches write into otherwise-empty banks (e.g. skip_intro
         // writes custom ASM into bank $A1 free space).
         var patchesApplied = 0
+        val enabledCount = project.patches.count { it.enabled }
+        val disabledCount = project.patches.size - enabledCount
+        println("[EXPORT] Patches: $enabledCount enabled, $disabledCount disabled (${project.patches.size} total)")
         for (patch in project.patches) {
             if (!patch.enabled) continue
+            println("[EXPORT] Applying patch: '${patch.name}' [${patch.id}] configType=${patch.configType ?: "hex"}")
             if (patch.configType == "ceres_escape_seconds") {
                 val totalSecs = (patch.configValue ?: 60).coerceIn(15, 600)
                 val mins = totalSecs / 60
@@ -2183,8 +2323,10 @@ class EditorState {
                     romData[off] = secsBcd.toByte()
                     romData[off + 1] = minsBcd.toByte()
                 }
+                println("[EXPORT]   Ceres timer: ${mins}m${secs}s")
             } else if (patch.configType == "beam_damage") {
                 val data = patch.configData ?: continue
+                var beamCount = 0
                 for (beam in ALL_BEAMS) {
                     val dmg = data[beam.key] ?: continue
                     val charged = dmg * 3
@@ -2198,9 +2340,12 @@ class EditorState {
                         romData[pcCharged] = (charged and 0xFF).toByte()
                         romData[pcCharged + 1] = ((charged shr 8) and 0xFF).toByte()
                     }
+                    beamCount++
                 }
+                println("[EXPORT]   Beam damage: $beamCount beams modified")
             } else if (patch.configType == "boss_stats") {
                 val data = patch.configData ?: continue
+                var fieldCount = 0
                 for (field in ALL_BOSS_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = romParser.snesToPc(field.snesAddress) + field.offset
@@ -2208,9 +2353,12 @@ class EditorState {
                         romData[pc] = (value and 0xFF).toByte()
                         romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
                     }
+                    fieldCount++
                 }
+                println("[EXPORT]   Boss stats: $fieldCount fields modified")
             } else if (patch.configType == "phantoon") {
                 val data = patch.configData ?: continue
+                var fieldCount = 0
                 for (field in ALL_PHANTOON_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = romParser.snesToPc(field.snesAddress)
@@ -2218,9 +2366,12 @@ class EditorState {
                         romData[pc] = (value and 0xFF).toByte()
                         romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
                     }
+                    fieldCount++
                 }
+                println("[EXPORT]   Phantoon behavior: $fieldCount fields modified")
             } else if (patch.configType == "enemy_stats") {
                 val data = patch.configData ?: continue
+                var modCount = 0
                 for (e in ENEMY_DEFS) {
                     val hp = data["${e.key}_hp"]
                     val dmg = data["${e.key}_dmg"]
@@ -2231,6 +2382,7 @@ class EditorState {
                             romData[pc] = (hp and 0xFF).toByte()
                             romData[pc + 1] = ((hp shr 8) and 0xFF).toByte()
                         }
+                        modCount++
                     }
                     if (dmg != null) {
                         val pc = romParser.snesToPc(snesAddr) + 6
@@ -2238,17 +2390,34 @@ class EditorState {
                             romData[pc] = (dmg and 0xFF).toByte()
                             romData[pc + 1] = ((dmg shr 8) and 0xFF).toByte()
                         }
+                        modCount++
                     }
                 }
+                println("[EXPORT]   Enemy stats: $modCount values modified")
+            } else if (patch.configType == "controller_config") {
+                val data = patch.configData ?: continue
+                var slotCount = 0
+                for (slot in CONTROLLER_SLOTS) {
+                    val value = data[slot.key] ?: continue
+                    val off = CONTROLLER_TABLE_PC + slot.tableIndex * 2
+                    if (off + 1 < romData.size) {
+                        romData[off] = (value and 0xFF).toByte()
+                        romData[off + 1] = ((value shr 8) and 0xFF).toByte()
+                    }
+                    slotCount++
+                }
+                println("[EXPORT]   Controller config: $slotCount buttons remapped")
             } else if (patch.configType == "boss_defeated" || patch.configType == "hyper_beam") {
-                // These are handled by the combined per-frame hook below
+                println("[EXPORT]   (deferred to combined per-frame hook)")
             } else {
+                val totalBytes = patch.writes.sumOf { it.bytes.size }
                 for (write in patch.writes) {
                     val off = write.offset.toInt()
                     for ((i, b) in write.bytes.withIndex()) {
                         if (off + i < romData.size) romData[off + i] = b.toByte()
                     }
                 }
+                println("[EXPORT]   Hex writes: ${patch.writes.size} records, $totalBytes bytes")
             }
             patchesApplied++
         }
@@ -2267,6 +2436,7 @@ class EditorState {
                 if (patch.configType == "hyper_beam") hyperBeam = true
             }
             if (enabledBosses.isNotEmpty() || hyperBeam) {
+                println("[EXPORT] Per-frame hook active: bosses=${enabledBosses.ifEmpty { "none" }}, hyperBeam=$hyperBeam")
                 val code = mutableListOf<Int>()
                 // Chain to original: JSL $8289EF
                 code.addAll(listOf(0x22, 0xEF, 0x89, 0x82))
@@ -2326,6 +2496,9 @@ class EditorState {
                     val addr = 0x1096E + i
                     if (addr < romData.size) romData[addr] = b.toByte()
                 }
+                println("[EXPORT]   Per-frame hook: ${code.size} bytes at \$DF:F040, hook at \$82:896E")
+            } else {
+                println("[EXPORT] Per-frame hook: not needed (no boss flags or hyper beam)")
             }
         }
 
@@ -2928,6 +3101,29 @@ class EditorState {
             }
         }
 
+        // Apply Kraid sprite tile patches (raw 4bpp → LZ5 compress → write to $B9)
+        for ((i, block) in com.supermetroid.editor.rom.EnemySpriteGraphics.KRAID_BLOCKS.withIndex()) {
+            val b64 = gfxData.spriteTileBlocks["kraid:$i"]
+            if (b64 == null) continue
+            println("[EXPORT] Kraid block $i: found ${b64.length} b64 chars")
+            try {
+                val rawBytes = java.util.Base64.getDecoder().decode(b64)
+                val compressed = lz5Compress(rawBytes)
+                val (_, origSize) = romParser.decompressLZ2WithSize(block.snesAddress)
+                println("[EXPORT] Kraid block $i: ${compressed.size}/$origSize bytes")
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, block.pcAddress, compressed.size)
+                    for (j in compressed.size until origSize) romData[block.pcAddress + j] = 0xFF.toByte()
+                    gfxPatched++
+                    println("[EXPORT] Patched Kraid sprite tile block $i at PC=0x${block.pcAddress.toString(16)}")
+                } else {
+                    println("[EXPORT] WARN: Kraid sprite block $i compressed size ${compressed.size} exceeds original $origSize — skipped")
+                }
+            } catch (e: Exception) {
+                println("[EXPORT] WARN: Kraid sprite block $i patch failed: ${e.message}")
+            }
+        }
+
         if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) {
             val orig = File(romPath)
             val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
@@ -3020,6 +3216,60 @@ class EditorState {
         out.writeBytes(romData)
         println("Exported: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)")
         return out.absolutePath
+    }
+
+    /**
+     * Export an IPS patch by diffing the patched ROM against the original.
+     * Reuses [exportToRom] to build the patched data, then generates IPS records
+     * for every changed byte range.
+     */
+    fun exportToIps(romParser: RomParser): String? {
+        val romPath = project.romPath
+        if (romPath.isEmpty()) return null
+
+        val original = romParser.getRomData()
+        val smcPath = exportToRom(romParser) ?: return null
+        val patched = File(smcPath).readBytes()
+
+        if (original.size != patched.size) {
+            println("[IPS] ROM size mismatch: ${original.size} vs ${patched.size}")
+            return null
+        }
+
+        val ipsData = buildIpsPatch(original, patched)
+        val orig = File(romPath)
+        val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}_edited.ips")
+        ipsFile.writeBytes(ipsData)
+        println("Exported IPS: ${ipsFile.absolutePath} (${ipsData.size} bytes)")
+        return ipsFile.absolutePath
+    }
+
+    private fun buildIpsPatch(original: ByteArray, patched: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write("PATCH".toByteArray(Charsets.US_ASCII))
+
+        var i = 0
+        val len = minOf(original.size, patched.size)
+        while (i < len) {
+            if (original[i] != patched[i]) {
+                val start = i
+                while (i < len && original[i] != patched[i] && (i - start) < 0xFFFF) i++
+                val size = i - start
+
+                // IPS record: 3-byte offset, 2-byte size, data
+                out.write((start shr 16) and 0xFF)
+                out.write((start shr 8) and 0xFF)
+                out.write(start and 0xFF)
+                out.write((size shr 8) and 0xFF)
+                out.write(size and 0xFF)
+                out.write(patched, start, size)
+            } else {
+                i++
+            }
+        }
+
+        out.write("EOF".toByteArray(Charsets.US_ASCII))
+        return out.toByteArray()
     }
 
     private fun lz5Compress(data: ByteArray) = LZ5Compressor.compress(data)

@@ -179,7 +179,7 @@ data class SmPatch(
     val id: String,
     var name: String,
     var description: String = "",
-    var enabled: Boolean = true,
+    var enabled: Boolean = false,
     val writes: MutableList<PatchWrite> = mutableListOf(),
     var configType: String? = null,
     var configValue: Int? = null,

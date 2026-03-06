@@ -43,6 +43,14 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
         )
 
         /**
+         * Kraid sprite tile block — 128 tiles LZ-compressed in bank $B9.
+         * Loaded by Kraid_SetupGfxWithTilePrioClear ($A7:AAC6) to $7E:4000.
+         */
+        val KRAID_BLOCKS = listOf(
+            SpriteBlock(0x1CFA38, 0xB9FA38, 0x0100, "Kraid Tiles")
+        )
+
+        /**
          * Complete 16-color SNES palette for Phantoon sprites, derived from
          * all 4 component PNGs (E4BF, E4FF, E53F, E57F). Index 0 = transparent.
          * The index order matches the sorted-brightness order found across all PNGs.
@@ -73,6 +81,7 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
          */
         val ENEMY_TILE_BLOCKS = mapOf(
             0xE4BF to PHANTOON_BLOCKS,
+            0xE2BF to KRAID_BLOCKS,
         )
 
         /**
@@ -89,6 +98,7 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
 
         val EDITOR_ENEMIES = listOf(
             EnemySpriteEntry(0xE4BF, "Phantoon", "Boss"),
+            EnemySpriteEntry(0xE2BF, "Kraid", "Boss"),
             EnemySpriteEntry(0xDCFF, "Zoomer"),
             EnemySpriteEntry(0xDC7F, "Zeela"),
             EnemySpriteEntry(0xD93F, "Sidehopper"),

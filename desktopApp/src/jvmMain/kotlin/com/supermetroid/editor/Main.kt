@@ -39,6 +39,7 @@ import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.EnemySpriteViewer
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
+import com.supermetroid.editor.ui.KraidSpriteEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
@@ -181,6 +182,12 @@ fun main() = application {
                             },
                             enabled = romParser != null
                         ) { Text("Export ROM") }
+                        Button(
+                            onClick = {
+                                romParser?.let { editorState.exportToIps(it) }
+                            },
+                            enabled = romParser != null
+                        ) { Text("Export IPS") }
                     }
                 }
                 
@@ -462,6 +469,12 @@ fun main() = application {
                                 val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
                                 if (selected.speciesId == 0xE4BF) {
                                     PhantoonSpriteEditor(
+                                        editorState = editorState,
+                                        romParser = romParser,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else if (selected.speciesId == 0xE2BF) {
+                                    KraidSpriteEditor(
                                         editorState = editorState,
                                         romParser = romParser,
                                         modifier = Modifier.fillMaxSize()
