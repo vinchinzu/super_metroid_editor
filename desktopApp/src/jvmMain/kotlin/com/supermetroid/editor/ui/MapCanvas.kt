@@ -1712,7 +1712,16 @@ fun MapCanvas(
                                                                         destDropExpanded = false
                                                                         destRoomSearch = ""
                                                                         if (rid != currentDoor.destRoomPtr) {
-                                                                            editorState.updateDoor(propsBts, currentDoor.copy(destRoomPtr = rid))
+                                                                            val match = romParser?.findVanillaDoorMatch(
+                                                                                rid, currentDoor.direction,
+                                                                                currentDoor.screenX, currentDoor.screenY
+                                                                            )
+                                                                            editorState.updateDoor(propsBts,
+                                                                                currentDoor.copy(
+                                                                                    destRoomPtr = rid,
+                                                                                    entryCode = match?.entryCode ?: 0,
+                                                                                    doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                                                ))
                                                                         }
                                                                     },
                                                                     modifier = Modifier.height(26.dp)
@@ -1767,13 +1776,25 @@ fun MapCanvas(
 
                                                 // Screen X (0x00–0xFF)
                                                 ByteDropdown("Screen X:", currentDoor.screenX) { v ->
-                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenX = v))
+                                                    val match = romParser?.findVanillaDoorMatch(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(
+                                                        screenX = v,
+                                                        entryCode = match?.entryCode ?: currentDoor.entryCode,
+                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                    ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
                                                 // Screen Y (0x00–0xFF)
                                                 ByteDropdown("Screen Y:", currentDoor.screenY) { v ->
-                                                    editorState.updateDoor(propsBts, currentDoor.copy(screenY = v))
+                                                    val match = romParser?.findVanillaDoorMatch(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
+                                                    editorState.updateDoor(propsBts, currentDoor.copy(
+                                                        screenY = v,
+                                                        entryCode = match?.entryCode ?: currentDoor.entryCode,
+                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                    ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -1823,9 +1844,9 @@ fun MapCanvas(
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                                // Scroll/Entry ASM pointers (advanced)
+                                                // Door cap position / Entry ASM pointers (advanced)
                                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                                    Text("Scroll:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
+                                                    Text("Door Cap:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
                                                     var scrollText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }

@@ -182,9 +182,16 @@ can contain VRAM offset flags for enemies with `tile_data_size & 0x8000`.
 
 **Free space allocation**: Bank $B4 free space is scanned ONCE before the room loop and tracked
 with a persistent `gfxFreePtr` that increments after each allocation (same pattern as bank $A1
-`enemyFreePtr`). Rescanning per-room caused overlapping writes because GFX set data contains
-`0xFF` bytes (species IDs like $D3FF, the $FFFF terminator) and `0x00` bytes (palette high
-bytes), which a backward free-space scan misidentifies as padding.
+`enemyFreePtr`). The backward scan also absorbs the last vanilla GFX set's `FFFF` terminator
+(both bytes are 0xFF), so a +2 guard is applied after the scan to preserve it. Without this,
+the engine reads past the terminator into our new data, loading garbage species and VRAM values.
+
+**Vanilla species without GFX entries**: Some species exist in a room's vanilla population but
+intentionally have NO GFX entry (e.g. Elevator in room $9938, Phantoon in $CD13). They work via
+`LoadEnemyGfxIndexes` defaults (palette row 13, tiles index 0). The export only adds GFX entries
+for species the user is adding — `neededSpecies = (finalSpecies - vanillaSpecies) - existingGfx`.
+Adding unneeded entries causes `ProcessEnemyTilesets` to decompress + DMA tile data to VRAM $7000+,
+corrupting the room's designed VRAM layout.
 
 ## OAM Spritemap Assembly (EnemySpritemap.kt)
 
@@ -228,7 +235,8 @@ Phantoon uses BG2 tilemaps (PhantoonSpritemap.kt), not OAM spritemaps.
   known stats verification for all editor enemies. Also validates Phantoon palette via `readEnemyPalette`.
 - `EnemyExportDiagTest.kt` — enemy population roundtrip, GFX set parsing, properties bit 0x2000
   enforcement, kill count byte verification, GFX set final-population logic (vs. raw change list),
-  4-entry GFX hardware limit enforcement.
+  4-entry GFX hardware limit enforcement, B4 free space terminator guard, vanilla species skip,
+  multi-room relocation overlap prevention.
 - `EnemySpritemapTest.kt` — OAM spritemap parsing, instruction list tracing, assembled sprite
   rendering (Zoomer, Zeela, Skree, Cacatac), animation frame extraction, OAM entry validation.
 - `PhantoonSpritemapRoundtripTest.kt` — Phantoon-specific: body render pixel-perfect match against

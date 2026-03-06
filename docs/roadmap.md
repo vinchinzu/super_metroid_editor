@@ -59,3 +59,19 @@ Status: Planned
 # Investigate: 2×2 Test Patterns
 Some users report 2×2 patterns appearing in pattern list (not built-in). Source unknown — may be from create-pattern defaults or legacy seed logic. Remove source if found.
 Status: Planned
+
+# Kill Count Editor
+Expose the enemy kill count byte in the UI. Currently preserved from vanilla — if enemies are removed so fewer than the kill count remain, gray doors become impossible to open. Add validation warnings and allow manual override.
+Status: Planned
+
+# Multi-State Room Editing
+Support editing enemy populations and GFX sets for non-default room states (e.g., boss-dead E629 conditions). Currently only the default E5E6 state is edited. Add state selector UI and per-state enemy lists.
+Status: Planned
+
+# Enemy GFX Limit Warnings
+Surface the 4-entry GFX hardware limit in the UI. Show which species are dropped when the limit is exceeded, and suggest merging palette slots or removing species. Prevent silent garbled sprites.
+Status: Planned
+
+# Null Enemy Pointer Room Support
+Allow adding enemies to rooms that have a null (0x0000) enemy population pointer. Allocate a new enemy set in bank $A1 free space and wire up the state data pointer.
+Status: Planned

@@ -143,7 +143,11 @@ data class RoomEdits(
     val scrollChanges: MutableList<ScrollChange> = mutableListOf(),
     var fxChange: FxChange? = null,
     var stateDataChange: StateDataChange? = null
-)
+) {
+    val hasEdits: Boolean get() =
+        operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
+        enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null || stateDataChange != null
+}
 
 /**
  * Per-metatile default override: block type + BTS for a specific tileset.

@@ -173,6 +173,282 @@ class ScrollSystemTest {
         println()
     }
 
+    @Test
+    fun `door ASM diagnostic - Landing Site vs Terminator vs Parlor`() {
+        val rp = loadRom("test-resources/Super Metroid (JU) [!].smc") ?: run {
+            println("SKIP: vanilla ROM not found")
+            return
+        }
+
+        val landingSite = 0x91F8
+        val parlor = 0x92FD
+        val terminator = 0x990D
+
+        println("\n=== DOOR ASM DIAGNOSTIC: Landing Site / Parlor / Terminator ===\n")
+
+        for (roomId in listOf(landingSite, parlor, terminator)) {
+            val room = rp.readRoomHeader(roomId) ?: continue
+            val roomHex = roomId.toString(16).uppercase()
+            println("Room \$${roomHex} (${room.name}) — ${room.width}x${room.height} screens")
+            val doors = rp.parseDoorList(room.doorOut)
+            for ((i, door) in doors.withIndex()) {
+                val destHex = door.destRoomPtr.toString(16).uppercase().padStart(4, '0')
+                val entryHex = door.entryCode.toString(16).uppercase().padStart(4, '0')
+                val capHex = door.doorCapCode.toString(16).uppercase().padStart(4, '0')
+                println("  Door[$i]: dest=$destHex dir=${door.directionName} " +
+                        "spawn=(${door.screenX},${door.screenY}) cap=$capHex entry=$entryHex dist=0x${door.distFromDoor.toString(16)}")
+                if (door.entryCode != 0x0000) {
+                    decodeDoorAsm(rp, door.entryCode)
+                }
+            }
+            println()
+        }
+
+        // Build reverse index: which vanilla doors point TO each room
+        println("=== REVERSE DOOR INDEX: doors that enter Landing Site ===")
+        val allRoomIds = mutableListOf<Int>()
+        for (roomId in 0x91F8..0x9FFF) {
+            val room = rp.readRoomHeader(roomId)
+            if (room != null && room.width in 1..16 && room.height in 1..16)
+                allRoomIds.add(roomId)
+        }
+
+        for (roomId in allRoomIds) {
+            val room = rp.readRoomHeader(roomId) ?: continue
+            val doors = rp.parseDoorList(room.doorOut)
+            for ((i, door) in doors.withIndex()) {
+                if (door.destRoomPtr == landingSite) {
+                    val srcHex = roomId.toString(16).uppercase()
+                    val entryHex = door.entryCode.toString(16).uppercase().padStart(4, '0')
+                    println("  From \$${srcHex} door[$i]: dir=${door.directionName} " +
+                            "spawn=(${door.screenX},${door.screenY}) entry=$entryHex")
+                    if (door.entryCode != 0x0000) {
+                        decodeDoorAsm(rp, door.entryCode)
+                    }
+                }
+            }
+        }
+
+        println("\n=== SCENARIO: Terminator door redirected to Landing Site ===")
+        println("If user redirects Terminator's left door (originally → Parlor) to → Landing Site,")
+        println("the entryCode stays as whatever Terminator→Parlor used.")
+        println("But the correct entryCode should come from a door that vanilla uses to enter Landing Site.")
+        println("This mismatch causes wrong scroll setup → BG corruption on entry.\n")
+
+        val termDoors = rp.parseDoorList(rp.readRoomHeader(terminator)!!.doorOut)
+        for ((i, door) in termDoors.withIndex()) {
+            if (door.destRoomPtr == parlor || door.destRoomPtr == landingSite) {
+                val destHex = door.destRoomPtr.toString(16).uppercase()
+                println("  Terminator door[$i] → \$$destHex: entryCode=0x${door.entryCode.toString(16).uppercase()}")
+            }
+        }
+    }
+
+    @Test
+    fun `BG corruption deep diagnostic - Terminator to Landing Site`() {
+        val rp = loadRom("test-resources/Super Metroid (JU) [!].smc") ?: run {
+            println("SKIP: vanilla ROM not found")
+            return
+        }
+
+        val landingSite = 0x91F8
+        val parlor      = 0x92FD
+        val terminator  = 0x990D
+
+        val lsRoom   = rp.readRoomHeader(landingSite)!!
+        val parlRoom = rp.readRoomHeader(parlor)!!
+        val termRoom = rp.readRoomHeader(terminator)!!
+
+        println("=== ROOM HEADERS ===")
+        for ((name, room) in listOf("Landing Site" to lsRoom, "Parlor" to parlRoom, "Terminator" to termRoom)) {
+            println("$name (0x${room.roomId.toString(16).uppercase()}): " +
+                "${room.width}x${room.height}, area=${room.area}, " +
+                "CRE=0x${room.creBitflag.toString(16)}, tileset=${room.tileset}, " +
+                "bgScrolling=0x${room.bgScrolling.toString(16).uppercase()}, " +
+                "scrollPtr=0x${room.roomScrollsPtr.toString(16).uppercase()}, " +
+                "bgDataPtr=0x${room.bgDataPtr.toString(16).uppercase()}, " +
+                "setupASM=0x${room.setupAsmPtr.toString(16).uppercase()}, " +
+                "doorOut=0x${room.doorOut.toString(16).uppercase()}")
+        }
+
+        fun rd16(off: Int) = (rp.romData[off].toInt() and 0xFF) or ((rp.romData[off+1].toInt() and 0xFF) shl 8)
+        fun rd24(off: Int) = rd16(off) or ((rp.romData[off+2].toInt() and 0xFF) shl 16)
+
+        println("\n=== ALL STATE DATA — Landing Site ===")
+        val lsStates = rp.findAllStateDataOffsets(landingSite)
+        for ((si, stateOff) in lsStates.withIndex()) {
+            val lvlPtr     = rd24(stateOff)
+            val tileset    = rp.romData[stateOff + 3].toInt() and 0xFF
+            val bgScroll   = rd16(stateOff + 12)
+            val scrollPtr  = rd16(stateOff + 14)
+            val bgDataPtr  = rd16(stateOff + 22)
+            val setupAsm   = rd16(stateOff + 24)
+            println("  state[$si] PC=0x${stateOff.toString(16)}: " +
+                "lvl=\$${lvlPtr.toString(16)}, tileset=$tileset, " +
+                "bgScroll=0x${bgScroll.toString(16).uppercase()}, " +
+                "scrollPtr=0x${scrollPtr.toString(16).uppercase()}, " +
+                "bgData=0x${bgDataPtr.toString(16).uppercase()}, " +
+                "setupASM=0x${setupAsm.toString(16).uppercase()}")
+
+            if (scrollPtr != 0 && scrollPtr != 0xFFFF) {
+                val scrollPc = rp.snesToPc(0x8F0000 or scrollPtr)
+                val scrollBytes = mutableListOf<Int>()
+                for (j in 0 until (lsRoom.width * lsRoom.height).coerceAtMost(50)) {
+                    if (scrollPc + j < rp.romData.size)
+                        scrollBytes.add(rp.romData[scrollPc + j].toInt() and 0xFF)
+                }
+                val scrollDisp = scrollBytes.mapIndexed { idx, v ->
+                    val label = when (v) { 0 -> "red"; 1 -> "blue"; 2 -> "green"; else -> "?($v)" }
+                    "$idx:$label"
+                }
+                println("    scroll data (${lsRoom.width}x${lsRoom.height}=${lsRoom.width*lsRoom.height} screens): $scrollDisp")
+            }
+        }
+
+        println("\n=== ALL STATE DATA — Terminator ===")
+        val termStates = rp.findAllStateDataOffsets(terminator)
+        for ((si, stateOff) in termStates.withIndex()) {
+            val lvlPtr     = rd24(stateOff)
+            val tileset    = rp.romData[stateOff + 3].toInt() and 0xFF
+            val bgScroll   = rd16(stateOff + 12)
+            val scrollPtr  = rd16(stateOff + 14)
+            val bgDataPtr  = rd16(stateOff + 22)
+            val setupAsm   = rd16(stateOff + 24)
+            println("  state[$si] PC=0x${stateOff.toString(16)}: " +
+                "lvl=\$${lvlPtr.toString(16)}, tileset=$tileset, " +
+                "bgScroll=0x${bgScroll.toString(16).uppercase()}, " +
+                "scrollPtr=0x${scrollPtr.toString(16).uppercase()}, " +
+                "bgData=0x${bgDataPtr.toString(16).uppercase()}, " +
+                "setupASM=0x${setupAsm.toString(16).uppercase()}")
+        }
+
+        println("\n=== DOOR DEFINITIONS (12-byte raw dumps) ===")
+        println("--- Landing Site door-out list ---")
+        val lsDoors = rp.parseDoorList(lsRoom.doorOut)
+        for ((i, door) in lsDoors.withIndex()) {
+            val entryPc = rp.doorEntryPcOffset(lsRoom.doorOut, i)!!
+            val raw = (0..11).map { rp.romData[entryPc + it].toInt() and 0xFF }
+            val hex = raw.joinToString(" ") { "%02X".format(it) }
+            val destName = when (door.destRoomPtr) {
+                parlor -> "Parlor"; terminator -> "Terminator"; landingSite -> "Landing Site"
+                else -> "0x${door.destRoomPtr.toString(16).uppercase()}"
+            }
+            println("  door[$i] → $destName: dir=${door.direction}(${door.directionName}) " +
+                "spawn=(${door.screenX},${door.screenY}) dist=0x${door.distFromDoor.toString(16)} " +
+                "doorCap=0x${door.doorCapCode.toString(16)} entry=0x${door.entryCode.toString(16)}")
+            println("    raw: $hex  (PC=0x${entryPc.toString(16)}, bank\$83 ptr=0x${(0x8000 + (entryPc - rp.snesToPc(0x830000))).toString(16)})")
+        }
+
+        println("\n--- Parlor door-out list ---")
+        val parlDoors = rp.parseDoorList(parlRoom.doorOut)
+        for ((i, door) in parlDoors.withIndex()) {
+            val entryPc = rp.doorEntryPcOffset(parlRoom.doorOut, i)!!
+            val raw = (0..11).map { rp.romData[entryPc + it].toInt() and 0xFF }
+            val hex = raw.joinToString(" ") { "%02X".format(it) }
+            val destName = when (door.destRoomPtr) {
+                parlor -> "Parlor"; terminator -> "Terminator"; landingSite -> "Landing Site"
+                else -> "0x${door.destRoomPtr.toString(16).uppercase()}"
+            }
+            println("  door[$i] → $destName: dir=${door.direction}(${door.directionName}) " +
+                "spawn=(${door.screenX},${door.screenY}) dist=0x${door.distFromDoor.toString(16)} " +
+                "doorCap=0x${door.doorCapCode.toString(16)} entry=0x${door.entryCode.toString(16)}")
+            println("    raw: $hex  (PC=0x${entryPc.toString(16)})")
+        }
+
+        println("\n--- Terminator door-out list ---")
+        val termDoors = rp.parseDoorList(termRoom.doorOut)
+        for ((i, door) in termDoors.withIndex()) {
+            val entryPc = rp.doorEntryPcOffset(termRoom.doorOut, i)!!
+            val raw = (0..11).map { rp.romData[entryPc + it].toInt() and 0xFF }
+            val hex = raw.joinToString(" ") { "%02X".format(it) }
+            val destName = when (door.destRoomPtr) {
+                parlor -> "Parlor"; terminator -> "Terminator"; landingSite -> "Landing Site"
+                else -> "0x${door.destRoomPtr.toString(16).uppercase()}"
+            }
+            println("  door[$i] → $destName: dir=${door.direction}(${door.directionName}) " +
+                "spawn=(${door.screenX},${door.screenY}) dist=0x${door.distFromDoor.toString(16)} " +
+                "doorCap=0x${door.doorCapCode.toString(16)} entry=0x${door.entryCode.toString(16)}")
+            println("    raw: $hex  (PC=0x${entryPc.toString(16)})")
+        }
+
+        println("\n=== SIMULATED EXPORT: Terminator door 1 → Landing Site ===")
+        val termDoor1Pc = rp.doorEntryPcOffset(termRoom.doorOut, 1)!!
+        val vanillaBefore = (0..11).map { rp.romData[termDoor1Pc + it].toInt() and 0xFF }
+        println("Vanilla Terminator door 1 raw: ${vanillaBefore.joinToString(" ") { "%02X".format(it) }}")
+
+        val userDc = object {
+            val destRoomPtr = 0x91F8
+            val bitflag = 0x0400
+            val doorCapCode = 0x0601
+            val screenX = 0
+            val screenY = 4
+            val distFromDoor = 0x8000
+            val entryCode = 0x0000
+        }
+        val orientation = (userDc.bitflag shr 8) and 0xFF
+        val clearedOrient = orientation and 0xFB
+        val exportBytes = intArrayOf(
+            userDc.destRoomPtr and 0xFF, (userDc.destRoomPtr shr 8) and 0xFF,
+            userDc.bitflag and 0xFF, clearedOrient,
+            userDc.doorCapCode and 0xFF, (userDc.doorCapCode shr 8) and 0xFF,
+            userDc.screenX and 0xFF, userDc.screenY and 0xFF,
+            userDc.distFromDoor and 0xFF, (userDc.distFromDoor shr 8) and 0xFF,
+            userDc.entryCode and 0xFF, (userDc.entryCode shr 8) and 0xFF
+        )
+        println("Export would write:             ${exportBytes.joinToString(" ") { "%02X".format(it) }}")
+
+        val parlToLsDoor = parlDoors.first { it.destRoomPtr == landingSite }
+        val parlToLsIdx = parlDoors.indexOf(parlToLsDoor)
+        val parlToLsPc = rp.doorEntryPcOffset(parlRoom.doorOut, parlToLsIdx)!!
+        val vanillaParlToLs = (0..11).map { rp.romData[parlToLsPc + it].toInt() and 0xFF }
+        println("Vanilla Parlor→LS raw:          ${vanillaParlToLs.joinToString(" ") { "%02X".format(it) }}")
+
+        println("\nByte-by-byte comparison (export vs vanilla Parlor→LS):")
+        val fieldNames = arrayOf("destLo","destHi","flagLo","orient","capX","capY","scrnX","scrnY","distLo","distHi","asmLo","asmHi")
+        var diffs = 0
+        for (i in 0..11) {
+            val match = if (exportBytes[i] == vanillaParlToLs[i]) "  OK" else " DIFF"
+            if (exportBytes[i] != vanillaParlToLs[i]) diffs++
+            println("  byte[$i] ${fieldNames[i].padEnd(7)}: export=0x${"%02X".format(exportBytes[i])} vanilla=0x${"%02X".format(vanillaParlToLs[i])}$match")
+        }
+        println("Total differences: $diffs (doorCapCode bytes are expected to differ)")
+
+        println("\n=== SHARED DOOR DEFINITION CHECK ===")
+        val allDoorPcAddrs = mutableMapOf<Int, MutableList<String>>()
+        for (roomId in listOf(landingSite, parlor, terminator, 0x92B3, 0x99BD, 0x9938, 0x9969)) {
+            val room = rp.readRoomHeader(roomId) ?: continue
+            val doors = rp.parseDoorList(room.doorOut)
+            for ((i, _) in doors.withIndex()) {
+                val pc = rp.doorEntryPcOffset(room.doorOut, i) ?: continue
+                allDoorPcAddrs.getOrPut(pc) { mutableListOf() }
+                    .add("room 0x${roomId.toString(16)} door[$i]")
+            }
+        }
+        val lsDoor0Pc = rp.doorEntryPcOffset(lsRoom.doorOut, 0)!!
+        for ((pc, refs) in allDoorPcAddrs) {
+            if (refs.size > 1 || pc == lsDoor0Pc || pc == termDoor1Pc) {
+                println("  PC=0x${pc.toString(16)}: ${refs.joinToString(", ")}${if (refs.size > 1) " ** SHARED **" else ""}")
+            }
+        }
+
+        println("\n=== REVERSE INDEX: all vanilla doors entering Landing Site ===")
+        for (roomId in 0x91F8..0x9FFF) {
+            val room = rp.readRoomHeader(roomId) ?: continue
+            if (room.width !in 1..16 || room.height !in 1..16) continue
+            val doors = rp.parseDoorList(room.doorOut)
+            for ((i, door) in doors.withIndex()) {
+                if (door.destRoomPtr == landingSite) {
+                    val entryPc = rp.doorEntryPcOffset(room.doorOut, i)!!
+                    val raw = (0..11).map { rp.romData[entryPc + it].toInt() and 0xFF }
+                    println("  from 0x${roomId.toString(16)} door[$i]: dir=${door.direction}(${door.directionName}) " +
+                        "spawn=(${door.screenX},${door.screenY}) dist=0x${door.distFromDoor.toString(16)} " +
+                        "entry=0x${door.entryCode.toString(16)} cap=0x${door.doorCapCode.toString(16)}")
+                    println("    raw: ${raw.joinToString(" ") { "%02X".format(it) }}  PC=0x${entryPc.toString(16)}")
+                }
+            }
+        }
+    }
+
     private fun decodeDoorAsm(rp: RomParser, asmPtr: Int) {
         val pc = rp.snesToPc(0x8F0000 or asmPtr)
         val bytes = ByteArray(64) { i ->

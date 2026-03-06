@@ -1367,7 +1367,8 @@ class EditorState {
 
         _roomEditOrder.clear()
         _editCounter = 0L
-        for (key in project.rooms.keys) {
+        for ((key, edits) in project.rooms) {
+            if (!edits.hasEdits) continue
             val rid = key.toIntOrNull(16) ?: continue
             _roomEditOrder[rid] = ++_editCounter
         }
@@ -2095,7 +2096,7 @@ class EditorState {
 
     // ─── Project file I/O ───────────────────────────────────────
 
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; coerceInputValues = true; encodeDefaults = true }
 
     /**
      * Save project to .smedit file. When romParser is provided, also export
@@ -2105,6 +2106,10 @@ class EditorState {
     fun saveProject(romParser: RomParser? = null): Boolean {
         if (projectFilePath.isEmpty()) return false
         return try {
+            // Prune rooms with no actual edits before saving
+            val emptyKeys = project.rooms.entries.filter { !it.value.hasEdits }.map { it.key }
+            for (k in emptyKeys) project.rooms.remove(k)
+
             File(projectFilePath).writeText(json.encodeToString(SmEditProject.serializer(), project))
             dirty = false
             println("Project saved: $projectFilePath")
@@ -2352,6 +2357,11 @@ class EditorState {
         // because written GFX data contains 0xFF (species IDs, FFFF terminator)
         // and 0x00 (palette high bytes), which a rescan treats as free space,
         // causing subsequent rooms to overwrite earlier relocated GFX sets.
+        //
+        // The backward scan also absorbs any FFFF terminator at the boundary
+        // (both bytes are 0xFF). We skip forward +2 to preserve it — otherwise
+        // the last vanilla GFX set loses its terminator and the engine reads
+        // garbage entries past it, corrupting VRAM and palettes.
         val bankB4End = romParser.snesToPc(0xB4FFFF) + 1
         val bankB4Start = romParser.snesToPc(0xB48000)
         var gfxFreePtr = bankB4End
@@ -2361,6 +2371,11 @@ class EditorState {
             gfxFreePtr--
         }
         gfxFreePtr++
+        val rawGfxFreePtr = gfxFreePtr
+        // The scan absorbed any FFFF terminator at the boundary; skip past it.
+        // Cost: at most 2 wasted bytes if there was no terminator.
+        if (gfxFreePtr + 2 <= bankB4End) gfxFreePtr += 2
+        println("[EXPORT] B4 free space: raw=0x${rawGfxFreePtr.toString(16)}, guarded=0x${gfxFreePtr.toString(16)} (+2 terminator guard)")
 
         // Free space tracker for level data banks ($C0-$CE).
         // Each bank is scanned from the end to find trailing 0xFF padding.
@@ -2558,12 +2573,10 @@ class EditorState {
             }
 
             // Patch door entries (last change per index wins)
-            // SM's SpawnDoorClosingPLM ($82:E8EB) indexes kDoorClosingPlmIds by
-            // door_orientation: values 0-3 have PLM ID 0 (no cap), values 4-7 have
-            // blue closing cap PLM IDs. Bit 2 of door_orientation is the "spawn
-            // closing cap" flag. When editing doors we clear this bit to prevent
-            // blue closing caps at stale (x_pos_plm, y_pos_plm) positions carried
-            // over from the original DoorDef.
+            // The full 12-byte door definition is written as-is from the user's
+            // DoorChange, including the orientation byte with cap flag (bit 2).
+            // doorCapCode and entryCode are auto-set from vanilla when the
+            // destination changes, so the cap flag is safe to preserve.
             if (hasDoorEdits && room.doorOut != 0 && room.doorOut != 0xFFFF) {
                 val byIndex = roomEdits.doorChanges.groupBy { it.doorIndex }
                 for ((doorIndex, changes) in byIndex) {
@@ -2571,17 +2584,15 @@ class EditorState {
                     val entryPc = romParser.doorEntryPcOffset(room.doorOut, doorIndex) ?: continue
                     if (entryPc + 11 >= romData.size) continue
 
-                    val originalOrientation = (dc.bitflag shr 8) and 0xFF
-                    val clearedOrientation = originalOrientation and 0xFB // clear bit 2 (cap flag)
-                    if (originalOrientation != clearedOrientation) {
-                        val dirName = arrayOf("Right","Left","Down","Up")[clearedOrientation and 3]
-                        println("Room 0x$roomKey door $doorIndex: cleared cap flag (orient $originalOrientation→$clearedOrientation $dirName)")
-                    }
+                    val orientation = (dc.bitflag shr 8) and 0xFF
+                    val dirName = arrayOf("Right","Left","Down","Up")[orientation and 3]
+                    val capStr = if (orientation and 0x04 != 0) " +cap" else ""
+                    println("Room 0x$roomKey door $doorIndex: orient=$orientation($dirName$capStr) cap=(${dc.doorCapCode and 0xFF},${(dc.doorCapCode shr 8) and 0xFF}) entry=0x${dc.entryCode.toString(16)}")
 
                     romData[entryPc] = (dc.destRoomPtr and 0xFF).toByte()
                     romData[entryPc + 1] = ((dc.destRoomPtr shr 8) and 0xFF).toByte()
                     romData[entryPc + 2] = (dc.bitflag and 0xFF).toByte()
-                    romData[entryPc + 3] = clearedOrientation.toByte()
+                    romData[entryPc + 3] = orientation.toByte()
                     romData[entryPc + 4] = (dc.doorCapCode and 0xFF).toByte()
                     romData[entryPc + 5] = ((dc.doorCapCode shr 8) and 0xFF).toByte()
                     romData[entryPc + 6] = (dc.screenX and 0xFF).toByte()
@@ -2597,6 +2608,7 @@ class EditorState {
             // Patch enemy population
             if (hasEnemyEdits && room.enemySetPtr != 0 && room.enemySetPtr != 0xFFFF) run enemyPatch@{
                 val originalEnemies = romParser.parseEnemyPopulation(room.enemySetPtr)
+                val originalSet = originalEnemies.toSet()
                 val modified = originalEnemies.toMutableList()
                 for (ec in roomEdits.enemyChanges) {
                     when (ec.action) {
@@ -2659,7 +2671,11 @@ class EditorState {
                     writeU16(off + 2, e.x)
                     writeU16(off + 4, e.y)
                     writeU16(off + 6, e.initParam)
-                    writeU16(off + 8, e.properties or 0x2000)
+                    // Preserve vanilla enemies' exact properties; ensure bit 0x2000
+                    // (spritemap_pointer init) is set for user-added/updated enemies.
+                    // Some vanilla enemies (bosses) intentionally omit 0x2000.
+                    val props = if (e in originalSet) e.properties else (e.properties or 0x2000)
+                    writeU16(off + 8, props)
                     writeU16(off + 10, e.extra1)
                     writeU16(off + 12, e.extra2)
                     writeU16(off + 14, e.extra3)
@@ -2675,13 +2691,19 @@ class EditorState {
                 roomsPatched.add(roomKey)
             }
 
-            // Patch enemy GFX set (bank $B4) — ensure all species in the
-            // FINAL population have GFX entries (max 4 per SNES hardware).
+            // Patch enemy GFX set (bank $B4) — add GFX entries only for
+            // species the USER is adding, not vanilla species that already work
+            // without entries (e.g. Elevator, special entities). Adding unneeded
+            // GFX entries causes ProcessEnemyTilesets to load tile data to VRAM
+            // that the room wasn't designed for, corrupting the VRAM layout.
             if (hasEnemyEdits && room.enemyGfxPtr != 0 && room.enemyGfxPtr != 0xFFFF) run gfxPatch@{
                 val gfxEntries = romParser.parseEnemyGfxSet(room.enemyGfxPtr)
                 val existingSpecies = gfxEntries.map { it.speciesId }.toSet()
 
-                val finalPopulation = romParser.parseEnemyPopulation(room.enemySetPtr).toMutableList()
+                val vanillaPopulation = romParser.parseEnemyPopulation(room.enemySetPtr)
+                val vanillaSpecies = vanillaPopulation.map { it.id }.toSet()
+
+                val finalPopulation = vanillaPopulation.toMutableList()
                 for (ec in roomEdits.enemyChanges) {
                     when (ec.action) {
                         "add" -> finalPopulation.add(RomParser.EnemyEntry(ec.enemyId, ec.x, ec.y, ec.initParam, ec.properties))
@@ -2689,7 +2711,15 @@ class EditorState {
                     }
                 }
                 val finalSpecies = finalPopulation.map { it.id }.toSet()
-                val neededSpecies = finalSpecies.filter { it !in existingSpecies }
+                // Only add GFX entries for species that are (a) genuinely new
+                // (not in vanilla population), (b) still present after removes,
+                // and (c) not already covered by the existing GFX set.
+                val neededSpecies = (finalSpecies - vanillaSpecies).filter { it !in existingSpecies }
+                val skippedVanilla = (finalSpecies intersect vanillaSpecies) - existingSpecies
+                if (skippedVanilla.isNotEmpty()) {
+                    println("Room 0x$roomKey: skipped ${skippedVanilla.size} vanilla species from GFX set " +
+                            "(${skippedVanilla.joinToString { "0x${it.toString(16)}" }})")
+                }
                 if (neededSpecies.isEmpty()) return@gfxPatch
 
                 val maxPalIdx = gfxEntries.maxOfOrNull { it.paletteIndex and 0xFF } ?: 0
@@ -2898,7 +2928,13 @@ class EditorState {
             }
         }
 
-        if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) return null
+        if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) {
+            val orig = File(romPath)
+            val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
+            out.writeBytes(romData)
+            println("Exported (vanilla copy, no edits): ${out.absolutePath}")
+            return out.absolutePath
+        }
 
         // ─── Export verification pass ───────────────────────────────
         // Re-read all modified data from the export copy and validate.

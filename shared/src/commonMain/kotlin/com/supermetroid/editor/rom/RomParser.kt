@@ -961,6 +961,43 @@ class RomParser(internal val romData: ByteArray) {
         return entryPc
     }
 
+    data class VanillaDoorMatch(val entryCode: Int, val doorCapCode: Int, val orientation: Int)
+
+    /**
+     * Search all vanilla doors across all rooms to find the best match
+     * for entering [destRoomId] from direction [direction] (0=R,1=L,2=D,3=U).
+     * Optionally prefer a match near ([screenX],[screenY]).
+     * Returns entryCode, doorCapCode, and orientation from the best matching vanilla door.
+     */
+    fun findVanillaDoorMatch(destRoomId: Int, direction: Int, screenX: Int = -1, screenY: Int = -1): VanillaDoorMatch? {
+        data class Candidate(val door: DoorEntry, val srcRoom: Int)
+        val candidates = mutableListOf<Candidate>()
+
+        for (roomId in 0x91F8..0x9FFF) {
+            val room = readRoomHeader(roomId) ?: continue
+            if (room.width !in 1..16 || room.height !in 1..16) continue
+            val doors = parseDoorList(room.doorOut)
+            for (door in doors) {
+                if (door.destRoomPtr == destRoomId && (door.direction and 0x03) == (direction and 0x03)) {
+                    candidates.add(Candidate(door, roomId))
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) return null
+
+        val best = if (screenX < 0 || screenY < 0) candidates.first()
+        else candidates.sortedBy {
+            kotlin.math.abs(it.door.screenX - screenX) + kotlin.math.abs(it.door.screenY - screenY)
+        }.first()
+
+        return VanillaDoorMatch(best.door.entryCode, best.door.doorCapCode, best.door.direction)
+    }
+
+    fun findVanillaEntryCode(destRoomId: Int, direction: Int, screenX: Int = -1, screenY: Int = -1): Int {
+        return findVanillaDoorMatch(destRoomId, direction, screenX, screenY)?.entryCode ?: 0x0000
+    }
+
     /**
      * Door cap colors from PLM type IDs.
      * Door caps in SM are PLMs placed at door positions. The PLM ID determines color:
