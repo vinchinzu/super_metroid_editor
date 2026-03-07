@@ -1,5 +1,6 @@
 plugins {
     kotlin("multiplatform")
+    kotlin("plugin.serialization") version "1.9.0"
     id("org.jetbrains.compose")
 }
 

@@ -75,6 +75,62 @@ Grab the latest release for your platform from [GitHub Releases](https://github.
 
 Requires JDK 17+ and a C++ compiler (Xcode CLI tools on macOS, `g++` on Linux, MinGW on Windows).
 
+### Quickstart with mise
+
+The repo now includes a local `mise` toolchain for the BizHawk-first emulator checks.
+
+```bash
+mise install
+mise run test_bizhawk
+mise run test_stable_retro
+mise run test
+```
+
+`test_bizhawk` runs the Lua syntax checks, Python bridge compile checks, and the full JVM test suite, including the BizHawk socket-backed backend tests.
+
+### Stable-Retro Runtime
+
+The `gym-retro` backend still uses the original `stable_retro` runtime from `add_emulator`.
+
+For the local runtime data sync:
+
+```bash
+../.venv/bin/python tools/sync_sm_runtime_data.py --source-game-dir ..
+```
+
+For a full stable-retro bridge smoke test:
+
+```bash
+mise run test_stable_retro
+```
+
+That smoke path expects:
+
+- a Python env with `stable_retro` and `pygame`
+- the reverse-SM runtime at `../sm` (or `SM_RUNTIME_DIR`)
+- Super Metroid integration data under `custom_integrations/SuperMetroid-Snes`
+
+`tools/ci/test_stable_retro.sh` auto-syncs integration data from the sibling game repo before it runs the bridge smoke.
+
+### Manual BizHawk Bring-Up
+
+To open the editor straight into the emulator workspace and auto-boot a BizHawk `ZebesStart` savestate:
+
+```bash
+./test_bizhawk.sh /path/to/SuperMetroid.sfc /path/to/EmuHawk
+```
+
+That script looks for `ZebesStart.state` in this order:
+
+- `SMEDIT_STATE_DIR`
+- `<rom dir>/editor_states`
+- `./editor_states`
+- parent folders above the editor repo
+
+It forces the BizHawk backend, opens the `Emu` tab, and starts the session automatically.
+
+If a packaged desktop launcher already exists under `desktopApp/build/compose/binaries/main/app`, the script uses it first. Otherwise it falls back to `mise exec java@17 -- ./gradlew :desktopApp:run`.
+
 ```bash
 # Clone with submodules (required for SPC audio)
 git clone --recurse-submodules git@github.com:kennycason/super_metroid_editor.git

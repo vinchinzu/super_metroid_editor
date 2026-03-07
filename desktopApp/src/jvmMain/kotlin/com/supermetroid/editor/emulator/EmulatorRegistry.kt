@@ -1,0 +1,24 @@
+package com.supermetroid.editor.emulator
+
+import com.supermetroid.editor.data.AppConfig
+
+object EmulatorRegistry {
+
+    private val factories = mutableMapOf<String, () -> EmulatorBackend>(
+        "bizhawk" to { BizHawkBackend() },
+        "gym-retro" to { GymRetroBackend() },
+    )
+
+    fun create(name: String): EmulatorBackend {
+        val factory = factories[name]
+            ?: throw IllegalArgumentException("Unknown emulator backend: '$name'. Available: ${availableBackends()}")
+        return factory()
+    }
+
+    fun availableBackends(): List<String> = factories.keys.sorted()
+
+    fun createFromConfig(): EmulatorBackend {
+        val settings = AppConfig.load()
+        return create(settings.emulatorBackend)
+    }
+}

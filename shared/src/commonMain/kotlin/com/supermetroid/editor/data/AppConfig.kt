@@ -5,6 +5,27 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
+private fun env(name: String): String? {
+    return System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+private fun envInt(name: String): Int? {
+    return env(name)?.toIntOrNull()
+}
+
+private fun defaultNavExportDir(): String {
+    val configured = env("SMEDIT_NAV_EXPORT_DIR")
+    if (!configured.isNullOrEmpty()) return configured
+    val cwd = File(System.getProperty("user.dir")).absoluteFile
+    val editorDir = when {
+        cwd.name == "super_metroid_editor" -> cwd
+        File(cwd, "super_metroid_rl/super_metroid_editor").isDirectory ->
+            File(cwd, "super_metroid_rl/super_metroid_editor")
+        else -> cwd
+    }
+    return File(editorDir, "export/sm_nav").absolutePath
+}
+
 @Serializable
 data class WindowConfig(
     val x: Int = -1,
@@ -18,6 +39,11 @@ data class AppSettings(
     val lastRomPath: String? = null,
     val window: WindowConfig = WindowConfig(),
     val lastRoomPerRom: Map<String, String> = emptyMap(),
+    val emulatorBackend: String = "bizhawk",
+    val bizhawkPath: String? = null,
+    val bizhawkPort: Int = 43884,
+    val emulatorNavExportDir: String = defaultNavExportDir(),
+    val emulatorFollowLiveRoom: Boolean = true,
 )
 
 object AppConfig {
@@ -27,20 +53,29 @@ object AppConfig {
 
     private var cached: AppSettings? = null
 
+    private fun withEnvOverrides(settings: AppSettings): AppSettings {
+        return settings.copy(
+            emulatorBackend = env("SMEDIT_EMULATOR_BACKEND") ?: settings.emulatorBackend,
+            bizhawkPath = env("SMEDIT_BIZHAWK_PATH") ?: settings.bizhawkPath,
+            bizhawkPort = envInt("SMEDIT_BIZHAWK_PORT") ?: settings.bizhawkPort,
+            emulatorNavExportDir = env("SMEDIT_NAV_EXPORT_DIR") ?: settings.emulatorNavExportDir,
+        )
+    }
+
     fun load(): AppSettings {
         cached?.let { return it }
         if (!configFile.exists()) {
-            val defaults = AppSettings()
+            val defaults = withEnvOverrides(AppSettings())
             cached = defaults
             return defaults
         }
         return try {
-            val settings = json.decodeFromString<AppSettings>(configFile.readText())
+            val settings = withEnvOverrides(json.decodeFromString<AppSettings>(configFile.readText()))
             cached = settings
             settings
         } catch (e: Exception) {
             System.err.println("[Config] Failed to read config: ${e.message}")
-            val defaults = AppSettings()
+            val defaults = withEnvOverrides(AppSettings())
             cached = defaults
             defaults
         }

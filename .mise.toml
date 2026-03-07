@@ -1,0 +1,16 @@
+[tools]
+java = "17"
+python = "3.12"
+lua = "5.4"
+
+[tasks.test]
+description = "Run the shared and desktop JVM test suites"
+run = "./gradlew :shared:jvmTest :desktopApp:jvmTest"
+
+[tasks.test_bizhawk]
+description = "Run BizHawk-first emulator validation"
+run = "bash tools/ci/test_bizhawk.sh"
+
+[tasks.test_stable_retro]
+description = "Run stable-retro bridge validation and smoke test"
+run = "bash tools/ci/test_stable_retro.sh"
