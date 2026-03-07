@@ -181,29 +181,19 @@ fun TilesetCanvas(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // ── Top toolbar (match Rooms: MaterialTheme, FilterChip, icons) ──
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface
+            // ── Top toolbar ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .defaultMinSize(minHeight = 36.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        "Tileset $tilesetId",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Text("Tileset $tilesetId", fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary)
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-                    // Selected tile info + editing inline
                     if (selectedMeta >= 0) {
                         TileToolbarInfo(
                             tilesetId = tilesetId,
@@ -212,27 +202,18 @@ fun TilesetCanvas(
                             modifier = Modifier.weight(1f)
                         )
                     } else {
-                        Text(
-                            "Click a tile to select",
-                            fontSize = 10.sp,
+                        Text("Click a tile to select", fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
+                            modifier = Modifier.weight(1f))
                     }
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-                    // Pixel Editor button (FilterChip like Rooms tools)
                     if (selectedMeta >= 0 && editorState.editorTileGraphics != null) {
                         FilterChip(
                             selected = false,
                             onClick = { showPixelEditor = true },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Text("Edit Pixels", fontSize = 11.sp)
-                                }
-                            },
+                            label = { Icon(Icons.Default.Brush, contentDescription = "Edit Pixels", modifier = Modifier.size(14.dp)) },
                             modifier = Modifier.height(28.dp)
                         )
                     }
@@ -389,12 +370,8 @@ fun TilesetCanvas(
                     }
 
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        "${(zoomLevel * 100).toInt()}%",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                    Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface)
             }
 
             // ── Main grid area ──
@@ -512,30 +489,22 @@ private fun TileToolbarInfo(
     }
 
     Row(
-        modifier = modifier,
+        modifier = modifier.height(28.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Tile preview
         if (preview != null) {
             Image(
                 bitmap = preview,
                 contentDescription = "Tile #$metatileIndex",
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(20.dp),
                 contentScale = ContentScale.FillBounds
             )
         }
 
-        // Index + palette
-        Column {
-            Text(
-                "#$metatileIndex (0x${metatileIndex.toString(16).uppercase().padStart(3, '0')})",
-                fontSize = 10.sp
-            )
-            if (palIndices.isNotEmpty()) {
-                Text("pal ${palIndices.sorted().joinToString(",")}", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        val palText = if (palIndices.isNotEmpty()) " pal ${palIndices.sorted().joinToString(",")}" else ""
+        Text("#$metatileIndex (0x${metatileIndex.toString(16).uppercase().padStart(3, '0')})$palText",
+            fontSize = 10.sp)
 
         Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 

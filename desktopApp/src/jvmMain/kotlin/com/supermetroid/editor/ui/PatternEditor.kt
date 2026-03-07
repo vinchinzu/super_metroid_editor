@@ -266,17 +266,17 @@ fun PatternEditorCanvas(
     var showTileMeta by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ─── Toolbar (mirrors MapCanvas) ──────────────────────
+        // ─── Toolbar ──────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Pattern name + info (double-click to rename)
-            Text(pattern.name, fontWeight = FontWeight.Bold, fontSize = 12.sp,
+            Text(pattern.name, fontWeight = FontWeight.Medium, fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable { showRenameDialog = true })
-            IconButton(onClick = { showRenameDialog = true }, modifier = Modifier.size(20.dp)) {
-                Icon(Icons.Default.Edit, "Rename", Modifier.size(12.dp),
+            IconButton(onClick = { showRenameDialog = true }, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Edit, "Rename", Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text("${pattern.cols}×${pattern.rows}", fontSize = 10.sp,
@@ -287,41 +287,39 @@ fun PatternEditorCanvas(
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Tool buttons — identical to MapCanvas
             FilterChip(
                 selected = editorState.activeTool == EditorTool.SELECT,
                 onClick = { editorState.activeTool = EditorTool.SELECT; focusReq.requestFocus() },
-                label = { Icon(Icons.Default.SelectAll, null, Modifier.size(14.dp)) },
-                modifier = Modifier.height(24.dp)
+                label = { Icon(Icons.Default.SelectAll, "Select", Modifier.size(14.dp)) },
+                modifier = Modifier.height(28.dp)
             )
             FilterChip(
                 selected = editorState.activeTool == EditorTool.PAINT,
                 onClick = { editorState.activeTool = EditorTool.PAINT; focusReq.requestFocus() },
-                label = { Icon(Icons.Default.Brush, null, Modifier.size(14.dp)) },
-                modifier = Modifier.height(24.dp)
+                label = { Icon(Icons.Default.Brush, "Paint", Modifier.size(14.dp)) },
+                modifier = Modifier.height(28.dp)
             )
             FilterChip(
                 selected = editorState.activeTool == EditorTool.FILL,
                 onClick = { editorState.activeTool = EditorTool.FILL; focusReq.requestFocus() },
-                label = { Icon(Icons.Default.FormatColorFill, null, Modifier.size(14.dp)) },
-                modifier = Modifier.height(24.dp)
+                label = { Icon(Icons.Default.FormatColorFill, "Fill", Modifier.size(14.dp)) },
+                modifier = Modifier.height(28.dp)
             )
             FilterChip(
                 selected = editorState.activeTool == EditorTool.SAMPLE,
                 onClick = { editorState.activeTool = EditorTool.SAMPLE; focusReq.requestFocus() },
-                label = { Icon(Icons.Default.Colorize, null, Modifier.size(14.dp)) },
-                modifier = Modifier.height(24.dp)
+                label = { Icon(Icons.Default.Colorize, "Sample", Modifier.size(14.dp)) },
+                modifier = Modifier.height(28.dp)
             )
             FilterChip(
                 selected = editorState.activeTool == EditorTool.ERASE,
                 onClick = { editorState.activeTool = EditorTool.ERASE; focusReq.requestFocus() },
-                label = { Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                modifier = Modifier.height(24.dp)
+                label = { Icon(Icons.Default.Clear, "Erase", Modifier.size(14.dp)) },
+                modifier = Modifier.height(28.dp)
             )
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Undo / Redo
             IconButton(onClick = { editorState.patUndo(); focusReq.requestFocus() },
                 enabled = editorState.patternUndoStack.isNotEmpty(), modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Undo, "Undo", Modifier.size(16.dp),
@@ -337,7 +335,6 @@ fun PatternEditorCanvas(
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Flip / Rotate
             IconButton(onClick = { editorState.flipOrCaptureH(); focusReq.requestFocus() },
                 enabled = editorState.brush != null, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Flip, "H-Flip", Modifier.size(16.dp),
@@ -355,20 +352,19 @@ fun PatternEditorCanvas(
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Resize / Delete / Use
             OutlinedButton(onClick = { showResizeDialog = true },
-                contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp)) {
+                contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) {
                 Text("Resize", fontSize = 9.sp)
             }
             Button(onClick = {
                 editorState.brush = editorState.patternToBrush(pattern)
                 editorState.activeTool = EditorTool.PAINT
-            }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp)) {
+            }, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp)) {
                 Text("Use", fontSize = 9.sp)
             }
             if (!pattern.builtIn) {
                 OutlinedButton(onClick = { showDeleteConfirm = true },
-                    contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(24.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(28.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                     Text("Delete", fontSize = 9.sp)
                 }
@@ -376,32 +372,15 @@ fun PatternEditorCanvas(
 
             Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Tile Meta overlay toggle
             FilterChip(
                 selected = showTileMeta,
                 onClick = { showTileMeta = !showTileMeta },
                 label = { Text("Meta", fontSize = 9.sp) },
-                modifier = Modifier.height(24.dp),
+                modifier = Modifier.height(28.dp),
                 leadingIcon = if (showTileMeta) { { Icon(Icons.Default.Visibility, null, Modifier.size(12.dp)) } } else null
             )
 
             Spacer(Modifier.weight(1f))
-
-            // Brush / Hover info
-            val brush = editorState.brush
-            if (brush != null) {
-                Text("${brush.cols}×${brush.rows} #${brush.primaryIndex}" +
-                    (if (brush.hFlip) " H" else "") + (if (brush.vFlip) " V" else ""),
-                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (editorState.patHoverX >= 0) {
-                val hw = editorState.patCellWord(editorState.patHoverX, editorState.patHoverY)
-                val hIdx = hw and 0x3FF; val hType = (hw shr 12) and 0xF
-                Text("#$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
-                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
 
             Text("${(zoomLevel * 100).toInt()}%", fontSize = 10.sp,
                 modifier = Modifier.width(36.dp))
@@ -410,7 +389,7 @@ fun PatternEditorCanvas(
                 onValueChange = { zoomLevel = it },
                 valueRange = 1f..8f,
                 steps = 13,
-                modifier = Modifier.width(80.dp)
+                modifier = Modifier.width(80.dp).height(28.dp)
             )
         }
 
