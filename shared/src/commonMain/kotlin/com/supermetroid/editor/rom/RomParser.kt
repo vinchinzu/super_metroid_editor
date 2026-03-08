@@ -966,6 +966,8 @@ class RomParser(internal val romData: ByteArray) {
      *
      * Scans the destination room's level data for type-9 (door) blocks on the
      * entry edge, then picks the topmost/leftmost block on the matching screen.
+     * The cap position is 1 tile INWARD from the door block (the game's
+     * SpawnDoorClosingPLM places the cap adjacent to the door opening, not on it).
      * Returns (capY shl 8) or capX as a doorCapCode, or null if no door blocks found.
      */
     fun deriveDoorCapPosition(destRoomId: Int, direction: Int, screenX: Int, screenY: Int): Int? {
@@ -1019,7 +1021,16 @@ class RomParser(internal val romData: ByteArray) {
 
         if (doorBlocks.isEmpty()) return null
         val best = doorBlocks.first()
-        return (best.by shl 8) or best.bx
+        val capX: Int
+        val capY: Int
+        when (dir) {
+            0 -> { capX = (best.bx + 1).coerceAtMost(blocksWide - 1); capY = best.by }
+            1 -> { capX = (best.bx - 1).coerceAtLeast(0);             capY = best.by }
+            2 -> { capX = best.bx; capY = (best.by + 1).coerceAtMost(blocksTall - 1) }
+            3 -> { capX = best.bx; capY = (best.by - 1).coerceAtLeast(0) }
+            else -> { capX = best.bx; capY = best.by }
+        }
+        return (capY shl 8) or capX
     }
 
     /**

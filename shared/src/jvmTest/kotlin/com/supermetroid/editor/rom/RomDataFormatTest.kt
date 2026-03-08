@@ -563,11 +563,134 @@ class RomDataFormatTest {
         }
 
         @Test
+        fun `deriveDoorCapPosition returns 1 tile inward from edge, matching vanilla`() {
+            val parser = loadTestRom() ?: return
+            // DDF3 door #2 → DD58: vanilla cap=(62,6), direction Left, screen(3,0)
+            val capDD58Right = parser.deriveDoorCapPosition(0xDD58, 1, 3, 0)
+            assertNotNull(capDD58Right, "Should find door blocks on DD58 right edge")
+            val cx = capDD58Right!! and 0xFF
+            val cy = (capDD58Right shr 8) and 0xFF
+            assertEquals(62, cx, "DD58 Left entry: cap X should be 62 (1 inward from edge 63)")
+            assertEquals(6, cy, "DD58 Left entry: cap Y should be 6 (topmost door block)")
+
+            // DE4D → DD58: vanilla cap=(1,6), direction Right, screen(0,0)
+            // DD58's left edge has no door blocks, so derive should return null
+            val capDD58Left = parser.deriveDoorCapPosition(0xDD58, 0, 0, 0)
+            assertNull(capDD58Left, "DD58 has no door blocks on left edge (x=0)")
+
+            // Test Landing Site (91F8) — well-known vanilla caps
+            val ls = parser.readRoomHeader(0x91F8)!!
+            val lsDoors = parser.parseDoorList(ls.doorOut)
+            println("\nLanding Site doors for cap comparison:")
+            for ((i, d) in lsDoors.withIndex()) {
+                val vanillaCapX = d.doorCapCode and 0xFF
+                val vanillaCapY = (d.doorCapCode shr 8) and 0xFF
+                println("  Door #$i → 0x${d.destRoomPtr.toString(16).uppercase()}, " +
+                    "dir=${d.directionName}, vanilla cap=($vanillaCapX,$vanillaCapY)")
+            }
+        }
+
+        @Test
         fun `bank 8F PLM area starts at correct PC offset`() {
             val parser = loadTestRom() ?: return
             val pc = parser.snesToPc(0x8F8000)
             val expected = if (parser.getRomData().size > 0x300000) 0x200 + 0x78000 else 0x78000
             assertEquals(expected, pc)
+        }
+    }
+
+    @Nested
+    inner class MotherBrainDoorCapAnalysis {
+
+        @Test
+        fun `analyze MB room door caps and incoming connections`() {
+            val parser = loadTestRom() ?: return
+            val mbRoom = parser.readRoomHeader(0xDD58) ?: return
+            println("=== Mother Brain Room (0xDD58) ===")
+            println("Dimensions: ${mbRoom.width}x${mbRoom.height} screens (${mbRoom.width*16}x${mbRoom.height*16} blocks)")
+
+            val mbDoors = parser.parseDoorList(mbRoom.doorOut)
+            println("\nDD58 outgoing doors (${mbDoors.size}):")
+            for ((i, d) in mbDoors.withIndex()) {
+                val capX = d.doorCapCode and 0xFF
+                val capY = (d.doorCapCode shr 8) and 0xFF
+                println("  Door #$i → dest=0x${d.destRoomPtr.toString(16).uppercase()}, " +
+                    "dir=${d.directionName}(${d.direction}), cap=($capX,$capY), " +
+                    "screen=(${d.screenX},${d.screenY})")
+            }
+
+            val mbStates = parser.findAllStateDataOffsets(0xDD58)
+            val defaultState = mbStates.lastOrNull()
+            if (defaultState != null) {
+                val data = parser.readStateData(defaultState)
+                val plmPtr = data["plmSetPtr"] ?: 0
+                val plms = parser.parsePlmSet(plmPtr)
+                println("\nDD58 PLM set ($8F:${plmPtr.toString(16).uppercase()}, ${plms.size} PLMs):")
+                for (plm in plms) {
+                    val isDoorCap = plm.id in listOf(0xC8A2, 0xC8A8, 0xC8AE, 0xC8B4)
+                    println("  PLM 0x${plm.id.toString(16).uppercase()} at (${plm.x},${plm.y}) param=0x${plm.param.toString(16)}" +
+                        if (isDoorCap) " *** DOOR CAP ***" else "")
+                }
+            }
+
+            println("\n--- Scanning Tourian rooms for doors entering DD58 ---")
+            val tourian = listOf(0xDAE1, 0xDB31, 0xDB7D, 0xDBCD, 0xDC19, 0xDC65,
+                0xDCB1, 0xDCFF, 0xDD2B, 0xDD58, 0xDDA3, 0xDDF3, 0xDE4D, 0xDEA7,
+                0xDF1B, 0xDF8D, 0xE06B, 0xE0B5)
+            for (srcId in tourian) {
+                if (srcId == 0xDD58) continue
+                val srcRoom = parser.readRoomHeader(srcId) ?: continue
+                val srcDoors = parser.parseDoorList(srcRoom.doorOut)
+                for ((di, d) in srcDoors.withIndex()) {
+                    if (d.destRoomPtr == 0xDD58) {
+                        val capX = d.doorCapCode and 0xFF
+                        val capY = (d.doorCapCode shr 8) and 0xFF
+                        println("  Room 0x${srcId.toString(16).uppercase()} door #$di → DD58: " +
+                            "dir=${d.directionName}(${d.direction}), cap=($capX,$capY), " +
+                            "screen=(${d.screenX},${d.screenY})")
+                    }
+                }
+            }
+
+            val autoCap = parser.deriveDoorCapPosition(0xDD58, 0, 0, 0)
+            if (autoCap != null) {
+                val ax = autoCap and 0xFF; val ay = (autoCap shr 8) and 0xFF
+                println("\nAuto-derived cap for DD58 dir=Right(0) screen(0,0): ($ax,$ay)")
+            }
+            val autoCap1 = parser.deriveDoorCapPosition(0xDD58, 1, 3, 0)
+            if (autoCap1 != null) {
+                val ax = autoCap1 and 0xFF; val ay = (autoCap1 shr 8) and 0xFF
+                println("Auto-derived cap for DD58 dir=Left(1) screen(3,0): ($ax,$ay)")
+                assertEquals(62, ax, "Cap X for Left entry should be 1 tile inward from right edge (62, not 63)")
+                assertEquals(6, ay, "Cap Y should match topmost door block")
+            }
+
+            println("\n--- Door blocks on edges of DD58 level data ---")
+            val levelData = try { parser.decompressLZ2(mbRoom.levelDataPtr) } catch (_: Exception) { null }
+            if (levelData != null) {
+                val bw = mbRoom.width * 16
+                val bh = mbRoom.height * 16
+                println("Left edge (x=0):")
+                for (by in 0 until bh) {
+                    val bt = parser.blockTypeAt(levelData, bw, bh, 0, by)
+                    if (bt == 0x9) println("  Door block at (0,$by)")
+                }
+                println("Right edge (x=${bw-1}):")
+                for (by in 0 until bh) {
+                    val bt = parser.blockTypeAt(levelData, bw, bh, bw - 1, by)
+                    if (bt == 0x9) println("  Door block at (${bw-1},$by)")
+                }
+                println("x=1 column:")
+                for (by in 0 until bh) {
+                    val bt = parser.blockTypeAt(levelData, bw, bh, 1, by)
+                    if (bt == 0x9) println("  Door block at (1,$by)")
+                }
+                println("x=${bw-2} column:")
+                for (by in 0 until bh) {
+                    val bt = parser.blockTypeAt(levelData, bw, bh, bw - 2, by)
+                    if (bt == 0x9) println("  Door block at (${bw-2},$by)")
+                }
+            }
         }
     }
 }
