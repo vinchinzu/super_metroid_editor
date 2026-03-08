@@ -70,7 +70,7 @@ class GamepadManager {
             mgr.initSDLGamepad()
             manager = mgr
             initialized = true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             System.err.println("[GamepadManager] Failed to init SDL gamepad: ${e.message}")
         }
     }
