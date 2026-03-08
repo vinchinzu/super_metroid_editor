@@ -11,6 +11,7 @@ import javax.sound.sampled.SourceDataLine
 class LibretroAudioOutput {
 
     private var line: SourceDataLine? = null
+    private var writeBuffer = ByteArray(0)
     @Volatile
     var muted: Boolean = false
 
@@ -22,7 +23,7 @@ class LibretroAudioOutput {
             true,     // signed
             false,    // little-endian (native SNES)
         )
-        val bufferBytes = (SAMPLE_RATE * 2 * 2 * BUFFER_SECONDS).toInt() // ~100ms buffer
+        val bufferBytes = (SAMPLE_RATE * 2 * 2 * BUFFER_SECONDS).toInt()
         val sdl = AudioSystem.getSourceDataLine(format)
         sdl.open(format, bufferBytes)
         sdl.start()
@@ -37,15 +38,14 @@ class LibretroAudioOutput {
         if (muted || samples.isEmpty()) return
         val sdl = line ?: return
 
-        // Convert ShortArray to byte array (little-endian)
-        val bytes = ByteArray(samples.size * 2)
+        val bytes = ensureWriteBuffer(samples.size * 2)
         for (i in samples.indices) {
             val s = samples[i].toInt()
             bytes[i * 2] = (s and 0xFF).toByte()
             bytes[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
         }
 
-        sdl.write(bytes, 0, bytes.size)
+        sdl.write(bytes, 0, samples.size * 2)
     }
 
     fun close() {
@@ -56,8 +56,16 @@ class LibretroAudioOutput {
         line = null
     }
 
+    private fun ensureWriteBuffer(size: Int): ByteArray {
+        if (writeBuffer.size < size) {
+            writeBuffer = ByteArray(size)
+        }
+        return writeBuffer
+    }
+
     companion object {
         const val SAMPLE_RATE = 32040f
-        private const val BUFFER_SECONDS = 0.1f
+        // Keep the queue short to reduce audio-induced end-to-end latency.
+        private const val BUFFER_SECONDS = 0.05f
     }
 }
