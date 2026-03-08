@@ -1,54 +1,86 @@
 package com.supermetroid.editor
 
-import androidx.compose.foundation.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.supermetroid.editor.ui.DraggableDividerHorizontal
-import com.supermetroid.editor.ui.DraggableDividerVertical
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import androidx.compose.ui.res.painterResource
-import java.awt.FileDialog
-import java.awt.Frame
 import com.supermetroid.editor.data.AppConfig
-import com.supermetroid.editor.data.WindowConfig
+import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.data.RoomRepository
+import com.supermetroid.editor.data.WindowConfig
 import com.supermetroid.editor.rom.RomParser
-import com.supermetroid.editor.ui.RoomListView
+import com.supermetroid.editor.ui.DraggableDividerHorizontal
+import com.supermetroid.editor.ui.DraggableDividerVertical
+import com.supermetroid.editor.ui.EditorState
+import com.supermetroid.editor.ui.EnemySpriteViewer
+import com.supermetroid.editor.ui.KraidSpriteEditor
+import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.ui.MapCanvas
-import com.supermetroid.editor.ui.TilesetPreview
-import com.supermetroid.editor.ui.TilesetListPanel
-import com.supermetroid.editor.ui.TilesetCanvas
-import com.supermetroid.editor.ui.TilesetEditorState
-import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatchEditorCanvas
-import com.supermetroid.editor.ui.PatternListPanel
+import com.supermetroid.editor.ui.PatchListPanel
 import com.supermetroid.editor.ui.PatternEditorCanvas
+import com.supermetroid.editor.ui.PatternListPanel
 import com.supermetroid.editor.ui.PatternThumbnailList
-import com.supermetroid.editor.ui.SoundListPanel
+import com.supermetroid.editor.ui.PhantoonSpriteEditor
+import com.supermetroid.editor.ui.RoomListView
+import com.supermetroid.editor.ui.RoomPropertiesPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
-import com.supermetroid.editor.ui.EnemySpriteViewer
-import com.supermetroid.editor.ui.PhantoonSpriteEditor
-import com.supermetroid.editor.ui.KraidSpriteEditor
+import com.supermetroid.editor.ui.SoundListPanel
+import com.supermetroid.editor.ui.TilesetCanvas
+import com.supermetroid.editor.ui.TilesetEditorState
+import com.supermetroid.editor.ui.TilesetListPanel
+import com.supermetroid.editor.ui.TilesetPreview
 import com.supermetroid.editor.ui.blockTypeName
-import com.supermetroid.editor.ui.LocalSwingWindow
-import androidx.compose.ui.text.font.FontFamily
-import kotlinx.coroutines.delay
-import com.supermetroid.editor.data.RomPreferences
-import com.supermetroid.editor.ui.EditorState
-import com.supermetroid.editor.ui.RoomPropertiesPanel
-import androidx.compose.ui.input.key.*
+import java.awt.FileDialog
+import java.awt.Frame
 import java.io.File
+import kotlinx.coroutines.delay
 
 fun main() = application {
     val roomRepository = remember { RoomRepository() }
@@ -129,7 +161,7 @@ fun main() = application {
             } else false
         }
     ) {
-        androidx.compose.runtime.CompositionLocalProvider(LocalSwingWindow provides window) {
+        CompositionLocalProvider(LocalSwingWindow provides window) {
         MaterialTheme {
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
@@ -398,7 +430,7 @@ fun main() = application {
                                     ) {
                                         for ((category, items) in grouped) {
                                             Text(category, fontSize = 12.sp,
-                                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                                fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurface)
                                             Spacer(Modifier.height(2.dp))
                                             for (entry in items) {
@@ -408,7 +440,7 @@ fun main() = application {
                                                         .clickable { selectedSpriteIdx = idx },
                                                     color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.primaryContainer
                                                             else MaterialTheme.colorScheme.surface,
-                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                                                    shape = RoundedCornerShape(6.dp)
                                                 ) {
                                                     Text(entry.name, fontSize = 11.sp,
                                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -512,7 +544,7 @@ fun main() = application {
 
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                    shape = androidx.compose.ui.graphics.RectangleShape,
+                                    shape = RectangleShape,
                                     modifier = Modifier.fillMaxWidth().height(24.dp)
                                 ) {
                                     Row(

@@ -1,0 +1,159 @@
+ROOM MUSIC SELECTION
+This section does NOT explain how to create custom music. That requires advanced assembly, musical knowledge and audio editing skill. This is simply a list of songs that you can use as the background music for a room, and then some information on door and event-triggered song changes.
+
+Song list: first byte is the "song set" value, and the second byte is the "play index" value, which can both be seen and edited at the bottom of SMILE RF's Room MDB tab:
+
+## = any value can be used
+
+03 05 = Song: Title screen
+03 06 = Song: Title screen (after pressing a button)
+36 05 = Song: Intro story
+2D 06 = Song: Ceres
+06 05 = Song: Empty Crateria (with rain and thunder)
+06 06 = Song: Empty Crateria (rain and thunder only)
+06 07 = Song: Empty Crateria (no rain or thunder)
+0C 05 = Song: Crateria
+09 05 = Song: Space pirates
+24 06 = Song: Bomb Torizo awakening
+## 03 = Song: Elevator rooms
+## 04 = Song: Hallway before golden boss statues
+09 06 = Song: Golden boss statue room
+0F 05 = Song: Green Brinstar
+12 05 = Song: Red Brinstar
+15 05 = Song: Upper Norfair
+18 05 = Song: Lower Norfair
+30 05 = Song: Wrecked Ship (boss = alive)
+30 06 = Song: Wrecked Ship (boss = dead)
+1B 05 = Song: Eastern Maridia
+1B 06 = Song: Western Maridia
+1E 05 = Song: Tourian
+2A 05 = Song: Miniboss fight
+27 06 = Song: Pre-boss tension (+ roaring sounds)
+45 06 = Song: Pre-boss tension (+ metroid sounds)
+27 05 = Song: Boss fight (+ roaring sounds)
+45 05 = Song: Boss fight (+ metroid sounds)
+24 05 = Song: Boss fight (Draygon and Ridley)
+21 05 = Song: Mother Brain fight
+24 07 = Song: Escape music
+3C 05 = Song: Credits music, doesn't loop
+
+00 00 = No change
+## 00 = No music
+00 05 = No change / song one
+00 06 = No change / song two
+
+3F 05 = Audio clip: "The last metroid is in captivity"
+42 05 = Audio clip: "The galaxy is at peace"
+2D 05 = Music clip: flying to Ceres and Zebes
+## 01 = Music clip: Samus appears (loading a saved game)
+## 02 = Music clip: Item fanfare (collecting an item)
+33 05 = Audio clip: Zebes exploding
+39 05 = Audio clip: Samus dying
+00 00 and 00 05 ("no change") are used often to keep from reloading the whole instrument set every time Samus transitions through a door, which causes a short delay, so it's wasteful to reload the instruments if a different song isn't meant to start playing. If you realize while testing your hack that the wrong music (or no music) has been loaded, it's probably because a room somewhere is using 00 00 or 00 05 when it should have loaded a song instead. 00 00 defaults to the title screen theme, which is why you hear it in most rooms that you QuickMet into.
+
+HOW TO LOAD SONGS USING A DOOR'S ASM POINTER
+This is mainly for rooms with multiple cells, like 7E9A0. You could have a different song play for each cell by just making the doors that lead into the cells load a new song, and then make certain that the three rooms that are connected to each cell aren't using 00 00 or 00 05.
+
+To make doors load a song, you only have to find some free space in bank $8F to paste-write these bytes: A9 00 00 22 C1 8F 80 A9 XX FF 22 C1 8F 80 A9 YY 00 22 C1 8F 80 60 (XX = song set, YY = play index) - after that, point to those bytes with a door's ASM pointer.
+
+That's three things that the door's ASM pointer has been used to edit in this guide (the first two were scroll colors and scroller values), and the potential becomes almost limitless once you learn how to program ASM. Here's an example piece of door ASM data you can also paste-write somewhere in bank $8F that changes all three types (up/down scrollers, scroll colors, and song choice): 08 E2 20 A9 70 8D AD 07 A9 A0 8D AF 07 A9 01 8F 20 CD 7E A9 02 8F 21 CD 7E 28 A9 00 00 22 C1 8F 80 A9 1E FF 22 C1 8F 80 A9 05 00 22 C1 8F 80 60
+
+Here are those same bytes, arranged vertically and labeled. The red values are the only values that you should edit:
+
+08 E2 20     <-- Begin ASM
+A9 70        <-- Load "up scroller" value
+8D AD 07     <-- Store up scroller value to room header
+A9 A0        <-- Load "down scroller" value
+8D AF 07     <-- Store down scroller value to room header
+
+A9 01        <-- Load blue scroll
+8F 20 CD 7E  <-- Store blue scroll to screen 00
+A9 02        <-- Load green scroll
+8F 21 CD 7E  <-- Store green scroll to screen 01
+
+28           <-- End scroll color change ASM
+
+A9 00 00     <-- Stop current song
+22 C1 8F 80  <-- Play song-stop value
+A9 1E FF     <-- Load new "song set" value
+22 C1 8F 80  <-- Play "song set"
+A9 05 00     <-- Load new "play index" value
+22 C1 8F 80  <-- Play "play index"
+
+60           <-- End ASM
+The sections of code that change the up/down scrollers and music will always stay the same length, but the section that changes scroll colors can vary in length, depending how many scroll colors need to be changed at once by the door, which has already been explained in section 17.
+
+INGAME SONG CHANGES
+Throughout the game, there are moments where the background music changes to another song without the use of door data or room headers. To do this anywhere you want at any time would most likely require some assembly programming knowledge, but in the meantime, here is a list of existing ingame song changes that you only need to hex-edit the song set and play index values for:
+
+List of music change events in Super Metroid:
+
+59B6D  - 03 [song set]    <-- Title screen
+59B80  - 05 [play index]  <-- Title screen
+59A95  - 06 [play index]  <-- Title screen (after skipping intro)
+5A5A0  - 3F [song set]    <-- "The last metroid is in captivity"
+5A60C  - 05 [play index]  <-- "The last metroid is in captivity"
+5A622  - 42 [song set]    <-- "The galaxy is at peace"
+5A629  - 05 [play index]  <-- "The galaxy is at peace"
+5A714  - 09 [song set]    <-- Intro story
+5A70C  - 00 [play index]  <-- Intro story
+5B221  - 00 [play index]  <-- Intro story music stopping before Ceres
+5BDD3  - 2D [song set]    <-- Flying toward Ceres
+5BDDA  - 05 [play index]  <-- Flying toward Ceres
+13244E - 05 [play index]  <-- Ceres & Norfair Ridley fights
+1340B4 - 07 [play index]  <-- Escape music after Ceres Ridley flies away
+1345EB - 03 [play index]  <-- Elevator music after Norfair Ridley dies
+100BD  - 07 [play index]  <-- Landing on rainy Zebes
+1546E1 - 96 [song set]    <-- Bomb Torizo awakening
+153952 - 98 [song set]    <-- Bomb Torizo fight
+153098 - 05 [play index]  <-- Bomb Torizo fight
+154AE3 - 05 [play index]  <-- Golden Torizo fight
+153255 - 9A [song set]    <-- Elevator music after Bomb/Golden Torizos die
+13C8B0 - 05 [play index]  <-- Kraid fight
+13C81C - 03 [play index]  <-- Elevator music after Kraid dies
+46259  - 03 [play index]  <-- Elevator music after collecting the Varia suit
+1210AB - 06 [play index]  <-- Tense music after Crocomire dies
+1217DE - 05 [play index]  <-- Crocomire destroying spike wall
+121B9F - 06 [play index]  <-- Tense music after Crocomire's skeleton dies
+13D543 - 05 [play index]  <-- Phantoon fight
+13DB92 - 05 [play index]  <-- Elevator music after Phantoon dies
+199B1B - 03 [play index]  <-- Elevator music after Botwoon dies
+129254 - 03 [play index]  <-- Elevator music after Draygon dies
+14F03D - 05 [play index]  <-- Giant metroid attacking sidehopper
+14F29B - 07 [play index]  <-- Giant metroid releasing Samus
+14880E - 06 [play index]  <-- Silence before Mother Brain fight
+14885A - 21 [song set]    <-- Mother Brain fight
+148E18 - 05 [play index]  <-- Mother Brain fight
+14CC66 - 48 [song set]    <-- Hyper beam acquired
+14CC6D - 05 [play index]  <-- Hyper beam acquired
+14B1FF - 24 [song set]    <-- Escape music after Mother Brain dies
+5D6C6  - 33 [song set]    <-- Planet Zebes exploding
+5D6BE  - 00 [play index]  <-- Planet Zebes exploding
+5DBAD  - 3C [song set]    <-- Credits
+5DBB4  - 05 [play index]  <-- Credits
+
+How to play elevator music after Spore Spawn dies:
+12E8B4 - Replace 0A BB A0 with 5A F9 A5 -- points to free space at 12F95A
+12F95A - Replace free space with 22 0A BB A0 A9 03 00 22 C1 8F 80 6B -- play index = 03
+Most ingame song changes don't have a song set value, because they only tend to use the play index to switch to an alternate version of the same song. By default, this limits most of the song selections to maybe a couple of variations. To be able to play any song you want at any of the addresses above would require small assembly hacks, similar to what was used to add an elevator music change after Spore Spawn's death.
+
+Be careful if you decide to alter song choices. It's pretty easy to crash the game, and even possibly do stuff to your emulator's sound. I don't know about any other emulators besides Snes9X 1.43, which can sometimes end up with muted/crashed audio, a grayed-out "Playback Rate" menu, and trying to use QuickMet will result in a black screen. If this happens to your Snes9X, you can fix it by loading a save state (or a different ROM), which should un-gray the playback rate options, allowing you to re-select 32Khz.
+
+SOUND EFFECTS
+SMILE isn't capable of switching most sound effects, but doing it with a hex editor is easy enough that it doesn't matter. There are four main groups of sound effects: Samus projectile sounds, hurt enemy sounds, active enemy sounds, and general ingame sounds. There are also three different sound effect libraries, and two actual sound effect types (independent and song-dependent).
+
+Samus projectile sounds: sound effects for all of Samus's beams and missiles. Samus's projectiles use library 1 sounds, which can't be changed because they don't have a library JSL like most sounds.
+
+Hurt enemy sounds: SMILE RF can edit these, because this data is part of each enemy's Main Header AI array (called "Sound"). Most hurt enemy sounds use library 2.
+
+Active enemy sounds: sounds that play while certain enemies move around or use their attacks. Most active enemy sounds use library 2.
+
+General ingame sounds: all other sounds that are used throughout the game.
+
+Sound libraries 1, 2 and 3: the three different sound effect libraries function mostly the same, with the main differences between them being their priority over each other. Library 1 seems to have priority over library 2, and library 2 seems to have priority over library 3. Within each library, there are five JSLs, which also seem to have a different order of priority that hasn't been fully tested and documented yet. Lower sound priority means that the sound effect is more easily able to be cut off by other sounds; this cut-off is what can cause space jumping and speed boost running to occasionally become silent until Samus lands or stops running.
+
+Song-dependent sounds: some sound effects don't load their sound data from its own space in the ROM, but will instead create a new sound effect by manipulating one of the background song's instruments. Metroids are an obvious example. Using metroids in a room that isn't playing the title screen theme, Maridia's music, or Tourian's music will mess their sound effects up, usually creating beeping tones or strange rumbling noises that sound glitchy. Most bosses use song-dependent sounds. Independent sounds can be used no matter which background song is playing, because they load actual audio data instead of instructions that repurpose a specific song instrument.
+
+The sound effects section of the hex edits page lists most of the known sound effect locations, along with how to edit them.
+
+

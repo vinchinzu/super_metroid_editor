@@ -1,0 +1,107 @@
+1.
+
+PLM preview. All of the PLM previews are shown here are .GIF images (located in SMILE RF\Files\PLM\), and aren't read directly from the ROM.
+
+2.
+
+PLM Selector list. Use the scrollers (or the up & down arrow keys after you've clicked on an entry) to browse PLM IDs. Clicking "Save PLM" (#4) after clicking on a different PLM ID entry will replace the PLM that you right-clicked on to bring up the PLM editor.
+
+3.
+
+Currently selected PLM ID. If you've memorized a PLM ID, you can type it here to load it right away instead of using the PLM Selector (#2) to browse.
+
+4.
+
+"Use As Default" checkbox and Save/Cancel buttons. The Use As Default checkbox allows the selected PLM to appear when a new one is added to the room with SMILE RF's "PLM / Enemies" checkbox, instead of the red question mark placeholder. Clicking Save/Cancel will close the PLM editor.
+
+5.
+
+PLM Info. The PLM information seen in this screenshot is being read from a text file (found in SMILE RF\Files\PLM\B63B.txt) that you can edit/save. All PLM IDs have their own text file like this.
+
+6.
+
+Save / Reload PLM Info. "Save PLM Info" overwrites the selected PLM ID's text file (found in SMILE RF\Files\PLM\) with whatever edits you've made. "Load PLM Info" undoes any info changes you've made since opening the PLM editor, or last clicking on Save PLM Info.
+
+7.
+
+Open PLM info .TXT file. Opens the currently selected PLM's .TXT info file using your default text editor.
+
+8.
+
+Main PLM variable. In older versions of SMILE, this value was broken into two drop-down menus called High and Low. The main PLM variable is what makes that particular PLM unique (e.g., each item needs its own unique Main PLM variable value, and so does each shootable door cap that isn't blue).
+
+9.
+
+PLM type. Depending on which entry is selected in the PLM Selector (#2), the name and contents of this editing area will change between "Standard PLM", "Save Station PLM", "Scroll PLM", "Door PLM", "Expansion PLM", or "Upgrade PLM".
+
+10.
+
+PLM Offset. Offsets the default positioning of a PLM type's preview .GIF image in the level editor. You should never need to edit this value unless you're adding in completely new PLM types. This value is a SMILE RF setting that doesn't make any changes to your ROM.
+
+11.
+
+Edit PLM Scroll Data button. Change room scrolls when this PLM is touched. Clicking this will open a small editor that looks like the scroll editor and works almost the same way, except that it edits the inner color of each screen instead. These inner colors are the screens that are affected by touching the scroll PLM that you right-clicked on to bring up the PLM editor. See scroll PLMs.
+
+12.
+
+Door strength value. How many hits to open door. Changing this value will affect every door of that type (example: making a left-facing red door take 1 missile to open instead of 5 will affect all left-facing red doors in the game).
+
+13.
+
+Expansion value. How much each item is worth. $0005 for 5 missiles, super missiles or power bombs, and $0064 for 100 units of energy for energy/reserve tanks.
+
+14.
+
+Item bitflag. Values can be combined by adding them together (example: to make an item give you both Hi-Jump Boots ($0100) and Spring Ball ($0002), you would add their values together, which would be $0100 + $0002 = $0102
+
+List of equipment & beam bitflags:
+
+$0001 = Varia
+$0002 = Spring Ball
+$0004 = Morph Ball
+$0008 = Screw Attack
+$0010 = None
+$0020 = Gravity
+$0040 = --none--
+$0080 = --none--
+$0100 = Hi-Jump
+$0200 = Space Jump
+$0400 = --none--
+$0800 = --none--
+$1000 = Bomb
+$2000 = Speed Booster
+$4000 = Grapple Beam
+$8000 = X-Ray Scope
+$0001 = Wave
+$0002 = Ice
+$0004 = Spazer
+$0008 = Plasma
+$0010 = Charged beam
+$0020 = --none--
+$0040 = --none--
+$0080 = --none--
+$0100 = Missile / PB / Deadbeam
+$0200 = Super Missile / PB / Deadbeam
+$0400 = Dead Beam
+$0800 = Dead Missile/Super
+$1000 = Charge
+$2000 = --none--
+$4000 = --none--
+$8000 = Live beam
+$0500 = Bomb
+15.
+
+Upgrade PLM type. Depending on which PLM is selected in the PLM Selector (#2), this will either say "Suit", "Beam" or "HUD".
+
+16.
+
+Item bitflag set at this RAM address. You only need to worry about what this value says if you're programming custom items.
+
+17.
+
+Save PLM Instructions button. Must be clicked after changing any of the values under Door PLM (#12), Expansion PLM (#13), or Upgrade PLM (#14).
+
+18.
+
+Edit Save Station Data button. Set Samus's spawn point when loading a saved game. Clicking this button opens the Save Station Editor.
+

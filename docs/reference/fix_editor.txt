@@ -1,0 +1,140 @@
+▲  ∧  SMILE RF window ("ROM Stuff" tab)  ∨ 
+[IMG_003.png: ROM Stuff]
+
+1.
+
+Data Watcher. Watches chunks of ROM data for changes. Useful for ASM programmers who suspect that code is being written somewhere that it shouldn't be.
+
+2.
+
+PLM Index Tools. Lets you scan the ROM for unwanted instances of two items or two doors sharing the same Main PLM Variable (see PLM editor). If you wanted to make sure two doors weren't sharing a Main PLM Variable of $0010, you'd enter "$010" (as pictured), check the "Door" checkbox, and click the "Find Index" button. After that, go to "? > Task Log" to see if the index was found in more than one room (here's another picture). Clicking the "Show All Indexes" button will generate "[ROM-FILENAME]_Door Index.txt" or "[ROM-FILENAME]_Item Index.txt" in the same folder as the Super Metroid ROM that you currently have open in RF, depending which checkbox is checked. This means if you were to open "Super_Metroid_supzer.SMC" from My Documents and click Show All Indexes, you'd be creating "Super_Metroid_supzer_Door Index.txt" or "Super_Metroid_supzer_Item Index.txt" in My Documents. The .TXT files themselves list every single item/door index and their corresponding rooms.
+
+3.
+
+MDB Tools. The "Search MDB Entries" button creates a text file called "[ROM-FILENAME]_MDB.txt" in the same folder as the Super Metroid ROM that you currently have open in RF, which is a list of all working room headers. "Export Room Details" button creates "[ROM-FILENAME]_Room_Details.txt" with all pointers used by all rooms in the game.
+
+The Append and New checkboxes are only used by the Search MDB Entries button. "Append" searches the ROM, and any rooms that are found are added to the current MDB list (even though the current one may contain rooms that aren't in the ROM). "New" will generate a new MDB list of only the rooms that it found from searching the ROM.
+
+4.
+
+ROM Data. Export / Import chunks of ROM data as .BIN files. Exported files appear in the same folder as the Super Metroid ROM that you currently have open in RF, as "[ROM-FILENAME] Data $XXXXXX (Size $YYYY).bin" with X and Y being whatever values you entered into the Address and Size fields. Use LoROM addresses only, not PC addresses. The size can be between $0000-FFFF.
+
+5.
+
+Debug Stuff. Click on the ROM Stuff tab, and then slowly type "RFDEBUG" and press enter. Doing this will cause the "Debug Stuff" options to appear directly underneath "ROM Data". The debug menu is not shown in the screenshot because its contents will probably change often, and the debug features themselves could be risky to use. Make a back-up of your ROM before you mess with anything in the SMILE RF debug menu!
+
+▲  ∧  FX Editor  ∨ 
+[IMG_004.png: FX editor]
+
+1.
+
+Previous door ID. When you use the the Ctrl+E hotkey to "travel through" a door, its location in bank $83 will appear in this box.
+
+2.
+
+Plus (+) button. Copies the value in the previous door ID value box (#1) over to the nearby drop-down menu (#3).
+
+3.
+
+Door ID that sets new FX pointer. Seen in some spots in Norfair with rising lava/acid. This pointer will override the room's default FX pointer that's usually edited in the Room MDB tab, but only after Samus goes through a certain door, or doors. See door-specific FX.
+
+4.
+
+Minus (--) button. Removes entries from the same drop-down menu that clicking the plus button adds to.
+
+5.
+
+FX type. Type of room effect to load; water, lava, fog, etc. If the room did not have any effects by default, make certain that it has its own 16-byte pointer somewhere in bank $83, and that it isn't sharing the same FX pointer with other rooms. If the drop-down menu (#3) changes changes to $FFFF for a room, that means a FX pointer must be given before you can edit the effects for that room.
+
+6.
+
+Palette blend. Palette blends are great. With palette blends, water, lava, fog and anything else that uses layer 3 can be any color you want. The original game doesn't use them very often. See palette blends.
+
+7.
+
+Liquid Options. Sets all of the basic behaviors of the room's water, lava or acid.
+
+$FFFF(1) Liquid Height --> $FFFF(2): $FFFF(1) is the starting height of a room's water/lava/acid. This is the value that you'd edit for just setting a liquid height that you don't intend to change (hotkey: hold Shift while the level editor window is in focus and look at the orange bars that appear on the left/right side; clicking will set a new height). $FFFF(2) only needs to be edited when making liquids rise or lower to a different height after Samus has entered the room.
+
+$0000 Speed: vertical speed of liquids.
+
+For making liquids rise, use a Speed value between $FFFF (slowest) and $8000 (fastest). Test $FFF0 first, then try $FFE0, $FFD0, $FFC0, etc. The Liquid Height value at $FFFF(1) must be HIGHER than the second value at $FFFF(2). Example: $0200 Liquid Height --> $0100
+
+For making liquids lower, use a Speed value between $0000 (slowest) and $7FFF (fastest). Test $0010 first, then try $0020, $0030, $0040, etc. The Liquid Height value at $FFFF(1) must be LOWER than the second value at $FFFF(2). Example: $0100 Liquid Height --> $0200
+
+Delay $00: how long until the room's liquid starts to rise or lower. Use a value between 01-FF. If you use 00, it'll never start.
+
+Flowing Left: makes a room's water appear to have a slow current moving left. Doesn't work for lava or acid.
+
+BG Heat FX: animates the background for heated and underwater rooms.
+
+To make a background animate like it's heated, select Acid or Lava as the FX Type, then use FFFF and FFFF as the Liquid Height values (if the room is in Norfair and you don't want heat damage to Samus, make sure Palette Options Unknown #1 is unchecked). Check either BG Animate (heatwave effect #1) or BG Liquid (heatwave effect #2, unused in Super Metroid). Small Tide and Large Tide should always both be unchecked if you're using FFFF and FFFF for the Liquid Height values, or you'll get water/lava/acid appearing over everything and disappearing every few seconds (caused by small/large tides making liquids vertically wrap from the very bottom, to the very top of the room).
+
+To make the background animate if it's underwater, check BG Animate.
+
+BG Liquid: makes water behave like air (works alongside BG Animate). Doesn't seem to do anything for lava/acid.
+
+Liquid Options Unused #1:
+
+Liquid Options Unused #2:
+
+Liquid Options Unused #3:
+
+Large Tide or Small Tide: makes water/lava/acid slowly move up and down. If Large and Small are both checked, Small will take priority.
+
+8.
+
+FX Transparency menu #1 (FX bit A). Some of the descriptions for entries in this drop-down menu are too long to see. To read them in full (and edit them if you wish), look at the text file: SMILE RF\Files\Data\fx1_entries.txt
+
+This menu has options that mainly affect the room's lighting. 02 is the most commonly used value, with 28 and 2A sometimes being used for rooms that are supposed to look darker.
+
+9.
+
+FX Transparency menu #2 (FX bit B). Some of the descriptions for entries in this drop-down menu are too long to see. To read them in full (and edit them if you wish), look at the text file: SMILE RF\Files\Data\fx1_entries.txt
+
+This menu has options that mainly affect how the FX layer will interact with other room layers. 18 and 14 are good choices. 18 = layer 3 drawn over everything. 14 = layer 3 drawn over everything (except enemies), with palette blends that subtract (darken) layer 3 instead of add (brighten); Maridia uses 14 in all of its rooms to darken its water. 02 is usually used as the default for rooms with no layer 3 effects.
+
+10.
+
+Animated tiles (FX bit C). These options are area-dependent.
+
+Spikes (H): if checked, spikes on the ceiling and floor will animate.
+
+Spikes (V): if checked, spikes on walls will animate.
+
+Ocean: this checkbox's name changes, depending on which area the room you have open is in. For Crateria it's Ocean, for Maridia it's Sand Source, etc.
+
+Lava: this checkbox's name changes, depending on which area the room you have open on is in. For Crateria it's Lava, for Maridia it's Sand Fall, etc.
+
+Animated Tiles Unused #1:
+
+Animated Tiles Unused #2:
+
+Animated Tiles Unused #3:
+
+Animated Tiles Unused #4:
+
+11.
+
+Palette Options (FX bit C). These options are area-dependent. The 'unknown' values aren't actually unknown; they're called that because they affect certain color ranges for many tileset palettes, and so they can't really be given short, easy-to-understand names. These checkboxes are what activate certain palette shift loops throughout the game (such as Norfair's heated glows). Not all areas have the same amount of palette shifts set up to use.
+
+Palette Options Unknown #1: used.
+
+Palette Options Unknown #2: used.
+
+Palette Options Unknown #3: used.
+
+Palette Options Unknown #4: used.
+
+Palette Options Unknown #5: used.
+
+Palette Options Unknown #6: unused.
+
+Palette Options Unknown #7: unused.
+
+Palette Options Unknown #8: unused.
+
+12.
+
+Save FX Data or Reload FX Data. Saves the edits you've made in the FX Editor to the ROM. Reload will undo all of your edits, unless you've already clicked Save FX Data, in which case it will undo all of the edits you made after that point.
+
