@@ -1,9 +1,14 @@
 package com.supermetroid.editor.libretro
 
+import com.sun.jna.Library
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import java.io.File
+
+// dlopen flags for loading libretro cores with isolated symbol scope
+private const val RTLD_LAZY = 0x00001
+private const val RTLD_LOCAL = 0x00000  // default on Linux, but explicit for clarity
 
 /**
  * High-level wrapper around libretro core loaded via JNA.
@@ -43,7 +48,11 @@ class LibretroCore(private val corePath: String) {
     private lateinit var inputStateCallback: RetroInputStateCallback
 
     fun init() {
-        lib = Native.load(corePath, LibretroLib::class.java)
+        // Load with RTLD_LOCAL to prevent symbol conflicts with Compose/Skia's bundled native libs
+        val options = mapOf(
+            Library.OPTION_OPEN_FLAGS to (RTLD_LAZY or RTLD_LOCAL)
+        )
+        lib = Native.load(corePath, LibretroLib::class.java, options)
 
         File(systemDir).mkdirs()
         File(saveDir).mkdirs()
@@ -65,10 +74,15 @@ class LibretroCore(private val corePath: String) {
     }
 
     fun loadGame(romPath: String): Boolean {
+        // Allocate native string for the path — must stay alive during retro_load_game
+        val pathBytes = romPath.toByteArray(Charsets.UTF_8)
+        val pathMem = Memory((pathBytes.size + 1).toLong())
+        pathMem.write(0, pathBytes, 0, pathBytes.size)
+        pathMem.setByte(pathBytes.size.toLong(), 0) // null terminator
         val info = RetroGameInfo().apply {
-            path = romPath
+            path = pathMem
             data = null
-            size = 0
+            size = com.sun.jna.NativeLong(0)
             meta = null
         }
         val loaded = lib.retro_load_game(info)

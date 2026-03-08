@@ -31,8 +31,10 @@ dist/
 *.pkg
 *.app
 
-# Logs
+# Logs & JVM crash dumps
 *.log
+hs_err_pid*
+core.*
 *.pyc
 __pycache__/
 
@@ -43,6 +45,9 @@ __pycache__/
 *.wav
 # But keep test-resources directory structure
 !test-resources/.gitkeep
+
+# Libretro cores (downloaded .so/.dylib/.dll)
+cores/
 
 # Emulator/runtime outputs
 custom_integrations/

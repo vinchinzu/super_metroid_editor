@@ -37,4 +37,13 @@ export SMEDIT_ROM_PATH="$ROM"
 export SMEDIT_OPEN_EMU=1
 export SMEDIT_AUTO_START=1
 
+# Preload system libstdc++ to prevent symbol conflicts between
+# the libretro core's C++ iostream and Compose/Skia's bundled natives.
+for STDCXX in /usr/lib/libstdc++.so.6 /usr/lib64/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libstdc++.so.6; do
+    if [[ -f "$STDCXX" ]]; then
+        export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$STDCXX"
+        break
+    fi
+done
+
 exec ./gradlew :desktopApp:run

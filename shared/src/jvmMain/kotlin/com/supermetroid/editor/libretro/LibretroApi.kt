@@ -61,10 +61,11 @@ object LibretroConstants {
 
 @Structure.FieldOrder("path", "data", "size", "meta")
 open class RetroGameInfo : Structure() {
-    @JvmField var path: String? = null
+    /** const char *path — use Pointer so JNA treats it as a native pointer, not inline char[] */
+    @JvmField var path: Pointer? = null
     @JvmField var data: Pointer? = null
-    @JvmField var size: Long = 0
-    @JvmField var meta: String? = null
+    @JvmField var size: com.sun.jna.NativeLong = com.sun.jna.NativeLong(0)
+    @JvmField var meta: Pointer? = null
 }
 
 @Structure.FieldOrder("base_width", "base_height", "max_width", "max_height", "aspect_ratio")
@@ -90,11 +91,14 @@ open class RetroSystemAvInfo : Structure() {
 
 @Structure.FieldOrder("library_name", "library_version", "valid_extensions", "need_fullpath", "block_extract")
 open class RetroSystemInfo : Structure() {
-    @JvmField var library_name: String? = null
-    @JvmField var library_version: String? = null
-    @JvmField var valid_extensions: String? = null
+    @JvmField var library_name: Pointer? = null
+    @JvmField var library_version: Pointer? = null
+    @JvmField var valid_extensions: Pointer? = null
     @JvmField var need_fullpath: Boolean = false
     @JvmField var block_extract: Boolean = false
+
+    fun getLibraryName(): String? = library_name?.getString(0)
+    fun getLibraryVersion(): String? = library_version?.getString(0)
 }
 
 // ── Callback interfaces ────────────────────────────────────────────────────

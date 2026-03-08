@@ -64,7 +64,7 @@ class LibretroBackend : EmulatorBackend {
 
         val sysInfo = onEmuThread { c.getSystemInfo() }
         return EmulatorCapabilities(
-            backendName = "libretro (${sysInfo.library_name ?: "unknown"})",
+            backendName = "libretro (${sysInfo.getLibraryName() ?: "unknown"})",
             supportsFrames = true,
             supportsMemoryAccess = true,
             supportsSaveStates = true,
