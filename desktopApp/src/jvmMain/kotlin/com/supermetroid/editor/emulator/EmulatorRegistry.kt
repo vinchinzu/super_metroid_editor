@@ -5,8 +5,6 @@ import com.supermetroid.editor.data.AppConfig
 object EmulatorRegistry {
 
     private val factories = mutableMapOf<String, () -> EmulatorBackend>(
-        "bizhawk" to { BizHawkBackend() },
-        "gym-retro" to { GymRetroBackend() },
         "libretro" to { LibretroBackend() },
     )
 

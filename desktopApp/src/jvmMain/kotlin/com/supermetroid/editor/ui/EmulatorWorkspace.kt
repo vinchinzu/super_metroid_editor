@@ -51,7 +51,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -60,7 +66,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.supermetroid.editor.EditorLaunchConfig
 import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.rom.RomParser
 import kotlinx.coroutines.delay
@@ -100,13 +105,11 @@ fun EmulatorWorkspace(
     romParser: RomParser?,
     editorState: EditorState,
     workspaceState: EmulatorWorkspaceState,
-    launchConfig: EditorLaunchConfig? = null,
     onRoomSelected: (RoomInfo) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val roomOverlay = room?.let { workspaceState.roomMapOverlay(it) }
-    var autoBootCompleted by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         if (workspaceState.navGraph == null) {
@@ -114,10 +117,8 @@ fun EmulatorWorkspace(
         }
     }
 
-    LaunchedEffect(editorState.project.romPath, launchConfig?.romPath) {
-        val romPath = editorState.project.romPath
-            .takeIf { it.isNotBlank() }
-            ?: launchConfig?.romPath
+    LaunchedEffect(editorState.project.romPath) {
+        val romPath = editorState.project.romPath.takeIf { it.isNotBlank() }
         workspaceState.updateRomPath(romPath)
     }
 
@@ -150,27 +151,6 @@ fun EmulatorWorkspace(
                 pendingFrames = MAX_STEP_REPEAT.toDouble()
             }
         }
-    }
-
-    LaunchedEffect(launchConfig, romParser, rooms) {
-        val config = launchConfig ?: return@LaunchedEffect
-        if (autoBootCompleted || !config.autoStartSession || romParser == null || rooms.isEmpty()) return@LaunchedEffect
-
-        workspaceState.updateRomPath(
-            editorState.project.romPath.takeIf { it.isNotBlank() } ?: config.romPath
-        )
-        workspaceState.updateNavExportDir(config.navExportDir)
-        workspaceState.updateRequestedControlMode(config.controlMode)
-        workspaceState.loadNavGraph()
-        workspaceState.connectBridge()
-        workspaceState.selectedStateName = config.bootStateName
-        if (workspaceState.saveStates.none { it.name == config.bootStateName }) {
-            workspaceState.refreshInventory()
-            workspaceState.selectedStateName = config.bootStateName
-        }
-        workspaceState.startSession()
-        workspaceState.setLoopRunning(true)
-        autoBootCompleted = true
     }
 
     Row(
@@ -228,6 +208,13 @@ fun EmulatorWorkspace(
                     EmulatorControlCard(workspaceState = workspaceState, onAction = { action ->
                         scope.launch {
                             when (action) {
+                                "play" -> {
+                                    if (!workspaceState.isConnected) workspaceState.connectBridge()
+                                    if (workspaceState.isConnected && !workspaceState.session.active) {
+                                        workspaceState.startSession()
+                                        workspaceState.setLoopRunning(true)
+                                    }
+                                }
                                 "load_nav" -> workspaceState.loadNavGraph()
                                 "connect" -> workspaceState.connectBridge()
                                 "disconnect" -> workspaceState.disconnectBridge()
@@ -251,17 +238,6 @@ fun EmulatorWorkspace(
                         selected = workspaceState.selectedStateName,
                         items = workspaceState.saveStates.map { it.name },
                         onSelect = { workspaceState.selectedStateName = it },
-                    )
-                    InventoryCard(
-                        title = "Models",
-                        subtitle = "Agent inventory",
-                        selected = workspaceState.selectedModelName,
-                        items = workspaceState.models.map { "${it.name} (${it.format})" },
-                        onSelect = { selected ->
-                            workspaceState.selectedModelName = workspaceState.models
-                                .firstOrNull { "${it.name} (${it.format})" == selected }
-                                ?.name
-                        },
                     )
                     PlannerSummaryCard(
                         workspaceState = workspaceState,
@@ -413,16 +389,16 @@ private fun EmulatorControlCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { onAction("start") },
-                    enabled = workspaceState.isConnected && !workspaceState.session.active && workspaceState.selectedStateName != null && !workspaceState.isBusy,
+                    onClick = { onAction("play") },
+                    enabled = !workspaceState.session.active && !workspaceState.isBusy,
                 ) {
-                    Text("Boot State", fontSize = 12.sp)
+                    Text("Play", fontSize = 12.sp)
                 }
                 OutlinedButton(
                     onClick = { workspaceState.setLoopRunning(!workspaceState.isRunning) },
                     enabled = workspaceState.session.active && !workspaceState.isBusy,
                 ) {
-                    Text(if (workspaceState.isRunning) "Pause Runtime" else "Resume Runtime", fontSize = 12.sp)
+                    Text(if (workspaceState.isRunning) "Pause" else "Resume", fontSize = 12.sp)
                 }
                 OutlinedButton(
                     onClick = { onAction("step") },
@@ -472,7 +448,7 @@ private fun EmulatorControlCard(
                 }
             }
             Text(
-                "Pluggable emulator backend. Select BizHawk or gym-retro from the control card, then connect.",
+                "In-process SNES emulator via libretro. Click Play to start, then focus the viewport for keyboard input.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -817,7 +793,7 @@ private fun EmulatorViewport(workspaceState: EmulatorWorkspaceState) {
                         Text("No frame yet", color = Color.White, fontSize = 15.sp)
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "Connect bridge -> start a state -> focus this panel for keyboard play.\nArrows + Z/X/A/S/Q/W + Shift/Tab + Enter | F1-F4 save | Shift+F1-F4 reload | ` reload last",
+                            "Click Play to start. Focus this panel for keyboard input.\nArrows + Z/X/A/S/Q/W + Shift/Tab + Enter | F1-F4 save | Shift+F1-F4 reload | ` reload last",
                             color = Color(0xFFB6C3CC),
                             fontSize = 12.sp,
                             lineHeight = 16.sp,

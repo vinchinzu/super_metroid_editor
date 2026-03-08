@@ -54,6 +54,11 @@ tasks.register<JavaExec>("benchmark") {
     }
 }
 
+// Ensure the libretro core is built before running or packaging
+tasks.named("jvmMainClasses") {
+    dependsOn(rootProject.tasks.named("buildLibretroCore"))
+}
+
 compose.desktop {
     application {
         mainClass = "com.supermetroid.editor.MainKt"

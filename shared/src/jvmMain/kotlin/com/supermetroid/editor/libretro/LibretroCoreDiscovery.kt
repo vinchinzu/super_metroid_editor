@@ -11,22 +11,45 @@ object LibretroCoreDiscovery {
     private val PREFERRED_CORES = listOf("snes9x", "bsnes", "mesen-s")
 
     private val SEARCH_DIRS = buildList {
-        // System-wide libretro cores
+        val home = System.getProperty("user.home")
+        val cwd = System.getProperty("user.dir")
+
+        // Project-local: submodule build output (highest priority)
+        add("$cwd/tools/snes9x/libretro")
+        // When run from a submodule dir (e.g. desktopApp/), check parent
+        add("$cwd/../tools/snes9x/libretro")
+
+        // SMEDIT user cores dir
+        add("$home/.smedit/cores")
+
+        // Project-local cores dir
+        add("$cwd/cores")
+        add("$cwd/../cores")
+
+        // System-wide libretro cores (Linux)
         add("/usr/lib/libretro")
         add("/usr/lib64/libretro")
         add("/usr/local/lib/libretro")
-        // RetroArch user config
-        val home = System.getProperty("user.home")
+
+        // macOS Homebrew (Apple Silicon + Intel)
+        add("/opt/homebrew/lib/retroarch/cores")
+        add("/usr/local/lib/retroarch/cores")
+        // RetroArch.app bundle
+        add("/Applications/RetroArch.app/Contents/Resources/cores")
+
+        // RetroArch user config (Linux/macOS)
         add("$home/.config/retroarch/cores")
-        // Flatpak RetroArch
+
+        // Flatpak RetroArch (Linux)
         add("$home/.var/app/org.libretro.RetroArch/config/retroarch/cores")
-        // Project-local cores dir
-        val cwd = System.getProperty("user.dir")
-        add("$cwd/cores")
-        add("$cwd/../cores")
+
+        // Windows common paths
+        add("$home/AppData/Roaming/RetroArch/cores")
+        add("C:/RetroArch/cores")
+        add("C:/RetroArch-Win64/cores")
     }
 
-    private val CORE_EXTENSION: String = when {
+    val coreExtension: String = when {
         System.getProperty("os.name").lowercase().contains("mac") -> ".dylib"
         System.getProperty("os.name").lowercase().contains("win") -> ".dll"
         else -> ".so"
@@ -56,7 +79,7 @@ object LibretroCoreDiscovery {
         // 3. Search known directories, preferring cores in PREFERRED_CORES order
         for (coreName in PREFERRED_CORES) {
             for (dir in SEARCH_DIRS) {
-                val candidate = File(dir, "${coreName}_libretro$CORE_EXTENSION")
+                val candidate = File(dir, "${coreName}_libretro$coreExtension")
                 if (candidate.isFile && candidate.canRead()) {
                     System.err.println("[LibretroDiscovery] Found core: ${candidate.absolutePath}")
                     return candidate.absolutePath
@@ -69,7 +92,7 @@ object LibretroCoreDiscovery {
             val dirFile = File(dir)
             if (!dirFile.isDirectory) continue
             val candidates = dirFile.listFiles { f ->
-                f.name.endsWith("_libretro$CORE_EXTENSION") &&
+                f.name.endsWith("_libretro$coreExtension") &&
                     PREFERRED_CORES.any { f.name.startsWith(it) }
             }
             val found = candidates?.firstOrNull()
@@ -84,7 +107,7 @@ object LibretroCoreDiscovery {
         val results = mutableListOf<CoreInfo>()
         for (coreName in PREFERRED_CORES) {
             for (dir in SEARCH_DIRS) {
-                val candidate = File(dir, "${coreName}_libretro$CORE_EXTENSION")
+                val candidate = File(dir, "${coreName}_libretro$coreExtension")
                 if (candidate.isFile && candidate.canRead()) {
                     results.add(CoreInfo(coreName, candidate.absolutePath))
                 }

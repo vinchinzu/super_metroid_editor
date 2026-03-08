@@ -3,7 +3,6 @@ package com.supermetroid.editor.benchmark
 import com.supermetroid.editor.emulator.EmulatorBackend
 import com.supermetroid.editor.emulator.EmulatorInput
 import com.supermetroid.editor.emulator.LibretroBackend
-import com.supermetroid.editor.emulator.GymRetroBackend
 import com.supermetroid.editor.emulator.SessionConfig
 import kotlinx.coroutines.runBlocking
 
@@ -49,7 +48,7 @@ fun main() {
 
     val warmupFrames = System.getenv("BENCH_WARMUP_FRAMES")?.toIntOrNull() ?: 60
     val benchFrames = System.getenv("BENCH_FRAMES")?.toIntOrNull() ?: 600
-    val backends = (System.getenv("BENCH_BACKENDS") ?: "libretro,gym-retro")
+    val backends = (System.getenv("BENCH_BACKENDS") ?: "libretro")
         .split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
     println("╔══════════════════════════════════════════════════╗")
@@ -100,14 +99,6 @@ fun main() {
             println("  ${r.backend.padEnd(20)} ${String.format("%8.2f", r.avgStepMs)} ms/step  ${String.format("%7.1f", r.fps)} FPS$label")
         }
 
-        val libretroRaw = results.find { it.backend == "libretro-no-audio" }
-        val gymRetro = results.find { it.backend == "gym-retro" }
-        if (libretroRaw != null && gymRetro != null) {
-            val speedup = gymRetro.avgStepMs / libretroRaw.avgStepMs
-            println()
-            println("  libretro (raw, no audio) is ${String.format("%.1f", speedup)}x faster than gym-retro")
-            println("  libretro raw: ${String.format("%.1f", libretroRaw.fps)} FPS vs gym-retro: ${String.format("%.1f", gymRetro.fps)} FPS")
-        }
         val libretro = results.find { it.backend == "libretro" }
         if (libretro != null) {
             println("  libretro (with audio pacing): ${String.format("%.1f", libretro.fps)} FPS — real-time sync via audio output")
@@ -132,7 +123,6 @@ fun benchmarkBackend(backendName: String, romPath: String, warmupFrames: Int, be
     val backend: EmulatorBackend = when (backendName) {
         "libretro" -> LibretroBackend()
         "libretro-no-audio" -> LibretroBackend(audioEnabledOverride = false)
-        "gym-retro" -> GymRetroBackend()
         else -> throw IllegalArgumentException("Unknown backend: $backendName")
     }
 

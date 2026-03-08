@@ -16,13 +16,11 @@ import com.supermetroid.editor.emulator.EmulatorRegistry
 import com.supermetroid.editor.emulator.FrameHolder
 import com.supermetroid.editor.emulator.GameSnapshot
 import com.supermetroid.editor.emulator.LibretroBackend
-import com.supermetroid.editor.emulator.ModelInfo
 import com.supermetroid.editor.emulator.SessionConfig
 import com.supermetroid.editor.emulator.SessionState
 import com.supermetroid.editor.emulator.StateInfo
 import com.supermetroid.editor.emulator.StepResult
 import com.supermetroid.editor.emulator.TracePoint
-import com.supermetroid.editor.emulator.GymRetroBackend
 import com.supermetroid.editor.integration.EditorDoorExport
 import com.supermetroid.editor.integration.EditorNavGraph
 import com.supermetroid.editor.integration.EditorNavNode
@@ -143,9 +141,9 @@ class EmulatorWorkspaceState(
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
     var requestedControlMode by mutableStateOf("manual")
-    var selectedBackendName by mutableStateOf(AppConfig.load().emulatorBackend)
+    var selectedBackendName by mutableStateOf("libretro")
 
-    var statusMessage by mutableStateOf("Load nav graph and connect bridge to start.")
+    var statusMessage by mutableStateOf("Click Play to start the emulator.")
         private set
     var capabilities by mutableStateOf<EmulatorCapabilities?>(null)
         private set
@@ -180,10 +178,7 @@ class EmulatorWorkspaceState(
 
     var saveStates by mutableStateOf<List<StateInfo>>(emptyList())
         private set
-    var models by mutableStateOf<List<ModelInfo>>(emptyList())
-        private set
     var selectedStateName by mutableStateOf<String?>(null)
-    var selectedModelName by mutableStateOf<String?>(null)
     var navGraph by mutableStateOf<LoadedNavGraph?>(null)
         private set
 
@@ -255,18 +250,9 @@ class EmulatorWorkspaceState(
         val b = backend ?: return
         isBusy = true
         try {
-            // For gym-retro, use its discover command
-            if (b is GymRetroBackend) {
-                val result = withContext(Dispatchers.IO) {
-                    b.discover(navExportDir, requestedControlMode, selectedModelName)
-                }
-                applyStepResult(result)
-            } else {
-                val states = b.listStates()
-                saveStates = states.sortedBy { it.name.lowercase() }
-            }
+            val states = b.listStates()
+            saveStates = states.sortedBy { it.name.lowercase() }
             if (selectedStateName == null) selectedStateName = saveStates.firstOrNull()?.name
-            if (selectedModelName == null) selectedModelName = models.firstOrNull()?.name
             statusMessage = "Inventory refreshed"
         } catch (e: Exception) {
             statusMessage = "Inventory refresh failed: ${e.message}"
@@ -277,7 +263,7 @@ class EmulatorWorkspaceState(
 
     suspend fun startSession() {
         val b = backend ?: return
-        val stateName = selectedStateName ?: saveStates.firstOrNull()?.name ?: return
+        val stateName = selectedStateName ?: saveStates.firstOrNull()?.name
         isBusy = true
         try {
             val result = b.startSession(
@@ -286,7 +272,6 @@ class EmulatorWorkspaceState(
                     stateName = stateName,
                     navExportDir = navExportDir,
                     controlMode = requestedControlMode,
-                    selectedModel = selectedModelName,
                 )
             )
             applyStepResult(result)
@@ -499,20 +484,8 @@ class EmulatorWorkspaceState(
         }
     }
 
-    suspend fun setRecording(active: Boolean) {
-        val b = backend
-        if (b !is GymRetroBackend) return
-        if (!session.active) return
-        isBusy = true
-        try {
-            val result = withContext(Dispatchers.IO) { b.setRecording(active) }
-            applyStepResult(result)
-            statusMessage = if (active) "Recording started" else "Recording stopped"
-        } catch (e: Exception) {
-            statusMessage = "Recording toggle failed: ${e.message}"
-        } finally {
-            isBusy = false
-        }
+    suspend fun setRecording(@Suppress("UNUSED_PARAMETER") active: Boolean) {
+        // Recording is not supported by the libretro backend
     }
 
     fun setLoopRunning(running: Boolean) {
@@ -711,18 +684,12 @@ class EmulatorWorkspaceState(
     }
 
     suspend fun configureBridge() {
-        val b = backend ?: return
-        if (b is GymRetroBackend) {
-            withContext(Dispatchers.IO) {
-                b.configure(navExportDir, requestedControlMode, selectedModelName)
-            }
-        }
+        // No-op for libretro backend (no external bridge to configure)
     }
 
     private suspend fun applyStepResult(result: StepResult) {
         session = result.session
         if (result.states.isNotEmpty()) saveStates = result.states.sortedBy { it.name.lowercase() }
-        if (result.models.isNotEmpty()) models = result.models.sortedBy { it.name.lowercase() }
         if (result.recordingPath != null) recordingPath = result.recordingPath
         result.message?.let { statusMessage = it }
         applySnapshot(result.snapshot)
@@ -741,7 +708,7 @@ class EmulatorWorkspaceState(
             return
         }
 
-        // Slow path: remote backends (BizHawk, gym-retro) use Base64
+        // Slow path: fallback for backends that use Base64 frames
         val decodedFrame = incoming
             .takeIf { it.frameRgb24Base64 != null }
             ?.let { withContext(Dispatchers.Default) { decodeFrame(it) } }

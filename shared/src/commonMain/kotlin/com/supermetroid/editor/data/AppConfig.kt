@@ -9,10 +9,6 @@ private fun env(name: String): String? {
     return System.getenv(name)?.trim()?.takeIf { it.isNotEmpty() }
 }
 
-private fun envInt(name: String): Int? {
-    return env(name)?.toIntOrNull()
-}
-
 private fun defaultNavExportDir(): String {
     val configured = env("SMEDIT_NAV_EXPORT_DIR")
     if (!configured.isNullOrEmpty()) return configured
@@ -39,9 +35,7 @@ data class AppSettings(
     val lastRomPath: String? = null,
     val window: WindowConfig = WindowConfig(),
     val lastRoomPerRom: Map<String, String> = emptyMap(),
-    val emulatorBackend: String = "bizhawk",
-    val bizhawkPath: String? = null,
-    val bizhawkPort: Int = 43884,
+    val emulatorBackend: String = "libretro",
     val emulatorNavExportDir: String = defaultNavExportDir(),
     val emulatorFollowLiveRoom: Boolean = true,
     val libretroCorePath: String? = null,
@@ -58,8 +52,6 @@ object AppConfig {
     private fun withEnvOverrides(settings: AppSettings): AppSettings {
         return settings.copy(
             emulatorBackend = env("SMEDIT_EMULATOR_BACKEND") ?: settings.emulatorBackend,
-            bizhawkPath = env("SMEDIT_BIZHAWK_PATH") ?: settings.bizhawkPath,
-            bizhawkPort = envInt("SMEDIT_BIZHAWK_PORT") ?: settings.bizhawkPort,
             emulatorNavExportDir = env("SMEDIT_NAV_EXPORT_DIR") ?: settings.emulatorNavExportDir,
         )
     }

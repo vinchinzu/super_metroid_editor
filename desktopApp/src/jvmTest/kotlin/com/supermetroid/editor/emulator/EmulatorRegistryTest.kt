@@ -9,28 +9,18 @@ import org.junit.jupiter.api.assertThrows
 class EmulatorRegistryTest {
 
     @Test
-    fun `registry returns bizhawk backend`() {
-        val backend = EmulatorRegistry.create("bizhawk")
+    fun `registry returns libretro backend`() {
+        val backend = EmulatorRegistry.create("libretro")
         assertNotNull(backend)
-        assertEquals("bizhawk", backend.name)
-        assertTrue(backend is BizHawkBackend)
-        backend.close()
-    }
-
-    @Test
-    fun `registry returns gym-retro backend`() {
-        val backend = EmulatorRegistry.create("gym-retro")
-        assertNotNull(backend)
-        assertEquals("gym-retro", backend.name)
-        assertTrue(backend is GymRetroBackend)
+        assertEquals("libretro", backend.name)
+        assertTrue(backend is LibretroBackend)
         backend.close()
     }
 
     @Test
     fun `registry lists available backends`() {
         val backends = EmulatorRegistry.availableBackends()
-        assertTrue(backends.contains("bizhawk"))
-        assertTrue(backends.contains("gym-retro"))
+        assertTrue(backends.contains("libretro"))
     }
 
     @Test

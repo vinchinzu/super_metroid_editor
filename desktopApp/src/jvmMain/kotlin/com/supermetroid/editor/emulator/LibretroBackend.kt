@@ -49,9 +49,8 @@ class LibretroBackend(
         val settings = AppConfig.load()
         val corePath = LibretroCoreDiscovery.findCore(settings.libretroCorePath)
             ?: throw IllegalStateException(
-                "No SNES libretro core found. Install one:\n" +
-                    "  sudo pacman -S libretro-snes9x\n" +
-                    "Or set SMEDIT_LIBRETRO_CORE=/path/to/snes9x_libretro.so"
+                "No SNES libretro core found. Run: ./gradlew buildLibretroCore\n" +
+                    "Or set SMEDIT_LIBRETRO_CORE=/path/to/snes9x_libretro${LibretroCoreDiscovery.coreExtension}"
             )
 
         val audioEnabled = audioEnabledOverride ?: settings.libretroAudioEnabled

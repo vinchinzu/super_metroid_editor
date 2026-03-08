@@ -38,8 +38,10 @@ import com.supermetroid.editor.ui.SoundListPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.EnemySpriteViewer
-import com.supermetroid.editor.ui.EmulatorWorkspace
 import com.supermetroid.editor.ui.EmulatorWorkspaceState
+import com.supermetroid.editor.ui.FloatingEmulatorWindow
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Gamepad
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.KraidSpriteEditor
 import com.supermetroid.editor.ui.blockTypeName
@@ -57,7 +59,6 @@ import androidx.compose.ui.input.key.*
 import java.io.File
 
 fun main() = application {
-    val launchConfig = remember { EditorLaunchConfig.fromEnvironment() }
     val roomRepository = remember { RoomRepository() }
     val scope = rememberCoroutineScope()
     var romParser by remember { mutableStateOf<RomParser?>(null) }
@@ -95,7 +96,7 @@ fun main() = application {
         rooms = withContext(Dispatchers.IO) { roomRepository.getAllRooms() }
 
         // Auto-load requested ROM first, then fall back to last ROM if available.
-        val bootRomPath = launchConfig.romPath ?: RomPreferences.getLastRomPath()
+        val bootRomPath = RomPreferences.getLastRomPath()
         if (bootRomPath != null) {
             try {
                 romLoadInFlight = true
@@ -104,8 +105,7 @@ fun main() = application {
                 RomPreferences.setLastRomPath(bootRomPath)
                 editorState.initForRom(bootRomPath)
                 if (selectedRoom == null) {
-                    selectedRoom = rooms.firstOrNull { it.handle == launchConfig.roomHandle }
-                        ?: pickDefaultRoom(rooms, bootRomPath)
+                    selectedRoom = pickDefaultRoom(rooms, bootRomPath)
                 }
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
@@ -149,6 +149,7 @@ fun main() = application {
     ) {
         androidx.compose.runtime.CompositionLocalProvider(LocalSwingWindow provides window) {
         MaterialTheme {
+            var emulatorEnabled by remember { mutableStateOf(false) }
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
@@ -196,11 +197,26 @@ fun main() = application {
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    // Right side: Save + Export
+                    // Right side: EMU toggle + Save + Export
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        OutlinedButton(
+                            onClick = { emulatorEnabled = !emulatorEnabled },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (emulatorEnabled) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surface,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.Gamepad,
+                                contentDescription = "Toggle emulator",
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("EMU", fontSize = 11.sp)
+                        }
                         Button(
                             onClick = { editorState.saveProject(romParser) },
                             enabled = romParser != null
@@ -223,7 +239,7 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(if (launchConfig.openEmulatorWorkspace) 5 else 0) }
+                var leftTab by remember { mutableStateOf(0) }
                 var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
@@ -232,23 +248,6 @@ fun main() = application {
                 var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
-                    if (leftTab == 5) {
-                        EmulatorWorkspace(
-                            room = selectedRoom,
-                            rooms = rooms,
-                            romParser = romParser,
-                            editorState = editorState,
-                            workspaceState = emulatorWorkspaceState,
-                            launchConfig = launchConfig,
-                            onRoomSelected = { room ->
-                                selectedRoom = room
-                                val romPath = RomPreferences.getLastRomPath()
-                                if (romPath != null) saveLastRoom(romPath, room)
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        return@BoxWithConstraints
-                    }
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
@@ -285,10 +284,6 @@ fun main() = application {
                                 Tab(selected = leftTab == 4, onClick = { leftTab = 4 },
                                     modifier = Modifier.height(32.dp)) {
                                     Text("Sprites", fontSize = 11.sp)
-                                }
-                                Tab(selected = leftTab == 5, onClick = { leftTab = 5 },
-                                    modifier = Modifier.height(32.dp)) {
-                                    Text("Emu", fontSize = 11.sp)
                                 }
                             }
 
@@ -613,6 +608,16 @@ fun main() = application {
                                 }
                             }
                         }
+                    }
+
+                    // ── Floating emulator overlay ──
+                    if (emulatorEnabled) {
+                        FloatingEmulatorWindow(
+                            workspaceState = emulatorWorkspaceState,
+                            editorState = editorState,
+                            romParser = romParser,
+                            onClose = { emulatorEnabled = false },
+                        )
                     }
                 }
             }
