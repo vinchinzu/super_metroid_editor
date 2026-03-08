@@ -1,0 +1,297 @@
+1.
+
+Picture of selected enemy. This graphic isn't read directly from the ROM like #25 is, but is a .GIF file that can be found at SMILE RF\Files\Enemies\CEBF.gif.
+
+2.
+
+Enemy list. Lets you browse enemies to replace the one that you right-clicked on to bring up the enemy editor. You can double-click on an entry to add it to the Room Enemies list (#27), but only after you've repointed the Enemy Set, or after removing an entry from the list so that the number of entries never goes above what it originally was.
+
+3.
+
+Enemy ID. Can be used instead of the enemy list for choosing an enemy to replace the one you right-clicked. If you've memorized an enemy's ID, typing it here loads that enemy up and saves you the trouble of having to navigate the tiny scrolling enemy list.
+
+4.
+
+"Use As Default" checkbox and Save/Cancel buttons. The Use As Default checkbox allows the selected enemy to appear when a new one is added to the room with SMILE RF's "PLM / Enemies" checkbox, instead of the knight placeholder. Clicking Save/Cancel will close the enemy editor.
+
+5.
+
+Special [$0F86, X]. you usually won't need to edit this since it automatically changes to what it needs to be, based which checkboxes (#6) are currently checked.
+
+6.
+
+Enemy data checkboxes. These only affect the enemy in the room that you right-clicked on to bring up the enemy editor.
+
+Invisible: makes the enemy invisible. Probably doesn't work for all enemies.
+
+Move Off-Screen: allows the enemy's AI to run, no matter how away from Samus it is. Don't use this on too many enemies, or it can cause the room to lag.
+
+Platform: allows Samus to stand on top of the enemy without being harmed. Doesn't work right for most enemies that weren't intended to be used as platforms.
+
+Non-Responsive: makes the enemy unable to harm Samus, and unable to be harmed by Samus.
+
+Respawn: the enemy will blink back into existence in the spot it's placed at in the room after Samus kills it.
+
+Block Plasma: makes plasma beam disappear after damaging the enemy instead of passing through it.
+
+7.
+
+Graphics [$0F88, X]. You shouldn't need to ever edit this. Used by gate enemy, and can be set to $FFFF for them. For enemies that need to have the Extended Tilemap Format checkbox (#8) checked, the correct value will automatically be placed in this field.
+
+8.
+
+"Disable Movement / Animations" and "Extended Tilemap Format" checkboxes.
+
+Disable Movement / Animations: stops the enemy from processing its tilemap code. You shouldn't ever need to use this.
+
+Extended Tilemap Format: only needs to be checked for certain enemies with more complex animations, such as space pirates.
+
+9.
+
+Tilemaps [$0F92, X]. This is the address that's being used as a pointer to the enemy's starting tilemap/instruction. Called "Orientation" in older SMILE versions.
+
+10.
+
+Speed [$0FB4, X]. See enemy info (#12). If no info is provided, assume that $0000 should be used.
+
+11.
+
+Speed 2 [$0FB6, X]. See enemy info (#12). If no info is provided, assume that $0000 should be used.
+
+12.
+
+Enemy Info. These are the basic instructions for setting up the enemy. You can edit this info yourself if you need to and save the changes. If this area reads [NO INFO FILE FOUND], then you likely only need to set the enemy's values for fields #5, #7, #9, #10, and #11 to these: Special = $2000, Graphics = $0000, Tilemaps = $0000, Speed = $0000, and Speed 2 = $0000.
+
+13.
+
+Save Enemy Info & Reload Enemy Info. If you choose to edit the text that's in the Enemy Info box, saving it will overwrite a .TXT file located in SMILE RF\Files\Enemies\ for that enemy (CEBF.txt in this screenshot).
+
+14.
+
+Open enemy .TXT file. Some enemies have more detailed info .TXT files that can't all be shown at once in SMILE RF's Enemy Info area. Clicking this button opens the .TXT file using your default text editor.
+
+15.
+
+AI Bank. This is the bank that the selected enemy's AI is located in. You shouldn't ever need to edit this value.
+
+16.
+
+Beta name for enemy. These have no effect on the enemy behavior, so there's no reason to edit these. See beta enemy names.
+
+17.
+
+Basic enemy attributes. For these changes to take effect, you'll have to click "Save DNA" (#26) before clicking the Save button (#4).
+
+Energy: how much health the enemy has.
+
+Damage: how much damage Samus will take from touching the enemy. This doesn't include the damage for enemy projectiles, which will need to be edited separately.
+
+Sound: this is only the hurt sound to play when the enemy takes damage. For sounds that enemies make while they're attacking or moving around, see hex editing > sound effects.
+
+Death: type of animation to play when the enemy is killed. 0000 = small, round explosion (most enemies have this), 0001 = killed by screw attack, 0002 = large, round explosion, 0003 = series of small explosions, 0004 = series of large explosions.
+
+Width: enemy's horizontal hitbox size in pixels, starting from the center of the enemy.
+
+Height: enemy's vertical hitbox size in pixels, starting from the center of the enemy.
+
+18.
+
+Layer priority. Determines which layers the enemy will appear behind or in front of. 00 = very front, 02 = in front of Samus, 05 = between Samus and background, 0B = behind all.
+
+19.
+
+Hurt flash. How long for an enemy to continuously flash white after taking damage from Samus. Interestingly, hurt flash also serves as a "flinch duration" for most enemies by freezing them in place if slightly higher values like 10 are used.
+
+20.
+
+Main AI pointers. You shouldn't edit any of these values unless you know what's going to happen, or you know how to safely test and undo new changes. Click "Save DNA" (#26) to save any changes made. Remember that these pointers will affect the main enemy AI itself! This means that if you give enemy CEBF (Boyon) a new shot AI, it will affect every Boyon in the game.
+
+To visit these spots with a hex editor, look at the AI Bank (#15) and stick that value in front of the Main AI Pointers below. Example from screenshot: Initiation AI is 871C, and the AI Bank is $A2, so this gives us a LoROM address of $A2:871C, which converts to PC address / hex editor offset 11071C.
+
+Initiation AI: this pointer is to the very beginning of an enemy's AI. Initiation AI sets up the enemy. It runs once per enemy as the room is loading, then never again unless Samus re-enters the room.
+
+Main AI: this pointer is to the starting point of the enemy's main active/running AI. Main AI only runs while the enemy is visible on-screen. If the Move Off-Screen checkbox is checked, then that enemy's Main AI will always be running until Samus leaves the room or kills the enemy.
+
+Shot AI: pointer to code to run when the enemy is shot by Samus, usually set to 802D. Common values: 802D = normal hit to enemy. 804C = no effect.
+
+Hurt AI: pointer to code to run when the enemy receives damage, almost always 804C. Only different for a few bosses and enemies.
+
+Touch AI: pointer to code to run when Samus touches the enemy, usually set to 8023. Common values: 8023 = normal harm to Samus. 804C = no effect. 8E6B = normal harm to Samus + enemy self-destructs.
+
+PB (power bomb) AI: pointer to code to run when Samus sets off a power bomb while the enemy's Main AI is running, usually set to 0000.
+
+Grapple AI: pointer to code to run when Samus's grappling beam touches the enemy. Common values: 800A = grapples onto enemy + kills enemy. 800F = grapple is stopped and has no effect on the enemy. 8005 = grapples onto enemy and freezes it in place. 8000 = grapple passes harmlessly through enemy. 8014 = grapples onto enemy without freezing it in place. 8019 = similar to 800A, but slightly longer grapple duration.
+
+X-Ray AI: pointer to code to run when X-Ray is used while the enemy's Main AI is active.
+
+Frozen AI: pointer to code to run when frozen.
+
+Boss Value: used by bosses to disable the map, disable footstep sound effects, and change certain tiles on the map to pink / explored.
+
+NOTE: Any "Shot AI", "Touch AI", "Grapple AI", "X-ray AI" or "Frozen AI" pointer higher than 8767 is enemy-specific, meaning that it will almost always crash the game if used by the wrong type of enemy.
+
+21.
+
+Extra AI, X. These extra AI pointers aren't used at all in the original Super Metroid, but custom enemies can be coded to use of them. The values below ($####, X) are for how far into the $40 bytes of enemy DNA that the extra AI pointer is located. This means that if you started counting in hex from the beginning of the enemy's DNA data, the "$0016, X" pointer would be located $16 bytes in, "$0024, X" is $24 bytes in, etc.
+
+$0016, X:
+
+$0024, X:
+
+$0026, X:
+
+$002A, X:
+
+$002C, X:
+
+$002E, X:
+
+$0034, X:
+
+22.
+
+Enemy graphics pointer. LoROM address location of the enemy's graphics. The graphics at this location are also previewed for you in the little window below (#25).
+
+23.
+
+GFX size. How many bytes of data to use for this enemy's graphics, starting from the Enemy Graphics Pointer.
+
+24.
+
+Possessors. Usually is the number of pieces required to make up one fully functioning enemy of this species. Pieces means that multiple copies of the same enemy are needed to complete the whole and make it work properly. The Shaktool that destroys the wall and grants you access to Spring Ball is made up of 7 enemies, for example. Exceptions to this are enemies such as Kago, which has 0009 as its possessors value, but only needs one enemy piece to function fully.
+
+25.
+
+Enemy graphics preview. The enemy graphics here are previewed directly from the ROM, just like tilesets.
+
+26.
+
+Save and reload enemy DNA buttons. "Save DNA" saves any changes made to the fields under the "Enemy Header AI", "Main AI Pointers" and "Enemy Graphics" sections above. "Load DNA" undoes any field edits you've made since opening the enemy editor, or last clicking Save DNA.
+
+27.
+
+Copy and paste enemy DNA. You should only be using these Copy/Paste buttons if you plan to overwrite an enemy with another. See enemy header copying.
+
+28.
+
+Room Enemies list. This was called the "Enemies Allowed list" in older SMILE versions. Maximum of 4 entries. Right-click on an entry to see a preview of it (#1, #25).
+
+Header: double-clicking an enemy ID removes it from the header list. Double-clicking an enemy ID in the Enemy Selector (#2) adds it to the header list. Entries can be dragged + dropped to change the order.
+
+Palette: shouldn't use any other values besides $0001, $0002, $0003 or $0007. Enemies are allowed to share the same value.
+
+29.
+
+Allowed pointer. This is just a mirror of the room's Enemy GFX pointer (Room MDB tab, #18) within SMILE, so editing one will directly affect the other.
+
+30.
+
+Enemies to clear room. Number of enemies that Samus must kill before gray doors will start flashing.
+
+NOTE: opening a flashing gray door will trigger the "Zebes is awake" event.
+
+31.
+
+Enemy palette pointer. Points to a spot somewhere in the enemy's AI Bank (#15) that contains the enemy's palette, which is always 32 bytes long. In the screenshot, the enemy's palette pointer is 8687, and the AI Bank is $A2, giving us the LoROM address $A2:8687, which is where enemy CEBF's palette is stored.
+
+32.
+
+Enemy palette. To edit an enemy's colors, click on a color and adjust the red/green/blue sliders (#33).
+
+33.
+
+RGB (red/green/blue) sliders. The red/green/blue squares with the numbers in them are actually draggable, which lets you copy the current color over another. The sliders themselves function just like the other palette editors in SMILE.
+
+34.
+
+Save, import, or export palette. "Save Palette" instantly saves any changes you've made to the enemy's palette with the RGB sliders. "Import Palette" allows you to load another enemy's palette that you've exported. "Export Palette" creates a palette file in the same folder as the Super Metroid ROM that you currently have open in SMILE, with a filename of the enemy ID you're editing (clicking it in the screenshot would create CEBF.tpl).
+
+35.
+
+Enemy weakness pointer. Points to a 22-byte string somewhere in bank $B4, which is made up of all the Damage Multiplier values for each of Samus's weapons for that particular enemy. This location is $B4 + Weakness Pointer. In this screenshot, the Weakness Pointer is EDA8, which means $B4:EDA8 (PC: 1A6DA8) is where you'd find the Damage Multiplier values for enemy CEBF if you were looking for them in a hex editor.
+
+36.
+
+Save enemy weaknesses. Saves your enemy weakness edits, which use 22 bytes in bank $B4.
+
+37.
+
+Weapon Type drop-down menu. Selecting a beam from this drop-down menu lets you edit that particular beam's Damage Multiplier (#38) and Freeze/Kill checkboxes (#39) for the enemy. If you make an edit, you'll need to click "Save Weakness" (#36) before picking another weapon from the drop-down menu, or your edit will be undone.
+
+38.
+
+Damage multiplier for currently selected weapon type. Can use a value between 0-F.
+
+0 = no damage to enemy.
+1 = 0.5x damage to enemy.
+2 = default (1x) damage to enemy.
+3 = 1.5x damage to enemy.
+4 = 2x damage to enemy.
+5 = 2.5x damage to enemy.
+4-F = higher damage to enemy.
+39.
+
+Freeze/Kill checkboxes. "Freeze, Don't Kill" will make the enemy always freeze in one shot no matter how much energy it has left, and not actually take any damage. "Kill, Don't Freeze" will make the enemy die normally once its energy reaches 0, instead of freezing at near-death. These only work with ice beam, or beam combinations with ice in them. These checkboxes change the high bit of the damage value for enemies.
+
+40.
+
+Drops pointer. Points to a 6-byte string somewhere in bank $B4, which is made up of the 6 values below at #42. This location is $B4 + Drops Pointer. In this screenshot, the drops pointer is F320, giving us $B4:F320 (PC: 1A7320). Going there with a hex editor, you'd see 14 0A 55 82 05 05, all of which are seen in the screenshot. From left to right: small energy, large energy, missile, nothing, super missile, power bomb.
+
+41.
+
+Save drops. Saves the changes you've made to any of the 6 fields below (#42) by writing to the location pointed to by the Drops Pointer (#40).
+
+42.
+
+Drop chances. How often the enemy will drop a certain type of ammunition or energy after it dies. Be sure to test these out thoroughly if you edit them. To be on the safe side, keep the total of these 6 values to exactly FF; use a hex calculator if you need to (from the screenshot: 14 + 0A + 55 + 05 + 05 + 82 = FF).
+
+
+UNUSED DATA -- BETA ENEMY NAMES
+14 bytes in bank $B4. Enemy beta names are unused, and can be overwritten. Enemy beta names are all located at offset 1A5D86, and each enemy's name pointer simply points to its respective name here (e.g., Atomic's name pointer is DD97, meaning its name is located at $B4:DD97).
+
+
+GENERAL ENEMY INFORMATION
+Graphic limitations: enemy graphics for a room are a limitation you'll run into sooner or later, which can happen if you use multiple large or complex enemies with many animations. For example, space pirates use many graphics for all of their animations, so fitting three other different enemy types in a room with space pirates can be a little difficult, because now you're limited to smaller enemies with fewer animation frames. If an enemy type is having graphical problems, and you're sure you've set up the Enemy GFX pointer / Room Enemies list correctly, try removing an entry from the Room Enemies list and see if that fixes it. If an enemy type is not on the Room Enemies list, its graphics will not load properly.
+
+Audio limitations: a few enemies require certain background songs to be playing for their sounds to work correctly (metroids, Maridia snails, bosses, and a few others). This is because the sound itself is tied to the instruments being used in the song. Thankfully, it only takes editing a few bytes at most to make them use a different sound, which is a great work-around for this limitation. See hex editing > sound effects.
+
+Off-screen limitations: the "Move Off-Screen" checkbox shouldn't be used on too many enemies for a single room. The complexity of the enemy's AI affects how many of them can be set to move off-screen before it becomes too much for the game to process smoothly. Be careful after about four or five off-screen enemies; by then, it might become easy to experience lag if too many other enemies are able to appear on-screen at once.
+
+On-screen limitations: too many enemies visible on the screen at the same time will cause the game to start lagging, even if none of the room's enemies have their "Move Off-Screen" checkbox checked. The swarm of tiny enemies that guard Bomb Torizo's room early in the game is a good example of the approximate maximum size that a cluster of enemies should be. For larger or more complex enemies, the number will need to be smaller.
+
+Wandering enemies: misplaced slopes can cause crawling enemies to drop from walls and ceilings. For any room that uses crawling enemies, make certain that the enemies are able to crawl completely around the room without falling or getting stuck in an awkward loop somewhere. For ANY enemy that's able to move around freely or deviate slightly from moving in a completely fixed pattern, you should test how far from its original position it's able to go, and try to consider all of the ways that the player could possibly interact with the enemy.
+
+For enemies like Waver ($D63F) and Multiviola ($D1BF), which fly around all over the place, you can test them out by checking their "Move Off-Screen" checkbox, then using the fast-forward function in your emulator for about 15 seconds or more. By that time, the enemies will have either gotten wedged in somewhere, or they will be stuck in a loop. You want them to get stuck in a loop, because it means that they'll never stop moving until Samus kills them. The size and length of time that it takes for them to complete the loop will vary, so test and re-test until they end up looping in a way that you like.
+
+Enemy-specific limitations & quirks:
+
+Shutter enemies can briefly screen-wrap at the top of the screen and appear at the bottom for a few frames, so it's best to limit them to hallways.
+Changing physics will affect the Etecoons' ability to demonstrate walljumps.
+The dead & dried Tourian enemies must have their 'enemies to clear room' value set to 00, which is at the very end of the Enemy Set data string, after the FF FF.
+Shaktool's scroll color changes might need to be removed if you're editing the enemy's positioning or room shape.
+Mocktroids will crash the game if set to respawn.
+Space pirates have a large vertical frozen hitbox.
+Wall-climbing space pirates will climb up and down through the air if something solid isn't there to stop them.
+Walking dragons don't recognize slopes, and fall slowly if allowed to walk off of ledges.
+Some respawning enemies will count towards the 'enemies to clear room' amount needed to unlock gray doors.
+Enemy placement doesn't always mean that that's where the enemy will appear in the room. Sometimes the enemy's initialization AI will determine the enemy's position instead, and therefore must be changed with a hex editor. This mainly applies to bosses.
+If Samus gets force-crouched between frozen enemies and the ceiling, it's possible to get locked in-place until the enemy unfreezes. This is kind of unavoidable for wandering enemies, but for fixed-movement enemies like ripper, keeping three tiles between them and any ceilings will fix the problem. Also, if a flying enemy such as Gamet is perfectly level with the platform that Samus is standing on and then frozen, standing on the frozen Gamet can sink Samus 1px down into the platform.
+Mocktroid & metroid's draining touch AI only works in bank $A3. "Shot reflected" also only works in bank $A3.
+Enemies that require the "Invisible" checkbox checked: not necessarily required, but usually used by respawning flies like Zeb/Zebbo (enemies $F193 and $F1D3), and by some multi-piece enemies.
+Enemies that require the "Non-Responsive" checkbox to be checked: usually used by extra enemies that are meant to be used by possessors.
+Enemies that require the "Extended Tilemap Format" checkbox to be checked: all space pirates, Oum ($D37F), Shutters ($D4FF-$D5FF), Bang ($DB3F), and bosses.
+Enemies that require the "Disable Movement / Animations" checkbox to be checked: Bang ($DB3F), and probably also some boss parts.
+Enemies that must be at the top of the Room Enemies list: most bosses, metroids, Wrecked Ship ghosts.
+Enemies that should NOT be added to the Room Enemies list: elevators, escape steam, Zebetites, Kihunter's wings, Evir's projectile, Kzan duplicate, probably some others.
+Enemies that require being the first enemy in the room (Enemy Index $00): Wrecked Ship ghosts, probably bosses and some others.
+Enemies with sound effects that rely on certain songs to be playing: Wrecked Ship ghosts, metroids, Yards ($DBBF), Name/Fune ($E6FF/$E73F), Etecoons ($E5BF), the broken Maridia glass tube, Mother Brain's case, most bosses
+If you want a room to have no enemies at all, change its Enemy Set and Enemy GFX pointers both to 8000.
+
+COPYING ENEMY HEADERS ("ENEMY CLONING")
+Copied enemy headers are explained much more thoroughly in an older guide for SMILE 2.5 that includes pictures. In the context of this guide, it's easy to explain exactly how enemy header copying works:
+
+To clone an enemy type, all you need to do is copy/paste-write its 64-byte header to some free space in bank $A0, and then make copies of its .GIF and .TXT files for SMILE RF. The filenames of these copied .GIF and .TXT files should be the last 4 digits of the LoROM address in bank $A0 that the enemy clone's header is located, as with all other enemies (e.g., if you pasted a copied enemy header at 1077E0, you'd name the copied files F7E0.GIF and F7E0.TXT). You can also overwrite an existing enemy header, which doesn't require copying the .GIF and .TXT files for that enemy, although you will still see the overwritten enemy's GIF/TXT files in SMILE unless you update them).
+
+There are a few limitations to what you can do, because copying an enemy's header is not the same thing as copying an enemy's entire AI code (copying an enemy's entire AI is possible, but much harder to do). These limitations are: all sounds except hurt sounds, animation speeds, actual AI edits, and special colors that aren't part of an enemy's default palette.
+
+

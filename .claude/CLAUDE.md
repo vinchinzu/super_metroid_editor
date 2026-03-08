@@ -41,6 +41,17 @@ Data flow: ROM File → RomParser (immutable) → EditorState (tracked changes) 
 - Tests may require a ROM file at specific paths; they skip gracefully if missing
 - Always run tests before submitting: `./gradlew :shared:jvmTest :desktopApp:jvmTest`
 
+## Documentation
+All ROM format knowledge, sprite data, boss specs, and engine internals live in `docs/`.
+- `docs/CONTEXT.md` - **Master index** — start here for any ROM data question
+- `docs/rom/` - ROM data format, limits, engine internals, hex edits
+- `docs/bosses/` - Per-boss deep dives (Phantoon, Kraid)
+- `docs/graphics/` - Tile pipeline, sprite system, OAM/BG2 formats
+- `docs/reference/` - SMILE editor references, rogue doors analysis
+- `docs/project/` - Roadmap, SMILE parity plan
+- `docs/code/` - Python ROM analysis scripts (run against test-resources/*.smc)
+- Use explicit imports, not wildcard imports (e.g. `import androidx.compose.runtime.remember` not `import androidx.compose.runtime.*`)
+
 ## Important Notes
 - ROM data uses SNES LoROM addressing; `snesToPc()` converts to file offsets
 - The `tools/snes_spc` git submodule must be initialized for audio features

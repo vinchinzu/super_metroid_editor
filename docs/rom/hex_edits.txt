@@ -1,0 +1,1902 @@
+begrimed.com
+
+HEX EDITS
+
+
+by Grime & others @ metcon
+
+Before you read any further, you should at least know how to find and modify bytes using the "goto" function with a hex editor, and you must be able to comprehend byte reversal for values. Example: 0002 will be seen as 02 00 in a hex editor, so changing the 00 byte is rarely needed.
+
+Physics (air, water, lava/acid)
+Beams & Charge Beam
+Missiles & Super Missiles
+Energy Tanks & Reserve Tanks
+Morph Ball & Spring Ball
+Bombs & Power Bombs
+High-Jump Boots & Speed Booster
+Space Jump & Screw Attack
+Varia Suit & Gravity Suit
+Grappling Beam & X-Ray Scope
+Crystal Flash
+Damage to Samus
+Samus' animation speeds
+Other Samus edits
+
+
+PHYSICS (AIR, WATER, LAVA/ACID)
+
+81D87 - 22 7F 96 94 to EA EA EA EA
+81DAC - 22 7F 96 94 to EA EA EA EA
+Disables walljumping.
+
+81DF8 - 22 F0 A8 A0 to EA EA EA EA
+81E1B - 22 F0 A8 A0 to EA EA EA EA
+Disables walljumping, but Samus still enters the "about to walljump" pose when it is attempted.
+
+81006 - FF 00 to 00 00
+Walljumping no longer forces Samus away from the wall.
+
+8F625 - 23 to 22
+Prevents Samus from losing speed by turning left/right during a spinning jump.
+
+81F7F - 00 60
+Something to do with keeping horizontal (and vertical?) momentum after all controller input is released during a spin jump.
+
+81F7D - 01 to ??
+Speed at which Samus moves left/right through the air during a spinning jump. 00 = very slow, 01 = standard, 02 = slightly faster, 08 = very fast, etc.
+
+81F71 - 01 to ??
+Speed at which Samus moves left/right through the air during a non-spinning jump and while falling. 00 = very slow, 01 = standard, 02 = slightly faster, 08 = very fast, etc.
+
+81FA1 - 01 to ??
+Speed at which Samus moves left/right through the air after running off of a ledge, falling after doing a super jump, and de-morphing. 00 = very slow, 01 = standard, 02 = slightly faster, 08 = very fast, etc.
+
+82049 - 01 to ??
+Speed at which Samus moves left/right through the air after performing a walljump. 00 = slower, 01 = standard, 02 = slightly faster, etc. (found by Black_Falcon)
+
+8267F - 20 64 8E to EA EA EA
+Disables the "skid" sequence when turning left/right; allows instant stopping.
+
+81F69 - 00 00
+Something to do with Samus coming to a stop after running. 01 01 made Samus stop almost instantly instead of taking a few steps automatically.
+
+81EA2 - 1C to ??
+The planet's gravity. Affects jump speed, jump height and fall speed whether Samus has high-jump boots equipped or not, except while underwater/lava/acid without Gravity suit. Combine with the jump-height values below for interesting effects. 0C = lower gravity, 1C = standard gravity, 2C = higher gravity, etc.
+
+81110 - 05 to ??
+Maximum fall speed. By itself, this change isn't really noticable until Samus has fallen for awhile, but combined with the gravity change and jump heights, it works well for creating faster-paced gameplay. 04 = slower fall, 05 = standard, 06 = faster fall, etc. Anything above 07 occasionally produces small background graphical errors.
+
+81B2F - 02 to 04
+Somewhat more realistic physics, I guess? Eliminates moving in air from a stand-still jump or turning around and moving in the opposite direction in mid-air.
+
+81F64 - 30 02 to ?? ??
+Running acceleration and default running speed; 30 = acceleration, 02 = max speed. These values are ADDED to what speed booster gives. Anything higher than 07 for max speed will cause errors when running at full speed with booster equipped, and anything higher than 05 will cause a crash during the game intro when Samus is running up to the baby metroid larva (can be fixed by skipping the intro sequence).
+
+81EB9 - 04 to ??
+Jump/springball height. 03 = lower, 04 = standard, 05 = higher, etc.
+
+81EC5 - 06 to ??
+Jump/springball height (with high-jump boots). 05 = lower, 06 = standard, 07 = higher, etc.
+
+81ED1 - 04 to ??
+Walljump height. 03 = lower, 04 = standard, 05 = higher, etc.
+
+81EDD - 05 to ??
+Walljump height (with high-jump boots). 04 = lower, 05 = standard, 06 = higher, etc.
+
+81EBB - 01 to ??
+Jump/springball height underwater without Gravity suit. 00 = lower, 01 = standard, 03 = higher, etc.
+
+81EC7 - 02 to ??
+Jump/springball height underwater without Gravity suit (with high-jump boots). 01 = lower, 02 = standard, 03 = higher, etc.
+
+81ED3 - 00 to ??
+Walljump height underwater without Gravity suit. 00 = standard, 01 = higher, 02 = even higher, etc.
+
+81EDF - 00 to ??
+Walljump height underwater without Gravity suit (with high-jump boots). 00 = standard, 01 = higher, 02 = even higher, etc.
+
+81EBD - 02 to ??
+Jump/springball height in lava/acid without Gravity suit. 01 = lower, 02 = standard, 03 = higher, etc.
+
+81EC9 - 03 to ??
+Jump/springball height in lava/acid without Gravity suit (with high-jump boots). 02 = lower, 03 = standard, 04 = higher, etc.
+
+81ED5 - 02 to ??
+Walljump height in lava/acid without Gravity suit. 01 = lower, 02 = standard, 03 = higher, etc.
+
+81EE1 - 03 to ??
+Walljump height in lava/acid without Gravity suit (with high-jump boots). 02 = lower, 03 = standard, 04 = higher, etc.
+
+822D1 - 01 00 to ?? ??
+Horizontal speed after walljumping in lava/acid without gravity suit; speed resets to default after releasing jump button.
+
+8209C - 04 02 to ?? ??
+Underwater running speed, without gravity suit. 04 = Samus' acceleration and slow-down rate when starting to run underwater, and 02 = the maximum speed she can run (found by Cardweaver).
+
+820A9 - C0 01 to ?? ??
+Speed at which Samus moves left/right underwater without gravity suit during a non-spinning jump and while falling. C0 = seems to affect jumps while standing still, 01 = seems to affect running jumps when Samus leaves the spinning animation (found by Cardweaver).
+
+821F9 - 01 00 to ?? ??
+Speed at which Samus moves left/right in lava/acid without gravity suit during a non-spinning jump and while falling.
+
+820B4 - C0 01 to ?? ??
+Speed at which Samus moves left/right through the water during a spinning jump, without gravity suit (found by Cardweaver).
+
+82205 - 01 00 to ?? ??
+Speed at which Samus moves left/right through lava/acid during a spinning jump, without gravity suit.
+
+820D8 - C0 01 to ?? ??
+Speed at which Samus moves left/right underwater without gravity suit after running off of a ledge, falling after doing a super jump, and de-morphing (found by Cardweaver).
+
+82229 - 01 00 to ?? ??
+Speed at which Samus moves left/right in lava/acid without gravity suit after running off of a ledge, falling after doing a super jump, and de-morphing.
+
+8209A - 00 00 to ?? ??
+Samus' "initial dash" duration underwater without gravity suit? 01 00 causes Samus to sprint a considerable distance by simply pressing left or right. Probably no point in editing.
+
+82168 - 04 01 to ?? ??
+Speed at which Samus moves left/right underwater without gravity suit in ball form during a springball jump. 04 = acceleration and slow-down rate, 01 = maximum speed (found by Cardweaver).
+
+822B8 - 04 01 to ?? ??
+Speed at which Samus moves left/right in lava/acid without gravity suit in ball form during a springball jump. 04 = acceleration and slow-down rate, 01 = maximum speed.
+
+822C4 - 04 01
+Horizontal acceleration and max speed of morph ball in lava/acid without gravity suit after doing a mid-air morph. 04 = acceleration, 01 = max speed.
+
+822C9 - 00 00
+Adjusts how quickly Samus can turn around and begin moving in the opposite direction in ball form after doing a mid-air morph in acid/lava without gravity suit.
+
+822C1 - 00 00
+Seems to handle how much distance Samus travels backwards when turning around in ball form after doing a mid-air morph in acid/lava without gravity suit. No reason to edit.
+
+822BD - 00 00
+Adjusts how quickly Samus can turn around and begin moving in the opposite direction during a spring ball jump in lava/acid without gravity suit.
+
+882B5 - 00 00
+Seems to handle how much distance Samus travels backwards when turning around during a spring ball jump in lava/acid without gravity suit. No reason to edit.
+
+82159 - 00 00
+Morph ball acceleration underwater without gravity suit? Something like that.
+
+820C0 - 04 02 to ?? ?? [without spring ball equipped]
+8215C - 04 02 to ?? ?? [with spring ball equipped]
+Speed at which Samus rolls left/right while in ball form underwater, without gravity suit. 04 = acceleration and slow-down rate, 02 = maximum roll speed (found by Cardweaver).
+
+822A9 - 00 00 to ?? ??
+Morph ball acceleration in lava/acid without gravity suit? Both bytes seem to do the same thing; didn't check if it was with or without spring ball.
+
+821E9 - 00 00
+Running acceleration in lava/acid without gravity suit? Both bytes seem to do the same thing.
+
+820F0 - 04 01 to ?? ?? [without spring ball equipped]
+82174 - 04 01 to ?? ?? [with spring ball equipped]
+Speed at which Samus moves underwater without gravity suit after mid-air morphing. 04 = acceleration and slow-down rate, 01 = maximum speed (found by Cardweaver).
+
+821A5 - 00 00
+Distance that Samus covers when turning left/right underwater without gravity suit while falling. No reason to edit this, really.
+
+82289 - 00 00
+Distance that Samus covers when turning left/right in acid/lava while standing. No reason to edit this.
+
+822F5 - 00 00
+Distance that Samus covers when turning left/right in acid/lava while falling. No reason to edit this.
+
+821BC - 00 00 to ?? ??
+Horizontal damage boost speed in water without gravity suit equipped.
+
+8230D - 00 00 to ?? ??
+Horizontal damage boost speed in lava/acid without gravity suit equipped.
+
+822C9 - 00 00 to ?? ??
+Adjusts how quickly Samus can turn around and begin moving in the opposite direction in ball form after doing a mid-air morph in acid/lava without gravity suit.
+
+23495 - 80 03
+Maridia quicksand's "strength." Higher values = higher jumping in quicksand.
+
+
+
+
+BEAMS & CHARGE BEAM
+
+9826B - D0 to 80
+Removes the 'flicker' effect from all uncharged beam shots. This makes them appear to move much more smoothly through the air (found by Black Falcon).
+
+83860 - 3C to ??
+Timer for how quickly charged shots can be fired. 1C = more rapid charged shots, 3C = standard, 5C = longer delay between firing charged shots, etc.
+
+838D4 - 00 to 10
+Samus always fires charged shots (found by Black Falcon).
+
+83857 - 4C 87 B8 to EA EA EA
+Samus never fires charged shots; instead fires normal shots very quickly while the button is held (found by Flamestar666).
+
+83A37 - 04 00
+Number of frames that the flash from firing a charged shot lasts.
+
+824F5 - AD D0 0C to EA EA EA
+Disables the pseudo screw attack, which happens if Samus does a spinning jump during a beam charge (found by Crashtour99).
+
+8D755 - 3C to 3D-77
+Adjusts how long until Samus' body starts to flash while a beam is charging. 3C = standard, 77 = about 2 seconds, 78 or higher = Samus never flashes at all. Any value lower than 3C will sometimes make the flash colors stick, so don't do that (found by Flamestar666).
+
+83B56 - 9D to 9E
+Increases the speed of the beam charging animation (found by ProjectXVIII).
+
+83B99 - 9D to 9E
+Increases the speed of the beam charging animation even more.
+
+83B56 - 9D to 80
+Removes the beam charging animation; everything else works normally.
+
+83BA2 - D0 to 80
+Removes only the dots/particles from the beam charging animation.
+
+83B90 - 9D to 9E
+The large spark at the tip of Samus' gun while charging cycles through its animation frames slower than usual. Looks a lot cooler than it sounds.
+
+83968 - 22 97 B1 90 to EA EA EA EA
+Slows down the acceleration of all beams (doesn't affect missiles/super missiles).
+
+83A32 - 22 97 B1 90 to EA EA EA EA
+Slows down the acceleration of charged shots for all beams (doesn't affect missiles/super missiles).
+
+838CB - 04 to ??
+Adjusts how far shots travel before their beam trail starts. 00 = no beam trails at all, 04 = standard, 1F = shots travel roughly halfway across the screen before their beam trail starts (found by Flamestar666).
+
+982F7 - 22 A9 B6 90 to EA EA EA EA
+Removes ALL trails; this includes charged/uncharged shots for every beam, missiles/super missiles, and SBAs.
+* To only remove trails from specific beam combinations, see this reference.
+
+83847 - 78 00 to ?? ??
+Adjusts how long Samus' beam must be charging before SBAs activate. 40 00 = almost instantly, 78 00 = standard; about 2 seconds, FF 01 = about 8 seconds, etc. (found by Black Falcon)
+
+84CC0 - AD D2 09 to EA EA EA
+Disables the use of SBAs that activate when charging ice, spazer, wave or plasma by themselves while power bombs are selected.
+
+84F34 - 20 to ??
+Adjusts how far away the ice beam SBA circles around Samus. 10 = smaller radius; closer to Samus, 20 = standard radius, 40 = larger radius, etc. (found by Flamestar666)
+
+84F71 - 02 to 01
+Allows Samus to fire beams while the ice beam SBA is in effect (found by Flamestar666).
+
+84EF7-84F27 - all to EA [$31 bytes]
+Rotating ice SBAs no longer vanish after they touch an enemy. Alternatively, you can use 80 2A instead of changing all 49 bytes (31 if you're counting in hex) to EA.
+
+845FB - D0
+D0 to 80 = ice beam SBA lasts forever. D0 to F0 = ice beam SBA instantly disperses upon use. If you decide to make it last forever, you should also apply the above change to let Samus fire her weapon during its use so the player can open doors without having to use bombs.
+
+8F464 - 28 00
+Distance from Samus that ice SBA starts disperses. 28 to 01 and it disperses from her body instead of from the ice circle. Dispersing the SBA from Samus' body would work really well with the above change for making it disperse instantly.
+
+
+
+
+MISSILES & SUPER MISSILES
+
+83EBF - CE to AD [missiles]
+83EC4 - CE to AD [super missiles]
+8402E - 8D to AD [power bombs]
+Infinite ammunition. If you use these, make sure to remove the HUD's ammo number for whatever weapon(s) you give Samus infinite ammo for. 1C13 - 20 78 9D to EA EA EA = remove missile number. 1C34 - 20 98 9D to EA EA EA = remove super missile number. 1C52 - 20 98 9D to EA EA EA = remove power bomb number.
+
+8427B - 0A
+How quickly Samus can fire missiles. Anything faster than about 06 will probably not register missile hits occasionally if you fire them too quickly.
+
+82F80 - 22 57 B6 90 to EA EA EA EA
+Removes the smoke trails from missiles.
+
+82FFE - 22 57 B6 90 to EA EA EA EA
+Removes the smoke trails from super missiles.
+
+82F7D - 9D to 9E
+Removes all but 1 smoke trail from missiles, which only appears once at the tip of Samus' gun as it fires.
+
+82FFB - 9D to 9E
+Removes all but 1 smoke trail from super missiles, which only appears once at the tip of Samus' gun as it fires.
+
+A253C - 22 06 AE 90 to EA EA EA EA
+A24D2 - 22 06 AE 90 to EA EA EA EA
+Missiles and super missiles pass through walls like wave beam, as well as travel along certain slopes and surfaces.
+
+82F96 - 9D to 9E
+82FA0 - 9D to 9E
+Missiles move very slowly through the air, almost like a torpedo. Doesn't affect super missiles.
+
+98114 - 02 to ??
+Screenshake behavior of missiles and super missiles. 02 to 01 = only normal missiles shake screen, 02 to 03 = both normal missiles and super missiles shake screen (found by Flamestar666).
+
+98140 - 01 to ??
+Timer for how long missiles, super missiles and beams take to explode after striking a solid surface (found by Black Falcon).
+
+24F3E - 03 to ??
+Alters which projectile type is needed to destroy power bomb blocks. 01 = missile, 02 = super missile, 03 = power bomb, 04 = unused, 05 = bomb (found by Black Falcon).
+
+24F77 - 02 to ??
+Alters which projectile type is needed to destroy super missile blocks. 01 = missile, 02 = super missile, 03 = power bomb, 04 = unused, 05 = bomb (found by Black Falcon).
+
+
+
+
+ENERGY TANKS & RESERVE TANKS
+
+2096C - 79 00 00 to EA EA EA
+Energy tanks no longer add +1 energy tank, and only refill Samus' energy (I assume they still add to the ending item% though).
+
+
+
+
+BOMBS & POWER BOMBS
+
+81EF5 - 02 to ?? [in air]
+81EF7 - 00 to ?? [in water, without gravity suit]
+Bomb jump and diagonal bomb jump height; also affects the jumps from power bombs. 01 = lower, 02 = standard, 03 = higher, etc. For gravityless underwater bomb jumps, 01 = higher, 02 = even higher, 08 = stupidly high, etc. (found by Black_Falcon)
+
+81F28 - 30 03 to ?? ??
+Diagonal bomb jump X/Y or something to that effect; 30 = vertical rise, 03 = horizontal distance/speed? Play around with these.
+
+10B61 - 22 85 97 A0 to EA EA EA EA
+Disables bomb jumping (found by DSO).
+
+84023 - 20 E7 C0 to EA EA EA
+Disables bomb jumping for power bombs only.
+
+9815C - 01 to ??
+Timer for how long bombs take to explode after the normal timer runs out (found by Black Falcon).
+
+40DE7 = 30 00
+Speed of power bomb's radius spreading outward. Don't make it much faster than what it already is, or power bombs may start "missing" certain blocks. 60 00 is probably the safest value to use, but it's not really even that noticable.
+
+101849 - 02 to 00
+Enables only diagonal bomb jumping for bombs and power bombs.
+
+83FAC - 00 to EA
+Power bombs no longer work; Samus drops a normal bomb instead, but power bombs can still be used for the beam-specific SBAs.
+
+8604F - 20 1B 8F to EA EA EA
+Samus no longer stops moving horizontally at the peak of a diagonal bomb jump; gives them an interesting 'bunny hop' effect.
+
+8604F - 20 1B 8F to 20 DF 8E
+Similiar to the change above, except diagonal bomb jumps send Samus flying a considerable distance. Very cool.
+
+86061 - 03 to 01
+Diagonal bomb jumps move at a sharper upward angle and don't cover as much horizontal distance.
+
+8604C - 20 DF 8E to EA EA EA
+Diagonal bomb jumps no longer work; bombs and power bombs always make Samus hop straight up.
+
+8605A - 20 E2 90 to EA EA EA
+Diagonal bomb jumps move straight horizontally forever; player loses control of Samus and can only use bombs until hitting a wall, at which point Samus falls to the ground normally. Could be useful for hacks that involve crossing large gaps with low ceilings; doesn't affect normal bomb jumps.
+* Changing 20 E2 90 to "20 DF 8E" instead of EA EA EA has the same effect, but the horizontal movement is much faster.
+
+858E3 - 00 to ?? [left bomb]
+858E5 - 01 to ?? [middle-left bomb]
+858E7 - 02 to ?? [middle bomb]
+858E9 - 01 to ?? [right-middle bomb]
+858EB - 00 to ?? [right bomb]
+Adjusts the vertical speed of the 5 bombs that Samus drops when charging a beam and entering ball form. 04 is probably the highest you'd wanna make any of them go.
+
+858D9 - 00 81 to ?? ?? [left bomb]
+858DB - 80 80 to ?? ?? [middle-left bomb]
+858DD - 00 00 to ?? ?? [middle bomb]
+858DF - 80 00 to ?? ?? [right-middle bomb]
+858E1 - 00 01 to ?? ?? [right bomb]
+Adjusts the horizontal speed of the 5 bombs that Samus drops when charging a beam and entering ball form. These 2-byte pairs are odd, and it's not worth trying to explain how they work exactly. Just know that for each pair, ## ##, the left byte affects them slightly, while the right byte affects them heavily. If the bomb(s) disappear or fly down from the top of the screen, you probably set the right byte too high. Play around with them on a back-up ROM to get a feel for how they work if that explanation didn't make sense.
+
+858D1 - 6E 00 to ?? ?? [left bomb]
+858CF - 78 00 to ?? ?? [middle-left bomb]
+858D3 - 64 00 to ?? ?? [middle bomb]
+858D7 - 78 00 to ?? ?? [right-middle bomb]
+858D5 - 6E 00 to ?? ?? [right bomb]
+Timer for each of the 5 bombs that Samus drops when charging a beam and entering ball form. Again, the right bytes (all 00 in this case) heavily affect how long the bombs take to explode. Changing 00 to 01 will add several seconds. Changing the left bytes (6E, 78 or 64) to 10 or lower will crash the game if the right byte isn't 01 or higher.
+
+840B3 - AD to A9
+Always throw out 5 bombs in place of using normal bombs.
+
+840AB - AD to A9
+Disables throwing out 5 bombs at once if Samus charges her beam and morphs.
+
+840BB - AD to A9
+Disables throwing out 5 bombs, as well as entering morph ball while beam charging.
+
+
+
+
+MORPH BALL & SPRING BALL
+
+82648 - 9C 2C 0B to EA EA EA
+Disables mockball/speedball completely. If springball is equipped, Samus bounces into the air; unequipped, Samus' speed resets after morph-landing.
+
+82638 - 20 C7 92 to EA EA EA
+Disables mockball/speedball in the same way as above, but with an interesting side-effect. Mid-air morphing behaves almost the same way as mid-air de-morping.
+
+81F89 - 03 to ?? [without spring ball equipped]
+82025 - 03 to ?? [with spring ball equipped]
+Speed at which Samus rolls left/right while in ball form. 01 = slower, 03 = standard, 05 = faster, etc.
+
+82031 - 01 to ??
+Speed at which Samus moves left/right through the air in ball form during a springball jump. 00 = very slow, 01 = standard, 02 = slightly faster, 08 = very fast, etc. (found by Black_Falcon)
+
+81FB9 - 01 to ?? [without spring ball equipped]
+8203D - 01 to ?? [with spring ball equipped]
+Speed at which Samus moves left/right through the air in ball form after mid-air morphing. 00 = slower, 01 = standard, 02 = slightly faster, etc.
+
+81EB5 - 01 to ??
+Bounce height when landing on the ground in ball form. 00 = no bounce, 01 = standard bounce height, 02 = slightly higher bounce, etc. (found by Black_Falcon)
+
+8F7D5 - 16 to 00
+Allows use of Morph Ball without having the item (found by Scyzer).
+
+
+
+
+HIGH-JUMP BOOTS & SPEED BOOSTER
+
+818F7 - AD A2 09 89 00 01
+Check for which item enables high-jump.
+
+804FF - AD A2 09 89 00 20 [faster running animation]
+80558 - AD A2 09 89 00 20 [blue echoes and sound]
+81789 - A9 A2 09 8D 00 20 [equipped]
+Various checks for the speed booster item. Probably no point in editing these unless you really know what you're doing.
+
+8178C - 89 to A9
+Samus can run fast even if speed booster isn't collected or equipped. No sound, blue echoes or breaking speed blocks until Samus has the item equipped.
+
+8192B - 6D 44 0B to EA EA EA
+Spinning jumps no longer lose a little bit of height if run button is held with speed booster equipped.
+
+81935 - 65 12 to EA EA
+Jumps no longer gain any extra height if Samus is running with speed booster.
+
+8191C - 89 00 20 to EA EA EA
+Jumps gain extra height if Samus is running, even without speed booster. Alternatively, you could pick another item to enable this effect.
+
+8E9E4 - A6 to 09
+8E9EC - A7 to 0A
+Samus' running speed no longer resets after landing from a jump (found by DSO).
+
+8E9F7 - A4 to 09
+8EA01 - A5 to 0A
+Samus' running speed no longer resets after landing from a fall, such as from running off of a ledge (found by Rakki).
+
+805A6 - 22 4D 91 80 to EA EA EA EA
+Mutes the sound of Samus running at full speed with blue echoes.
+
+80594 - 01 to 00
+Renders the speed booster harmless, only allowing Samus to run faster. Running animation plays at default speed.
+
+81796 - A9 01 00 to EA EA EA
+Renders the speed booster harmless, only allowing Samus to run faster. Running animation plays at default speed. Running speed is no longer carried over to jumps, but the increased jump height remains.
+
+80594 - 01 to D0
+Renders the speed booster harmless, only allowing Samus to run faster. Running animation plays faster after Samus travels a short distance.
+
+81797 - 01 00
+Delay until Samus' colors change to blue while running with speed booster.
+
+80594 - 01 to 02
+Blue speed booster echoes and sound begin earlier than usual (roughly 1 screen's distance).
+
+80594 - 01 to 04
+Blue speed booster echoes and sound begin much earlier than usual (roughly a half screen's distance).
+
+8F66F - 22 53 DE 91 to EA EA EA EA
+Allows Samus to move left/right in the air during a spinning jump without losing the blue speed booster effect, and walljump if it's done on the first frames of the pose change.
+
+81808 - AD 3C 0B to EA EA EA
+Allows Samus to keep the blue speed booster effect even after the run button is released; running speed returns to default, and holding the run button again will increase running speed normally.
+
+85037 - 1E
+Delay before shinespark starts; 1E to 01 and you no longer can horizontal shinespark, and anything higher than 3A causes an error. 3A gives more reaction time and makes horizontal sparking (on ground or in air) much easier.
+
+8501C - 08
+Horizontal shinespark acceleration speed. Might also affect diagonal shinesparks; haven't tested.
+
+85164 - 04 to 08
+lol, backwards shinesparks (probably shouldn't use).
+
+8F790 - B0 to EA
+8F792 - B0 to EA
+Disables the use of shinesparks (specifically, pressing down while running no longer works).
+
+8054E - FF to 0F
+81775 - FF to 0F
+Enables the use of speed booster while in morph ball form by holding the run button if Samus has the spring ball equipped (found by Flamestar666 and Kejardon).
+
+850CE - CE to AD [vertical]
+850FD - CE to AD [diagonal]
+85129 - CE to AD [horizontal]
+Shinesparks no longer drain Samus' energy.
+
+85125 - 1E 00 [horizontal]
+850CA - 1E 00 [vertical]
+852BE - 1E 00 [both?]
+Health checks for shinesparks to stop when Samus' health is at 29 or below. All 3 values should probably be changed to the same thing if you edit them. 1E to 00 disables it (found by Black Falcon and Grime).
+
+8514C - 0F [horizontal]
+85151 - 0F [horizontal]
+85230 - 0E [vertical]
+85235 - 0E [vertical]
+Adjusts the maximum speed of shinesparks. Anything higher than 0F will most likely cause graphical errors of some sort; note that changing both will also affect diagonal shinesparks (found by squishy_ichigo).
+
+8516E - 0F [horizontal, facing right]
+85173 - 0F [horizontal, facing right]
+851A6 - 0F [horizontal, facing left]
+851AB - 0F [horizontal, facing left]
+85277 - 0F [vertical, facing right?]
+8527C - 0F [vertical, facing left?]
+More values related to the maximum speed of shinesparks. I don't know if editing these is even needed, but they definitely are used in some capacity. Play around with these and the above changes until you achieve the desired speeds. Be sure to test diagonal shinesparks, too.
+
+852E1 - FC [facing right]
+852F5 - 04 [facing left]
+Speed of echoes rotating around Samus after shinesparking into a solid surface. Doesn't affect the overall wait time.
+
+852DB - 60 00
+852E9 - 20 00
+More values related to rotating echo speeds. Not sure what exactly these do, or if they need to be changed at all.
+
+85396 - AD C0 to 80 27
+Greatly reduces the waiting time until player has control of Samus again after shinesparking into a solid surface (found by SadiztykFish).
+
+
+
+
+SPACE JUMP & SCREW ATTACK
+
+824BE - 8F 2D B4 09 to EA EA EA EA
+Spinning jumps descend slower than usual with space jump equipped. Space jumping can be done by simply holding jump button. In water or lava, space jump sinks very slow; leaving the spinning animation makes Samus fall normally.
+
+8249E - 9D 9E 10 26 to EA EA EA EA
+Space jumping in the air behaves normally. Underwater, space jumps can be done quicker and at any time, even after falling long distances (makes mockball/speedball impossible to do).
+
+82493 - F0 0F AD to EA EA EA
+Space jumps can be done quicker and at any time in air, water or lava, even after falling long distances (makes mockball/speed ball impossible to do).
+
+82445 - AD 5E 19 to EA EA EA
+Space jump works underwater/lava/acid without Gravity suit.
+
+82493 - F0 0F AD to EA EA EA
+824BE - 8F 2D B4 09 to EA EA EA EA
+Space jumps remain in-place at the peak of the jump or when the jump button is released, can be done quicker and also by holding the jump button. Fire Samus' weapon or otherwise leave the spinning jump animation to fall normally.
+
+81E98 - 02 to ?? [air]
+81E9C - 00 to ?? [water]
+Adjusts how quickly you can repeatedly use space jump. 00 = more frequently, 02 = standard, 04 = less frequently, etc. (found by Black Falcon)
+
+81E9A - 05 to ?? [air]
+81E9E - 05 to ?? [water]
+Adjusts how long Samus must fall before space jump no longer works. The value differences are pretty radical, though. 04 = barely have to fall before you can no longer jump, 05 = standard, 06 = seemingly no limit to how long you can fall and still use space jump again, etc. (found by Black Falcon)
+
+82474 - D0 to 80
+Enables space jump without having the item. Uses the normal (non-space jump) spinning animation. Use the change below to make the spinning animation work properly.
+
+8F6BD - D0 to 80
+8F71E - D0 to 80
+80450 - D0 to 80
+Normal spinning jumps use the space jump animation instead. Can be used alone or in conjunction with the above change.
+
+82471 - 89 00 20
+Check for which item enables space jumping, but not the alternate spinning animation (never found that particular value).
+
+8F6B8 - D0 to 80
+8F719 - D0 to 80
+8044B - D0 to 80
+Normal spinning jumps become screw attack (no item needed). Yuo should only use this if you greatly reduce screw attack's damage, or else the game's difficulty will be broken.
+
+
+
+
+VARIA SUIT & GRAVITY SUIT
+
+6E386: 00 40 (4000)
+6E38F: 01 00 (0001)
+Adjusts how quickly Samus loses health in heated rooms without Varia suit. 00 40 = xxxx.4000 (0.25 damage per frame) = 15 damage per second. 01 00 = 0001.xxxx (1.x damage per frame) = 60-119 damage per second (depending on value at 6E386). Just play around with these values if that explanation confused you.
+
+6E37D - 21 to 01
+Removes Gravity suit's protection against heated rooms, meaning that Gravity suit can be collected first without making Varia useless (found by Jathys).
+
+20717 - 22 21 87 84 to EA EA EA EA Varia suit and Gravity suit behave like regular items when collected (bypasses the sound, flash, and moving Samus to the center of the screen). Might take a moment for the suit colors to change.
+
+869D9 - AD A2 09 89 20 00 D0 1B 89 01 00 F0 2B
+Suit damage divisors for spikes. Replace all of these bytes with EA and spikes will do the same amount of damage to Samus with all three suits. 89 20 00 to EA EA EA for Gravity only, and 89 01 00 to EA EA EA for Varia.
+
+46258 - A9 03 00 22 C1 8F 80 to EA EA EA EA EA EA EA
+Varia suit no longer changes the room's music after Samus collects it.
+
+
+
+
+GRAPPLING BEAM & X-RAY SCOPE
+
+DBDAA - 01 to 00
+Turns off the 'slow scrolling camera' effect when Samus is swinging back and forth with grapple beam (Flamestar666).
+
+85DD3 - 22 D6 CA 91 to EA EA EA EA
+X-ray scope no longer works when its HUD icon is selected. Only useful if you intend on replacing X-ray with a different item or something (found by DSO).
+
+4079A - 0A to 01
+Speed of X-ray Scope's "beam" widening before you can start moving it around.
+
+4079A - 0A to 01
+Gives the X-ray scope a much thinner "beam" than usual. Values higher than 40 will cause errors (found by Flamestar666).
+
+40850 - 01 00 [down]
+4087B - 01 00 [down]
+407F8 - 01 00 [up]
+4081A - 01 00 [up]
+Speed that X-ray scope's "beam" is able to move up and down. Anything higher than 03 00 is probably too fast (found by Black Falcon).
+
+
+
+
+CRYSTAL FLASH
+
+40B5F - 22 A2 D5 90 to EA EA EA EA
+Disables the use of Crystal Flash (found by JAM).
+
+
+
+
+DAMAGE TO SAMUS
+
+805FF - 01
+Rate that Samus' sprite flickers after taking damage from enemies, spikes, or enemy projectiles. 00 = no flicker at all (invulnerability still remains), 02+ slower flicker, etc.
+
+6E387 - 40
+Adjusts how quickly Samus loses health in heated rooms without Varia suit. 10 = slower, 40 = standard, 80 = faster, etc. (found by Black Falcon)
+
+81E8B - 00 80 00 00
+Speed at which Samus loses health while in lava. 00 80 00 00 = 0000.8000 (0.5 in decimal) damage per frame (found by Black Falcon).
+
+81E8F - 00 80 01 00
+Speed at which Samus loses health while in acid. If 01 00 is changed to 00 00, acid behaves like lava. 00 80 01 00 = 0001.8000 (1.5 in decimal) damage per frame (found by Black Falcon).
+
+8023D - 6D 8F 9E to EA EA EA
+80246 - 6D 91 9E to EA EA EA
+Acid no longer damages Samus, but the sound effects and steam graphics remain (found by Black Falcon).
+
+A0EB3 - 3C 00
+Adjusts how much damage Samus takes from touching spikes. 2C = lower, 3C = standard, 4C = higher, etc. Only affects spikes with the "spike block" attribute (found by PJBoy).
+
+101924 - 60 00 [enemy projectiles]
+102576 - 60 00 [enemy contact]
+Adjusts how long Samus flickers and has invincibility after taking damage from an enemy projectile or touching an enemy. 60 is the number of frames in 1s, 00 is the number of frames in 100s (found by Daltone).
+
+10192A - 05 00 [enemy projectiles]
+10257C - 05 00 [enemy contact]
+Timer for how long Samus is in "knockback" or the hurt post after taking damage from enemy projectile or touching an enemy.
+
+A0E9A - 3C 00 [spike BTS 00]
+A0ED5 - 3C 00 [spike BTS 01]
+A0F10 - 3C 00 [spike BTS 03]
+A1871 - 3C 00 [air fool X-ray BTS 02]
+Adjusts how long Samus flickers and has invincibility after taking damage from spike blocks with a certain BTS. 3C is the number of frames in 1s, 00 is the number of frames in 100s (found by Daltone).
+
+A0EA0 - 0A 00 [spike BTS 00]
+A0EDB - 0A 00 [spike BTS 01]
+A0F16 - 0A 00 [spike BTS 03]
+A1877 - 0A 00 [air fool X-ray BTS 02]
+Timer for how long Samus is in "knockback" or the hurt pose after taking spike BTS damage.
+
+
+
+
+SAMUS' ANIMATION SPEEDS
+
+* Most of Samus' animation speeds have not been documented yet. See this txt file with unidentified/possibly unused animation speeds for Samus that have been excluded from this page if you're interested in trying to find or identify some of them yourself.
+
+8B22D - 05 02 [facing right]
+8B231 - 05 02 [facing left]
+Landing from a normal jump or fall.
+
+8B236 - 05 02 [facing right]
+8B23B - 05 02 [facing left]
+Landing from spinning jumps, space jump or screw attack.
+
+8B298 - 0A 0A 0A 0A
+8B29D - 08 08 08 08 [low health]
+Standing still, not moving.
+
+8B2A3 - 0A 0A 0A 0A
+8B2A8 - 08 08 08 08 [low health]
+Crouching, not moving.
+
+8B326 - 03 04 04 04 04
+Normal jumping.
+
+8B384 - 04 03 02 03 02 03 02 03 02 [spin jump]
+8B392 - 01 01 01 01 01 01 01 01 [space jump]
+Spinjump animations.
+
+8B494 - 03 02 03 02 03 02 03 02 [spin jump]
+8B49E - 02 01 02 01 02 01 02 01 [space jump]
+Spinjump animations (after walljumping + holding jump button).
+
+8B39F-8B3B6
+8B4A8-8B4BF [after walljumping + holding jump]
+Screw attack's animations (24 bytes, all 01). There are a lot more frames for screw attack than there are for spin jump and space jump because of the green lightning that screw attack cycles through.
+
+8B33A - 02 10 [aiming straight up]
+8B33E - 02 [aiming straight down]
+8B346 - 02 [aiming with L, R, or firing a shot]
+8B342 - 02 [moving left or right]
+Aiming or moving around in the air.
+
+8B34A - 08 06 06
+Falling off of a ledge or de-morphing in the air.
+
+8B35C - 02 10 [aiming straight up]
+8B366 - 02 [aiming straight down]
+8B361 - 02 [aiming with L]
+Aiming or moving around in the air, after de-morphing. Haven't found aiming with R.
+
+8B378 - 03 03 03 03 03 03 03 03
+Morph ball. Haven't found being water/lava/acid without gravity suit yet.
+
+8B38F - 08 [normal spin jumps]
+8B39C - 08 [space jump equipped]
+8B3B9 - 08 [screw attack equipped]
+The "about to walljump" pose that Samus enters when you're... about to walljump. Doesn't affect the actual window of time you have to perform a walljump or the distance from wall that you have to be.
+
+8B3BB - 02 02 02 [turning left]
+8B3C0 - 02 02 02 [turning right]
+Turning around while standing.
+
+8B3E3 - 02 02 02 [turning left]
+8B3E8 - 02 02 02 [turning right]
+Turning around while standing, aiming straight up.
+
+8B3ED - 02 02 02 [turning left]
+8B3F2 - 02 02 02 [turning right]
+Turning around while standing, aiming with L.
+
+8B433 - 02 02 02 [turning left]
+8B438 - 02 02 02 [turning right]
+Turning around while standing, aiming with R.
+
+8B3CF - 02 02 02 [turning left]
+8B3D4 - 02 02 02 [turning right]
+Turning around while crouching.
+
+8B429 - 02 02 02 [turning left]
+8B42E - 02 02 02 [turning right]
+Turning around while crouching, aiming with L.
+
+8B451 - 02 02 02 [turning left]
+8B456 - 02 02 02 [turning right]
+Turning around while crouching, aiming with R.
+
+8B3C5 - 02 02 02 [turning right]
+8B3CA - 02 02 02 [turning left]
+Turning around while in the air.
+
+8B401 - 02 02 02 [turning right]
+8B406 - 02 02 02 [turning left]
+Turning around while in the air, aiming with L.
+
+8B43D - 02 02 02 [turning right]
+8B442 - 02 02 02 [turning left]
+Turning around while in the air, aiming with R.
+
+8B5D3 - 02 02 02 02 02 02 02 02 02 02
+Samus' running animation while holding the run button (no speed booster equipped).
+
+8B5E8 - 03 03 03 03 03 03 03 03 03 03
+8B5FE - 02 02 02 02 02 02 02 02 02 02
+8B614 - 01 01 01 01 01 01 01 01 01 01
+Samus' running animation while holding the run button and using the speed booster. These are for speeding up the running animation before Samus turns blue.
+
+
+
+
+OTHER SAMUS EDITS
+
+80E67 - 20 3E 97 to EA EA EA
+Disables running (including speed booster).
+
+87251 - 00
+This is Samus' "facing the camera" pose, and if you choose to "skip intro" in SMILE, this will be the pose you see when the game loads and Samus is standing on top of her ship. This pose can be changed to whatever you like. D7, and you will start the game in morph ball form, for example (you will be unable to morph again until you collect the item). Have fun.
+
+8B30A - 4D
+8B30D - 4E
+4D to 19 and 4E to 1A = normal jumps become spinjumps. 1B/1C = normal jumps use the space jump graphics & sound. 81/82 = normal jumps become screw attack.
+
+871F5 - 00 00 to 9B 00
+87251 - 00 00 to 9B 00
+8D55A - 00 00 to 9B 00
+8D632 - 00 00 to 9B 00
+8E40B - 00 00 to 9B 00
+8E765 - 00 00 to 9B 00
+8E12F - 9C 1C 0A to 20 EE FF
+8FFEE - FF FF FF FF FF FF FF to A9 9B 00 8D 1C 0A 60
+Samus' shoulders while wearing the power suit appear larger, as if wearing varia/gravity suit. The last two changes at 8E12F and 8FFEE are for giving power suit larger shoulders after Samus touches down on Zebes for the first time and emerges from the ship.
+
+46332 - 9B 00 to 00 00
+46374 - 9B 00 to 00 00
+87260 - 9B 00 to 00 00
+8726F - 9B 00 to 00 00
+8D562 - 9B 00 to 00 00
+8D63A - 9B 00 to 00 00
+8E413 - 9B 00 to 00 00
+8E750 - 9B 00 to 00 00
+Samus' shoulders while wearing varia/gravity suit appear smaller, as if wearing the power suit. These are all of Samus' "facing the camera" poses, and can be replaced by other poses entirely. For example, if you wanted Samus to start the game in morph ball form, you'd use 1D 00 instead of 00 00, and so on.
+
+
+
+HUD
+
+82B4E - 08 00
+Blinking speed of mini-map square that Samus is currently on. 00 = no longer blinks, 04 = blinks twice as fast, 09+ = looks kinda buggy (Flamestar666).
+
+1C5F - 10 to 20
+HUD icons use yellow/power bomb door colors instead of green/super missile door colors when selected (Black Falcon).
+
+1C60 - 20 EA 9C to EA EA EA
+HUD icons no longer change to green when cycling through items.
+
+84669 - F0 to 80
+Turns off the alternate graphics for Samus' arm cannon when missiles, super missiles or grappling beam are selected.
+
+01C13 - 20 78 9D to EA EA EA [missiles]
+01C34 - 20 98 9D to EA EA EA [super missiles]
+01C52 - 20 98 9D to EA EA EA [power bombs]
+Removes the numbers underneath the missile, super missile and power bomb icons. Should probably be used in conjunction with infinite ammo unless you wanna confuse people. The numbers will still display in QuickMet, but playing the game and collecting the items normally works fine.
+
+
+FX1
+
+43059 - 00 00 01 00 02 00 03 00 04 00 05 00 06 00 05 00 04 00 03 00 02 00 01 00 00 00
+Dimming pattern for "Fireflea FX" - notice how it goes from 00, up to 06, then back down to 00. Modifying those values will affect how the glow behaves. Lower values = brighter colors; can be used for flickering effect.
+
+430D6 - 06 00
+Timer for how quickly the "Fireflea FX" glow cycles through its dim/light phase. 02 00 = faster glow, 0A 00 = slower glow, 06 01 = extremely slow glow, etc. Could possibly be used for day/night cycles.
+
+45E54 - 0F
+Adjusts how far the "haze" FX1 extends from the bottom of the screen, as well as transparency? 00 = entire screen is covered with transparent haze color, 0F = default, 1A = slightly noticable haze along the lower portion of the screen, etc. (found by Black Falcon)
+
+59C98 - 88 to 93
+Removes the greenish haze from the title screen (found by DChronos).
+
+924D - 88 to 93
+Removes the greenish haze from the game over screen (found by DChronos).
+
+15490F - 22 to 6B
+Removes the gray haze from the bomb Torizo's room and allows you to use any other FX1 in its place. Easiest way to do this is to use another Crateria room's FX1 pointer after you change 22 to 6B (found by Sadiztyk Fish).
+
+80264 - 04 to 05
+80269 - FF to 0F
+Changes the graphic animation when Samus touches the surface of acid from steam(?) to bubbles (found by Black Falcon).
+
+
+
+
+MENUS & PAUSE SCREENS
+
+125BD - 80 00 10 to EA EA EA
+Pressing any button will unpause the game; disables equipment screen use and map scrolling.
+
+12FF6 - 00 to 01
+Pressing right on the equipment screen while in the "beam" frame leads to "boots" instead of "misc." (found by JAM).
+
+11297 - 85 B1 to C6 B1
+112C6 - 85 B1 to E6 B1
+112D3 - 85 B1 to C6 B1
+112E0 - 85 B1 to E6 B1
+Pause screen map scrolls much more smoothly (found by DSO).
+
+
+DOORS
+
+* The sounds for doors opening/closing use library 2. The rest of these values are animation frames for every door's opening/closing sequence, and can be changed to make doors open or close at different speeds. If you're more into the advanced stuff, see crashtour99's door dissassembly.
+
+2448B - 07 [open sound]
+244A8 - 08 [shut sound]
+2448C - 06 00
+24490 - 06 00
+24494 - 06 00
+2449E - 02 00 [delay before closing]
+244A2 - 02 00
+244A9 - 02 00
+244AD - 02 00
+Blue door, facing LEFT.
+
+244BC - 07 [open sound]
+244D9 - 08 [shut sound]
+244BD - 06 00
+244C1 - 06 00
+244C5 - 06 00
+244CF - 02 00 [delay before closing]
+244D3 - 02 00
+244DA - 02 00
+244DE - 02 00
+Blue door, facing RIGHT.
+
+244ED - 07 [open sound]
+2540A - 08 [shut sound]
+244EE - 06 00
+244F2 - 06 00
+244F6 - 06 00
+24500 - 02 00 [delay before closing]
+24504 - 02 00
+2450B - 02 00
+2450F - 02 00
+Blue door, facing DOWN.
+
+2451E - 07 [open sound]
+2453B - 08 [shut sound]
+2451F - 06 00
+24523 - 06 00
+24527 - 06 00
+24531 - 02 00 [delay before closing]
+24535 - 02 00
+2453C - 02 00
+24540 - 02 00
+Blue door, facing UP.
+
+24350 - 07 [open sound]
+2430B - 08 [shut sound]
+24331 - 09 [hit with missile sound]
+24351 - 06 00
+24355 - 06 00
+24359 - 06 00
+24301 - 02 00 [delay before closing]
+24305 - 02 00
+2430C - 02 00
+24310 - 02 00
+Red door, facing LEFT.
+
+243B2 - 07 [open sound]
+2436D - 08 [shut sound]
+24393 - 09 [hit with missile sound]
+243B3 - 06 00
+243B7 - 06 00
+243BB - 06 00
+24363 - 02 00 [delay before closing]
+24367 - 02 00
+2436E - 02 00
+24372 - 02 00
+Red door, facing RIGHT.
+
+24476 - 07 [open sound]
+24431 - 08 [shut sound]
+24457 - 09 [hit with missile sound]
+24477 - 06 00
+2447B - 06 00
+2447F - 06 00
+24427 - 02 00 [delay before closing]
+2442B - 02 00
+24432 - 02 00
+24436 - 02 00
+Red door, facing DOWN.
+
+24414 - 07 [open sound]
+243CF - 08 [shut sound]
+243F5 - 09 [hit with missile sound]
+24415 - 06 00
+24419 - 06 00
+2441D - 06 00
+243C5 - 02 00 [delay before closing]
+243C9 - 02 00
+243D0 - 02 00
+243D4 - 02 00
+Red door, facing UP.
+
+241D1 - 07 [open sound]
+2418F - 08 [shut sound]
+241D2 - 06 00
+241D6 - 06 00
+241DA - 06 00
+24185 - 02 00 [delay before closing]
+24189 - 02 00
+24190 - 02 00
+24194 - 02 00
+Green door, facing LEFT.
+
+24230 - 07 [open sound]
+241EE - 08 [shut sound]
+24231 - 06 00
+24235 - 06 00
+24239 - 06 00
+241E4 - 02 00 [delay before closing]
+241E8 - 02 00
+241Ef - 02 00
+241F3 - 02 00
+Green door, facing RIGHT.
+
+242EE - 07 [open sound]
+242AC - 08 [shut sound]
+242EF - 06 00
+242F3 - 06 00
+242F7 - 06 00
+242A2 - 02 00 [delay before closing]
+242A6 - 02 00
+242AD - 02 00
+242B1 - 02 00
+Green door, facing DOWN.
+
+2428F - 07 [open sound]
+2424D - 08 [shut sound]
+24290 - 06 00
+24294 - 06 00
+24298 - 06 00
+24243 - 02 00 [delay before closing]
+24247 - 02 00
+2424E - 02 00
+24252 - 02 00
+Green door, facing UP.
+
+2404D - 07 [open sound]
+24007 - 08 [shut sound]
+2404E - 04 00
+24052 - 04 00
+24056 - 04 00
+233FD - 02 00 [delay before closing]
+24001 - 02 00
+24008 - 02 00
+2400C - 02 00
+Yellow door, facing LEFT.
+
+240B0 - 07 [open sound]
+2406A - 08 [shut sound]
+240B1 - 06 00
+240B5 - 06 00
+240B9 - 06 00
+24060 - 02 00 [delay before closing]
+24064 - 02 00
+2406B - 02 00
+2406F - 02 00
+Yellow door, facing RIGHT.
+
+2410F - 07 [open sound]
+240CD - 08 [shut sound]
+24110 - 06 00
+24114 - 06 00
+24118 - 06 00
+240C3 - 02 00 [delay before closing]
+240C7 - 02 00
+240CE - 02 00
+240D2 - 02 00
+Yellow door, facing UP.
+
+24172 - 07 [open sound]
+2412C - 08 [shut sound]
+24173 - 06 00
+24177 - 06 00
+2417B - 06 00
+24122 - 02 00 [delay before closing]
+24126 - 02 00
+2412D - 02 00
+23131 - 02 00
+Yellow door, facing DOWN.
+
+23EAF - 07 [open sound]
+23E63 - 08 [shut sound]
+23EB0 - 04 00
+23EB4 - 04 00
+23EB8 - 04 00
+23E59 - 02 00 [delay before closing]
+23E5D - 02 00
+23E64 - 02 00
+23E68 - 02 00
+Flashing gray door, facing LEFT.
+
+23F18 - 07 00 [open sound]
+23ECC - 08 00 [shut sound]
+23F19 - 04 00
+23F1D - 04 00
+23F21 - 04 00
+23EC2 - 02 00 [delay before closing]
+23EC6 - 02 00
+23ECD - 02 00
+23ED1 - 02 00
+Flashing gray door, facing RIGHT.
+
+23F81 - 07 [open sound]
+23F35 - 08 [shut sound]
+23F82 - 04 00
+23F86 - 04 00
+23F8A - 04 00
+23F2B - 02 00 [delay before closing]
+23F2F - 02 00
+23F36 - 02 00
+23F3A - 02 00
+Flashing gray door, facing UP.
+
+23FEA - 07 [open sound]
+23F9E - 08 [shut sound]
+23FEB - 04 00
+23FEF - 04 00
+23FF3 - 04 00
+23F94 - 02 00 [delay before closing]
+23F98 - 02 00
+23F9F - 02 00
+23FA3 - 02 00
+Flashing gray door, facing DOWN.
+
+23ABE - 07 [open sound]
+23A5A - 08 [shut sound]
+23ABF - 04 00
+23AC3 - 04 00
+23AC7 - 04 00
+23A54 - 28 00 [delay before closing]
+23A5B - 02 00
+23A5F - 02 00
+23A63 - 02 00
+Bomb room door, facing RIGHT.
+
+$24351 - 06 00 F3 A8 to 24 87 B1 C4 [right]
+$243B3 - 06 00 23 A9 to 24 87 E2 C4 [left]
+$24415 - 06 00 53 A9 to 24 87 13 C5 [down]
+$24477 - 06 00 83 A9 to 24 87 44 C5 [up]
+Red doors change to blue instead of opening right away after 5 missiles.
+
+$241D2 - 06 00 33 A8 to 24 87 B1 C4 [right]
+$24231 - 06 00 63 A8 to 24 87 E2 C4 [left]
+$24290 - 06 00 93 A8 to 24 87 13 C5 [down]
+$242EF - 06 00 C3 A8 to 24 87 44 C5 [up]
+Green doors change to blue instead of opening right away after 1 super missile.
+
+23D58 - C9 00 02 F0 22 to EA EA EA EA EA
+Prevents super missiles from opening red missile doors and boss eye doors.
+
+
+SCREEN SHAKING
+
+* Most (if not all) of the screen shake locations have been documented, but not actually identified yet. Unidentified screen shakes aren't posted on this page, but can be found in this txt file if you'd like to try identifying some of them yourself. Grime is lazy.
+
+* Screen shake "type" can be one of many different values. This list probably doesn't have all of the different types, so try some other values out if these don't work for you:
+
+01 = slight up/down shake
+15 = left/right shake
+17 = angled left/right shake
+1E = background shake left/right
+1D = background shake angled left/right
+1C = background shake up/down.
+
+* To disable a particular screen shake, change its duration(s) to 00.
+
+10BAF - 22 87 86 A0 to EA EA EA EA
+Completely turns off the screen shake effect for the entire game.
+
+98126 - 14 [all solid surfaces]
+1021EA - 12 [every enemy except space pirates]
+101CB8 - 12 [space pirates]
+Type of screenshake when super missiles hit certain things.
+
+9812C - 1E 00 [all solid surfaces]
+1021E4 - 1E 00 [every enemy except space pirates]
+101CB2 - 1E 00 [space pirates]
+Duration of screenshake when super missiles hit certain things.
+
+
+MISCELLANEOUS
+
+16EDA - 1E to 1F
+When starting a brand new save file ("no data"), Samus immediately begins at the Crateria landing site after "start game" is selected, instead of displaying the area and map screens. For this to work, the "hide intro" box must be UNchecked in SMILE (found by Black Falcon).
+
+58674 - A9 38 85 74 A9 58 to A9 20 85 74 A9 40
+Stops the blue palette swaps during the zoomed-in title intro. You will need to apply this change if you plan on modifying the title screen/intro colors.
+
+2846 - 02 00 to ?? ?? [left]
+27D7 - 02 00 to ?? ?? [right]
+25F4 - 02 00 to ?? ?? [up]
+2593 - 02 00 to ?? ?? [down]
+Camera scrolling speed while panning away red scroll blocks (found by Scyzer).
+
+
+
+
+
+SOUND HEX EDITS
+
+
+
+
+HOW TO EDIT THESE SOUNDS
+
+Fundamentally, changing sounds isn't really any different from making any other kind of hex edit. There just might be a small bit of homework involved if the sound you wanna replace uses a different library. In cases where there isn't a library JSL present (such as Samus' projectiles), then using another sound library probably isn't possible without rewriting a bunch of code somewhere. Doing that won't be covered in this document because I don't know how. Thankfully there aren't many sounds without a JSL outside of those. You can find all of the known JSLs for each library on their sections of this page.
+
+So, a random example:
+
+111F2C - A9 34 00 = Saboten puffing out and shooting its cactus needles.
+
+You wanna make Saboten use a different sound when it fires needles. By default, Saboten's sound is in library 2 (sound 34) - but the new sound you want them to use for firing needles is in library 3 (sound 09). Changing the "34" value to "09" would simply use sound 09 from library 2 instead of from library 3. How to get around this? Just change the library JSL. Take a look at the "known library 3 JSLs" for library 3. I don't think it matters which one you choose, so grab whichever one you want. I'm gonna go with the top one, $809125
+
+JSLs almost always begin with opcode "22" (which you won't need to edit). Taking a look at the Saboten data, we can see it: A9 34 00 22 CB 90 80 - now if you'll have a look at library 2's known JSLs, you'll see there's $8090CB. Since hex reads its bytes in reverse order, this means it's the same 22 CB 90 80 that's in Saboten's data. And since we wanna use a library 3 sound, we simply take 809125 and reverse its bytes the same way: 22 25 91 80. With that new JSL in place, sound 34 would now read from library 3 instead of library 2.
+
+Easy, right?
+
+
+ACTIVE ENEMY & BOSS SOUNDS
+Doc'd by Grime
+
+These aren't the same as "enemy hurt sounds" which can be edited right in SMILE. You only need to edit the middle value (A9 ## 00), unless you decide to change which library the sound loads from (see above). Values are listed in order but broken apart by library, so some the sounds are scattered around. Enemy names and IDs are included in each description, so you can press the Ctrl+F keys (or F3 key) and search that way. The sounds themselves are pretty isolated, so changing one shouldn't affect other things unless noted.
+
+Values described as "?????" are ones I either couldn't hear any changes to after editing, or didn't check since the library sound used was mute or used for clearing other sustaining sounds. The latter mostly applies to "B9 00 00" instructions because I didn't feel like breakpointing each one.
+
+
+Below sounds use LIBRARY 2:
+
+1108D0 - A9 0E 00 = Boyon (CEBF) hopping up and down.
+11107B - A9 1B 00 = Kame (CF3F) ramming into walls.
+1114D1 - A9 3A 00 = Kame (CF3F) swishing through the air.
+111F2D - 34 = Saboten (CFFF) shooting needles.
+
+113C2A - A9 65 00 = Noise for Rio swooping down at Samus (big bulky Brinstar fly things).
+
+114359 - A9 65 00 = Noise for big bulky Norfair fly things swopping down at Samus.
+
+112764 - A9 4D 00 = Low pulsing hum of Samus' ship hovering up and down.
+113F36 - A9 0D 00 = Splash sound of red "Squeept" enemies from Norfair hopping in and out of lava.
+114825 - A9 64 00 = Blue "Holtz" enemies from lower Norfair swooping down at Samus.
+114B6D - A9 0E 00 = Giant green snail things from Maridia poking its mouth... things out at Samus.
+114FD7 - A9 63 00 = ?????
+1153B8 - A9 57 00 = ?????
+11670F - A9 61 00 = Lava dragons in Norfair spitting fireballs at Samus.
+1189EB - A9 5B 00 = Metal skree diving down at Samus.
+118A54 - A9 5C 00 = Metal skree burrowing into the ground.
+11BA7A - A9 56 00 = "BANG" absorbing damage from Samus' beam shots, presumably. Haven't tested.
+11C70E - A9 5B 00 = Skree diving down at Samus.
+11C777 - A9 5C 00 = Skree burrowing into the ground.
+11DC72 - A9 57 00 = ?????
+11EAA7 - A9 50 00 = Metroid sounds while draining Samus.
+1208CA - A9 54 00 = ?????
+120A22 - A9 3B 00 = ?????
+120CFD - A9 74 00 = Crocomire roaring.
+120D09 - A9 25 00 = Crocomire raking his claws into the ground.
+120DA5 - A9 75 00 = Crocomire's bones collapsing after he dies.
+120E91 - A9 3B 00 = Crocomire falling through the blocks at the end of his room.
+120FD5 - A9 76 00 = Crocomire walking backwards.
+1214FD - A9 77 00 = Crocomire's dying roars after falling into lava.
+1218AC - A9 2B 00 = Crocomire's room shaking before he breaks down the wall of spikes.
+121982 - A9 29 00 = Crocomire pushing down the wall of spikes (first sound)
+1219C0 - A9 30 00 = Crocomire pushing down the wall of spikes (second sound).
+121A7E - A9 25 00 = Crocomire's skeleton landing on the ground, right before it collapses.
+12E9A7 - A9 29 00 = Spore Spawn's room shifting colors after he is killed.
+12E6E8 - 2C 2C 00 = Spore Spawn opening and exposing his core.
+12E9A7 - A9 29 00 = Spore Spawn's last noise as he dries up and dies.
+12E9EB - A9 25 00 = Spore Spawn's death explosions.
+1308A9 - A9 42 00 = Big round gray boulders breaking (first sound).
+1308D5 - A9 43 00 = Big round gray boulders breaking (second sound).
+13099B - A9 42 00 = ????? (unused "KZAN"?).
+1309B6 - A9 43 00 = ????? (unused "KZAN"?).
+130C18 - A9 1B 00 = Bloody spike platforms ("KZAN") from Wrecked Ship/Lower Norfair crashing down.
+130DB1 - A9 61 00 = Fire pillars from Lower Norfair ("HIBASHI") shooting upwards.
+131948 - A9 5E 00 = Fire rings from lower Norfair ("PUROMI")
+131B1E - A9 3F 00 = Mini Kraid firing spikes from its belly.
+131BBC - A9 16 00 = Mini Kraid roaring and spitting rocks.
+132ACD - A9 4E 00 = Ceres Ridley flying away before the escape timer starts.
+13364C - A9 76 00 = ?????
+137838 - A9 25 00 = Ceres door exploding during escape sequence when Samus enters elevator room.
+13AF95 - A9 2D 00 = Kraid roaring.
+13B650 - A9 76 00 = Kraid's footsteps.
+13D9DE - A9 24 00 = Phantoon's death explosions (first sound).
+13D9E7 - A9 2B 00 = Phantoon's death explosions (second sound).
+13DA7E - A9 7E 00 = Phantoon's final slow death roar/groan.
+13DDB9 - A9 73 00 = Phantoon's hurt sound when his HP reaches 0 (lolwut).
+13DDDC - A9 73 00 = Phantoon's hurt sound.
+13EA2F - A9 33 00 = Etecoons chirping (first sound).
+13EB8E - A9 32 00 = Etecoons chirping (second sound).
+13EE36 - A9 33 00 = Etecoons chirping (third sound).
+13EE8C - A9 33 00 = Etecoons chirping (fourth sound? Couldn't hear any difference).
+13F6BE - A9 3D 00 = Dachora "pressing down" after running and charging its shinespark.
+13F6E5 - A9 39 00 = Dachora running and gaining speed booster echoes.
+13F7CA - A9 3B 00 = Dachora shinesparking.
+13F892 - A9 3C 00 = Dachora crashing into the ceiling after shinesparking.
+140791 - A9 5E 00 = Mini Draygon's noise. Not the same ones that appear in the boss room.
+141135 - A9 17 00 = Blue "EYE" enemies shining their yellow light on Samus.
+141174 - A9 71 00 = Stops the "EYE" enemy's light sound? Probably shouldn't edit.
+14213E - A9 2F 00 = Yapping maw ("HAND") enemies clamping their jaws together.
+1450B8 - A9 68 00 = Robot enemies in Wrecked Ship walking around.
+145DBC - A9 5E 00 = Walking dragon enemies ("NDRA") jumping out of the ground.
+145F2A - A9 3F 00 = Walking dragon enemies ("NDRA") spitting fireballs at Samus.
+1476DC - A9 4C 00 = All variations of "HACHI" spitting acid at Samus after losing their wings.
+149AF1 - A9 63 00 = Mother Brain shooting a string of fireballs at Samus from her hand.
+149F98 - A9 7F 00 = Mother Brain charging her rainbow beam.
+14B52B - A9 6E 00 = Mother Brain taking damage while sitting in her glass casing.
+14B944 - A9 71 00 = Stops Mother Brain's rainbow charging sound. Probably can be changed safely.
+14BC9E - A9 24 00 = Bomb sounds while Samus is pinned to the wall by Mother Brain's rainbow beam.
+14BE0D - A9 71 00 = ????? Probably related to mother brain or the giant metroid. Unused?
+14C7C4 - A9 72 00 = ????? Probably related to the giant metroid. Unused?
+14C9DA - A9 52 00 = ????? Probably related to the giant metroid. Unused?
+14CB13 - A9 72 00 = ????? Probably related to the giant metroid. Unused?
+14D5E1 - A9 10 00 = Dried Torizo before the giant metroid'a room collapsing into a pile of dust.
+14F2D9 - A9 7D 00 = Giant metroid's "feeling sorry" noise after it drains Samus.
+14F360 - A9 52 00 = Giant metroid's last noises as it flies away after draining Samus.
+14F77F - A9 78 00 = Giant metroid's noise as it drains the sidehopper, Samus and Mother Brain.
+14F999 - A9 52 00 = Giant metroid's noises as it lingers over Samus after draining her.
+154610 - A9 27 00 = Bomb Torizo and Golden Torizo's noise while spitting out round projectiles.
+154618 - A9 4B 00 = Bomb Torizo and Golden Torizo's footsteps.
+15538F - A9 34 00 = Golden Torizo spawning eggs from its belly when it's very low on health.
+155397 - A9 67 00 = Golden Torizo firing ring-shaped projectiles from its eyes down at Samus.
+15539F - A9 48 00 = Golden Torizo catching super missiles in his hand.
+15657F - A9 1C 00 = Chozo statues in Wrecked Ship/Lower Norfair gripping onto Samus.
+156587 - A9 4B 00 = Chozo statue's footsteps while carrying Samus to gravity suit in Wrecked Ship.
+16F414 - A9 25 00 = Mother Brain's head falling to the ground after being killed by hyper beam.
+190898 - A9 66 00 = ????? Space pirate sound, but I couldn't hear any changes.
+196F95 - A9 66 00 = Climbing space pirates jumping from one wall to another.
+199752 - A9 7C 00 = Botwoon spitting his 5 green projectiles at Samus.
+19957B - A9 24 00 = Botwoon's body parts hitting the ground, and blocks breaking (first sound).
+
+-----
+Below sounds JSL to 8090A3 and use library 2
+-----
+10401 - A9 71 00 = Muted sound after Ceres escape music ends when Samus steps onto the elevator.
+10480 - A9 71 00 = ?????
+1051D - A9 71 00 = Muted sound after Zebes escape music ends when Samus flies off on her ship.
+15D49 - A9 71 00 = Muted sound after Samus dies, but before the death animation triggers.
+1626F - A9 71 00 = Muted sound when Samus goes through a door.
+20C2B - B9 00 00 = ?????
+3032D - B9 00 00 = ?????
+13AFA0 - A9 2E 00 = Kraid's dying roars.
+13E9CC - A9 35 00 = Etecoons singing their little tune before they start walljumping.
+13F5B4 - A9 1D 00 = Dachora chirping when Samus gets near it.
+13F66E - A9 71 00 = ????? Looks like it goes to Dachora, but I couldn't hear any difference.
+
+-----
+Below sounds JSL to 8090AD and use library 2
+-----
+20C61 - B9 00 00 = ?????
+30363 - B9 00 00 = ?????
+141627 - A9 1F 00 = "FUNE" and "NAMI" spitting fireballs.
+
+-----
+Below sounds JSL to 8090B7 and use library 2
+-----
+20C46 - B9 00 00 = ?????
+30348 - B9 00 00 = ?????
+11AA6A - B9 00 00 = ????? Looks like it should go to mocktroids, but I couldn't hear a difference.
+11D229 - A9 70 00 = Small Maridian snails when Samus knocks them off of a wall.
+11D3E3 - A9 70 00 = Small Maridian snails when Samus pushes them around by running into them.
+11D497 - A9 70 00 = Small Maridian snails when Samus shoots them with beams or missiles.
+134371 - A9 45 00 = "Time bomb set!" text typing itself on-screen after Ceres Ridley flies away.
+134666 - A9 24 00 = Ridley's death explosions.
+148921 - A9 24 00 = Mother Brain's container exploding and collapsing.
+148BC3 - A9 24 00 = Mother Brain's head hitting the floor after her container collapses.
+148F75 - A9 29 00 = Mother Brain's body emerging from the floor.
+14B24F - A9 10 00 = Mother Brain's dried head crumbling away after she dies.
+14B38B - A9 24 00 = Wall behind Mother Brain bursting open after she dies.
+14DC37 - A9 10 00 = Dry creatures in Tourian crumbling away after Samus touches them.
+
+-----
+Below sounds JSL to 8090C1 and use library 2
+-----
+20C7C - B9 00 00 = ?????
+3037E - B9 00 00 = ?????
+36E8D - A9 09 00 = 'Small explosion' death sound. Shared by multiple enemies!
+36E99 - A9 24 00 = 'Series of explosions' death sound. Shared by multiple enemies!
+36EA5 - A9 0B 00 = 'Killed by screw attack/booster' death sound. Shared by almost all enemies!
+370C2 - A9 01 00 = Sound for small energy pick-ups that enemies drop.
+370D1 - A9 02 00 = Sound for large energy pick-ups that enemies drop.
+370E0 - A9 05 00 = Sound for power bomb pick-ups that enemies drop.
+370EF - A9 03 00 = Sound for missile pick-ups that enemies drop.
+370FE - A9 04 00 = Sound for super missile pick-ups that enemies drop.
+10255A - A9 0B 00 = 'Killed by screw attack/booster' death sound. Shared by almost all enemies!
+
+Below sounds use LIBRARY 3:
+
+
+20C7C - B9 00 00 = ?????
+3037E - B9 00 00 = ?????
+36E8D - A9 09 00 = 'Small explosion' death sound. Shared by multiple enemies!
+36E99 - A9 24 00 = 'Series of explosions' death sound. Shared by multiple enemies!
+36EA5 - A9 0B 00 = 'Killed by screw attack/booster' death sound. Shared by almost all enemies!
+370C2 - A9 01 00 = Sound for small energy pick-ups that enemies drop.
+370D1 - A9 02 00 = Sound for large energy pick-ups that enemies drop.
+370E0 - A9 05 00 = Sound for power bomb pick-ups that enemies drop.
+370EF - A9 03 00 = Sound for missile pick-ups that enemies drop.
+370FE - A9 04 00 = Sound for super missile pick-ups that enemies drop.
+10255A - A9 0B 00 = 'Killed by screw attack/booster' death sound. Shared by almost all enemies!
+
+-----
+Below sounds JSL to 809125 and use library 3
+-----
+10408 - A9 01 00 = Library 3? Stops Samus' health warning after escaping Ceres. Shouldn't edit.
+10487 - A9 01 00 = ????? Library 3?
+10534 - A9 01 00 = ????? Library 3?
+15D50 - A9 01 00 = ????? Library 3?
+20C34 - B9 00 00 = ????? Library 3?
+2530B - A9 2E 00 = Mother Brain's glass container shattering.
+30336 - B9 00 00 = ????? Library 3?
+856A7 - A9 01 00 = ????? Library 3?
+875A1 - A9 25 00 = Library 3. Plays whenever Samus stops speed boosting.
+
+-----
+Below sounds JSL to 80912F and use library 3
+-----
+20C6A - B9 00 00 = ?????
+3036C - B9 00 00 = ?????
+850A3 - A9 0F 00 = Shinespark sound if Samus only presses jump and nothing else.
+8DAD0 - A9 0C 00 = 'Shinespark stored' sound after Samus presses down while glowing blue.
+8FAF3 - A9 03 00 = Samus running with speed booster and gaining blue echoes.
+
+-----
+Below sounds JSL to 809139 and use library 3
+-----
+15C3E - A9 2D 00 = Repeating sound of reserve tanks refilling Samus' energy after it reaches 0.
+20C4F - B9 00 00 = ?????
+30351 - B9 00 00 = ?????
+801F0 - A9 2D 00 = Repeating sound of lava draining Samus' energy.
+80232 - A9 2D 00 = Repeating sound of acid draining Samus' energy.
+1027DD - A9 0A 00 = ????? Frozen enemy sound; probably affects a specific enemy(s). Not metroids.
+1028AB - A9 0A 00 = Frozen enemy sound. Affects most, if not all enemies that can be frozen.
+13437A - A9 0D 00 = "Time bomb set!" text typing itself on-screen after Mother Brain dies.
+14B091 - A9 13 00 = Multiple explosions as Mother Brain dies and her body fades away.
+14C557 - A9 2D 00 = Repeating sound of the giant metroid refilling Samus' energy.
+14CDF4 - A9 13 00 = Multiple explosions as the giant metroid dies and falls off-screen.
+
+-----
+Below sounds JSL to 809143 and use library 3
+-----
+20C85 - B9 00 00 = ?????
+30387 - B9 00 00 = ?????
+
+-----
+Below sounds JSL to 80914D and use library 3
+-----
+8D21 - A9 01 00 = ?????
+9460 - A9 01 00 = ?????
+12954 - A9 2A 00 = Sound of the blinking "L" and "R" buttons on the pause screens.
+12F7A - A9 2D 00 = Repeating sound of Samus manually using reserve tanks on the equipment screen.
+13C0C - A9 23 00 = ?????
+13C15 - A9 26 00 = ?????
+13C1E - A9 27 00 = ?????
+13E27 - A9 01 00 = ?????
+13E3C - A9 2B 00 = 'Shinespark stored' sound that substitutes 8DAD0 when Samus stops moving?
+20C19 - B9 00 00 = ?????
+3031B - B9 00 00 = ?????
+31AA0 - A9 1D 00 = Phantoon spawning rows of eye flames during his vulnerable phase.
+31AD2 - A9 1D 00 = Phantoon's rows of eye flames hitting the floor during his vulnerable phase.
+31D4D - A9 1E 00 = Kraid rising up from the ground; both phases.
+34427 - A9 13 00 = Mother Brain's blue/green rings exploding after she spits them at Samus.
+34548 - A9 13 00 = Mother Brain's mouth bombs exploding after bouncing along the ground.
+34749 - A9 13 00 = Mother Brain's orange fireball string exploding when it hits the wall.
+588AF - A9 0D 00 = Sound of green text typing itself on-screen during the game's intro.
+5A25B - A9 23 00 = Related to intro music and probably other stuff. Shouldn't edit.
+5A263 - A9 26 00 = Related to intro music and probably other stuff. Shouldn't edit.
+5A26B - A9 27 00 = Related to intro music and probably other stuff. Shouldn't edit.
+5BA9F - A9 23 00 = Related to intro music and probably other stuff. Shouldn't edit.
+5BB4A - A9 23 00 = Related to intro music and probably other stuff. Shouldn't edit.
+6C67C - B9 00 00 = ?????
+6E3A4 - A9 2D 00 = Repeating sound of Samus losing health in heated rooms without varia/gravity.
+805A3 - A9 03 00 = Samus gaining speed ala speed booster and getting blue echoes.
+8241B - A9 06 00 = Samus' quiet footsteps anytime she's moving along the ground.
+8533D - A9 10 00 = Slightly shorter bomb explosion sound; possibly used for a boss somewhere.
+86A8F - A9 01 00 = Stops warning beep when Samus' energy raises back up to 32+.
+86A9D - A9 02 00 = Warning beep when Samus' energy drops to 31 or lower.
+87339 - A9 02 00 = Warning beep 'refreshing' after unpausing the game or collecting an item.
+8E6D7 - A9 02 00 = Warning beep again. Probably another refresh under some other conditions.
+8F08C - A9 05 00 = Samus landing after a low jump; 'soft landing.'
+8F09A - A9 04 00 = Samus landing after a higher jump; 'hard landing.'
+8F2E8 - A9 05 00 = Samus kicking off of a wall during a walljump.
+11293A - A9 14 00 = Samus' ship opening (used once, only after touching down on Zebes).
+11297F - A9 15 00 = Samus' ship closing (used once, only after touching down on Zebes).
+112A47 - A9 14 00 = Samus' ship opening (entering ship).
+112A8C - A9 15 00 = Samus' ship closing (entering ship).
+112B58 - A9 14 00 = Samus' ship opening (exiting ship).
+112B9D - A9 15 00 = Samus' ship closing (exiting ship).
+116F60 - A9 0E 00 = All gates sounds, except ones with blue/red/green/yellow switches.
+119555 - A9 0B 00 = Elevators humming while taking Samus up or down.
+1195FE - A9 25 00 = Used to end the elevator hum, but is safe to replace with another sound. ;)
+11A983 - A9 2D 00 = Repeating sound of mocktroids draining Samus.
+11EE75 - A9 2D 00 = Repeating sound of metroids draining Samus.
+11F008 - A9 0A 00 = Metroids getting frozen by ice beam.
+12079E - A9 1C 00 = Crocomire firing round projectiles from his mouth.
+120D45 - A9 22 00 = Crocomire struggling in acid (bubbling sounds).
+129F70 - B9 00 00 = ????? Draygon's death sound?
+12E8A5 - B9 00 00 = ????? Draygon-related?
+133FD7 - A9 24 00 = ?????
+1352C7 - A9 21 00 = Ridley swinging his tail at Samus.
+1376BD - A9 2C 00 = Ceres doors opening.
+137DAD - A9 09 00 = Sound of Zebetites in Mother Brain's room when shot by Samus.
+13B893 - A9 1F 00 = Kraid shooting his belly spike platforms.
+13BC1B - A9 1E 00 = Kraid spitting rocks at Samus (before his whole body emerges).
+13C528 - A9 1E 00 = Kraid sinking into the ground after he's killed (rumbling sounds).
+13CF68 - A9 1D 00 = Phantoon dropping eye flames randomly during the fight.
+13CF83 - A9 28 00 = Phantoon firing his eye flames in an outward circle.
+13D4BA - A9 1D 00 = Phantoon's eye flames appearing at the very beginning of the fight.
+13D8E6 - A9 29 00 = Phantoon firing waves of eye flames after being hit by a super missile.
+143E8C - A9 2D 00 = Repeating sound of hopping "NOMI" enemies draining Samus.
+149B32 - BD 00 00 = ????? Something to do with Mother Brain. Shouldn't edit.
+14CBFF - A9 19 00 = ????? Probably shouldn't edit, based on what sound 19 is.
+
+
+OTHER IN-GAME SOUNDS
+Doc'd by Flamestar666
+
+1C90 - 39 = missile selection click (22 49 90 80)
+96FE - 37 = copy data move downwwards (22 49 90 80)
+9713 - 37 = go back on data copy menu (22 49 90 80)
+9730 - 37 = copy data move upwards (22 49 90 80)
+973B - 37 = copy data select (22 49 90 80)
+9834 - 37 = copy to downwards (22 49 90 80)
+9870 - 37 = copy to back (22 49 90 80)
+987A - 37 = copy to select (22 49 90 80)
+989C - 37 = copy to upwards (22 49 90 80)
+99A5 - 38 = comfirm copy yes (22 49 90 80)
+99CE - 37 = confirm copy no (22 49 90 80)
+99E3 - 37 = confirm copy move cursor (22 49 90 80)
+9B9E - 37 = data clear downwards (22 49 90 80)
+9BA8 - 37 = data clear select (22 49 90 80)
+9BCD - 37 = data clear Upwards (22 49 90 80)
+9BD7 - 37 = data clear select (22 49 90 80)
+9C50 - 38 = data clear confirm cancel (22 49 90 80)
+9C6C - 37 = data clear confirm cancel 2? (22 49 90 80)
+9C83 - 37 = data clear confirm cursor (22 49 90 80)
+9D2F - 37 = data cleared confirmed fade (22 49 90 80)
+A1F8 - 37 = return to title screen (22 49 90 80)
+A1FF - 21 = return to title screen 2nd sound (no JSL)
+A21A - 2A = File select (ABC) (22 49 90 80)
+A2B3 - 37 = cursor moving file select (22 49 90 80)
+A2D2 - 37 = data copy select (22 49 90 80)
+A2EC - 37 = data clear select (22 49 90 80)
+A832 - 38 = loading into map from world map 1 (22 49 90 80)
+A88F - 37 = ????? (22 49 90 80)
+ABA0 - 3B = loading into map from world map 2 (22 49 90 80)
+ADAC - 38 = Starting game from map screen (22 49 90 80)
+ADD9 - 3C = Loading out to world map from map 1 (22 49 90 80)
+AFFF - 3C = loading out to world map from map 2 (22 49 90 80)
+112A8 - 36 = menu movement click (22 49 90 80)
+12565 - 38 = switching between equipment/map screen (22 49 90 80)
+125C3 - 38 = Pressing start when paused (22 49 90 80)
+12CDF - 37 = highlighting reserve tank in manual mode (22 49 90 80)
+12CF8 - 37 = highlighting Mode (in manual) from reserve tank (22 49 90 80)
+12E9B - 37 = changing between manual mode and auto mode (22 49 90 80)
+1344B - 37 = highlight mode while in auto (22 49 90 80)
+13481 - 37 = moving cursor over beams downwards (22 49 90 80)
+134A3 - 37 = moving cursor over beams upwards/moving into beams from boots (22 49 90 80)
+134CF - 37 = moving downwards on suit/misc (22 49 90 80)
+134FD - 37 = moving upwards on suit/misc (22 49 90 80)
+1352B - 37 = moving over boots downwards (22 49 90 80)
+13554 - 37 = moving over boots upwards (22 49 90 80)
+13575 - 38 = select on/off equipment sound (no reserve) (22 49 90 80)
+13E4C - 41 = resume charge sound after unpausing (22 49 90 80)
+16D4D - 37 = option mode cursor upwards (22 49 90 80)
+16D68 - 37 = option mode cursor downwards (22 49 90 80)
+16D8F - 38 = option mode change language (22 49 90 80)
+1702C - 37 = special setting more cursor upwards (22 49 90 80)
+17047 - 37 = special setting mode cursor downwards (22 49 90 80)
+17064 - 38 = special setting mode go back (pressing B) (22 49 90 80)
+17079 - 38 = special setting mode selection (pressing A) (22 49 90 80)
+17161 - 37 = controller config moving cursor up (22 49 90 80)
+17187 - 37 = controller config moving cursor down (22 49 90 80)
+171B6 - 38 = controller config input (all) (22 49 90 80)
+80090 - 0E = water splash (exiting) (22 CB 90 80)
+800E0 - 0D = entering splash (22 CB 90 80)
+80180 - 0F = bubble1 (underwater) (no JSL)
+80185 - 11 = bubble2 (underwater) (22 CB 90 80)
+801F1 - 2D = health draining under lava (22 39 91 80)
+80232 - 2D = damage drain sound under acid (22 39 91 80)
+802BD - 10 = burning sound from acid/lava (22 CB 90 80)
+80453 - 31 = Flip sound after walljumping (22 49 90 80)
+80464 - 3E = Resuming spacejump after walljump (22 49 90 80)
+80478 - 33 = resuming screw attack after walljump (22 49 90 80)
+805A4 - 03 = change sound of speed booster boost (22 4D 91 80)
+8241B - 06 = samus's steps (22 4D 91 80)
+85337 - 35 = shinespark hurt (stopping) (22 49 90 80)
+8533E - 10 = shinespark impact (22 4D 90 80)
+824EF - 2F = Fliping in water (without gravity suit) (22 49 90 80)
+83B41 - 08 = charge beam charging (startup) (22 2B 90 80)
+8414B - 08 = bomb explosion (22 CB 90 80)
+84D83 - 28 = Waveshield startup (22 49 90 80)
+85AF6 - 28 = Waveshield continuation (22 49 90 80)
+85A18 - 29 = Waveshield end (clears sound) (22 49 90 80)
+84E0C - 23 = Iceshield ring (22 49 90 80)
+84F12 - 24 = Iceshield impact (22 49 90 80)
+84F6A - 24 = Iceshield Break (22 49 90 80)
+84E80 - 25 = Spazer Shield startup (22 49 90 80)
+85C21 - 26 = Spazer Shield end (22 49 90 80)
+84F01 - 27 = Plasma Shield (22 49 90 80)
+87457 - 31 = Fliping sound while hurt (22 2B 90 80)
+87460 - 3E = spacejump sound while hurt (22 2B 90 80)
+87469 - 33 = screwattack while hurt (22 2B 90 80)
+87482 - 32 = Walljumping while hurt (22 21 90 80)
+875C9 - 32 = landing a flip (22 21 90 80)
+8F067 - 32 = landing a flip2 (very fast) (22 49 90 80)
+8D591 - 56 = varia get (22 CB 90 80)
+8D669 - 56 = gravity get (22 CB 90 80)
+8D8CE - 35 = Samus hurt (22 49 90 80)
+8EF31 - 09 = xray scope (22 49 90 80)
+8F6CC - 31 = Flipping to the right (22 49 90 80)
+8F6D5 - 3E = Spacejump to the right (22 49 90 80)
+8F72D - 31 = Flipping to the left (22 49 90 80)
+8F736 - 3E = Spacejump to the left (22 49 90 80)
+8F750 - 33 = Screwattack (22 49 90 80)
+86A9E - 02 = low health alarm 1 (does not repeat if not set to 02) (22 4D 91 80)
+875A1 - 25 = impacting into object (running into a wall) (22 25 91 80)
+8F08D - 05 = soft landing (22 4D 91 80)
+8F09B - 04 = hard landing (22 4D 91 80)
+8DAD1 - 0C = shinespark stored (22 2F 91 80)
+8FAF4 - 0F = sphinespark sound (22 2F 91 80)
+980F0 - 0C = beam impact sound (22 CB 90 80)
+980FE - 07 = Missile impact sound (22 CB 90 80)
+DC694 - 05 = Fire grapple (22 3F 90 80)
+DC73C - 06 = Grapple latch (22 49 90 80)
+DC843 - 10 = Grapple Break (no JSL)
+DC8C6 - 07 = Grapple delatch (22 21 90 80)
+DC857 - 07 = ????? (22 21 90 80)
+10255B - 0B = death by screwattack/speedboost (22 C1 90 80)
+1027CC - 3D = Impact on "armored" enemies (22 35 90 80)
+112764 - 4D = Samus' ship hover (22 CB 90 80)
+
+
+LIBRARY 1 SOUNDS
+Doc'd by Kejardon
+
+Known library 1 JSLs:
+$809021
+$80902B
+$809035
+$80903F
+$809049
+
+00 = Nothing
+01 = Power Bomb
+02 = Clear sounds from this library?
+03 = Fire Missile
+04 = Fire Super Missile
+05 = Fire Grapple
+06 = Grappling on a block
+07 = Short grapple sound, not sure when it's used exactly.
+08 = Charge beam
+09 = X-Ray
+0A = Clear sounds from this library?
+0B = Fire beam (Normal)
+0C = Fire beam (Ice)
+0D = Fire beam (Wave)
+0E = Fire beam (Wave/Ice)
+0F = Fire beam (Spazer)
+10 = Fire beam (Spazer/Ice)
+11 = Fire beam (Spazer/Ice/Wave)
+12 = Fire beam (Spazer/Wave)
+13 = Fire beam (Plasma)
+14 = Fire beam (Plasma/Ice)
+15 = Fire beam (Plasma/Wave/Ice)
+16 = Fire beam (Plasma/Wave)
+17 = Fire beam (Charged)
+18 = Fire beam (Charged Ice)
+19 = Fire beam (Charged Wave)
+1A = Fire beam (Charged Wave/Ice)
+1B = Fire beam (Charged Spazer)
+1C = Fire beam (Charged Spazer/Ice)
+1D = Fire beam (Charged Spazer/Wave/Ice)
+1E = Fire beam (Charged Spazer/Wave)
+1F = Fire beam (Charged Plasma)
+20 = Fire beam (Charged Plasma/Ice)
+21 = Fire beam (Charged Plasma/Wave/Ice)
+22 = Fire beam (Charged Plasma/Wave)
+23 = Ice beam shield
+24 = Ice beam shield fires off
+25 = Spazer shield
+26 = Spazer shield fires off
+27 = Plasma shield
+28 = Wave shield
+29 = Nothing?
+2A = Samus helmet noise in the start menu
+2B = Nothing?
+2C = Nothing?
+2D = Nothing?
+2E = Save station saving
+2F = Spin jump sound (full spin sound)
+30 = Resuming normal spin jumping
+31 = Starting normal spin jumping
+32 = Stop spinjump sound?
+33 = Screw attack sound. Ramps up then loops
+34 = Stop screw-attack sound?
+35 = Samus hurt
+36 = Map 'click' when moving/scrolling
+37 = Selection click when moving on equipment screen or pressing select item.
+38 = Sound from when you change between equipment screens, or you toggle an equipped item.
+39 = Same as 37 (quieter)
+3A = Nothing?
+3B = Going from world map to area map when loading saved game
+3C = Going from area map to world map when loading saved game
+3D = Crumble block
+3E = Space jump
+3F = Same as 31
+40 = Mother brain's laser attack?
+41 = Resuming a charged beam, not starting it
+42 = Boss death throes (only with Kraid/Crocomire/Phantoon Boss BGM)
+43+ = Locks up sound and music
+
+
+LIBRARY 2 SOUNDS
+Doc'd by Kejardon
+
+Known library 2 JSLs:
+$8090CB
+$8090A3
+$8090AD
+$8009B7
+$8090C1
+
+00 = Nothing
+01 = Health pickup
+02 = Health pickup (for large?)
+03 = Missile pickup
+04 = Missile pickup (for supers?)
+05 = Missile pickup (for powerbombs?)
+06 = Not sure. Almost sounds like a bomb or a dud shot, but isn't either.
+07 = (Super) Missile explosion.
+08 = Bomb explosion.
+09 = Enemy death sound?
+0A = Block break
+0B = Enemy death sound (from screw attack, I think)
+0C = Enemy death sound? (Insom: Beam dud noise?)
+0D = Loud Water splash
+0E = Soft Water splash
+0F = 'large' Air bubbles
+10 = Scraping sound from dust enemies
+11 = 'small' Air bubbles
+12 = 'one' Air bubble (Tourian?)
+13 = 'two' Air bubbles (Tourian?)
+14 = 'three' Air bubbles (Tourian?)
+15 = nothing?
+16 = Boss screaming (only with Kraid/Crocomire/Phantoon Boss BGM)
+17 = Low pitch X-ray scope (Does NOT stop, ignores new sounds)
+18 = Load game 'hum' (very quiet). Loops infinitely till stopped
+19 = Boss gem shattering and goodies inside flying upward.
+1A = Explosions + smashing Mother Brain's glass case (Would make a good monster scream when paired with boss BGM...)
+1B = A muffled explosion? (Insom: A boulder smashing?)
+1C = Wrecked Ship chozo statue gripping Samus (as morph ball)
+1D = Dachora chirping noise
+1E = Smashing Mother Brain's glass case (Would make a good monster scream when paired with boss BGM...)
+1F = Weird tone then a plasma shot sound? (Probably specific enemy sound)
+20 = Space pirate barking?
+21 = Skree dive bombing / Reo screetch?
+22 = Hurt enemy 2? (Pipe enemies)
+23 = Hurt enemy 3? (Ball enemies)
+24 = Bomb explosion? (Used when escaping Zebes)
+25 = Sounds like a missile shot that immediately hits a wall, but muffled (Used when escaping Zebes)
+26 = Torizo shooting a cresent thing
+27 = Hurt enemy 4 (larger enemies, Torizo)
+28 = Bomb explosion
+29 = Shot block breaking?
+2A = Bomb explosion
+2B = Multiple bomb explosions. Not bomb-spread sound.
+2C = Either a Draygon scream or a Metroid/Mother Brain scream
+2D = Crocomire scream
+2E = Crocomire death throes
+2F = Yapping maw
+30 = Some sort of boss noise
+31 = Jumping starfish noise
+32 = Etecoon noise
+33 = Different etecoon noise
+34 = Puffing noise from those super missile giving cacti (saboten)
+35 = Etecoon humming the 'item get!' theme
+36 = Swooping Norfair enemies
+37 = Plugging into and using a missile/energy/map thing
+38 = Finished using the aforementioned thing
+39 = Speed Booster running
+3A = Single spin jump?
+3B = Ripping noise, not sure where from.
+3C = Missile explosion
+3D = Shinespark charged up
+3F = Missile launcher noise
+40 = A squeaky noise that reminds me of something disengaging
+41 = Nothing
+42 = Breaking noise, maybe from crumbling chozo statue.
+43 = Another explosion, sounds muffled
+44 = Nothing
+45 = A double-clicking sort of sound
+46 = Bubbling used in some rooms where lava rises
+47 = Swooping Norfair enemy?
+48 = Torizo shooting
+49 = Furry wall crawlers from Maridia
+4A = Very odd. Sort of a buzzing sound.
+4B = Stepping sound from the Wrecked Ship Chozo statue.
+4C = Draygon shooting his sticky white stuff ^_^
+4D = Low pitch humming sound you hear in the background of some rooms (ie: the one right before the boss statues.)
+4E = Slightly different power bomb sound
+4F = Splashing sound?
+50 = Metroid screech (only works with Tourian/Maridia BGMs)
+51 = Some sort of echoing noise
+52 = Alternate metroid screech?
+53 = Squishing noise
+54 = Lower pitched skree noise
+55 = Similar to #4A
+56 = 'Suit get!' noise
+57 = Crumble block?
+58 = Another metroid scream
+59 = Ridley's roar
+5A = Metroid feeding noise?
+5B = Skree noise
+5C = Skree meets ground
+5D = Very subtle noise, sounds like rubbing/scraping
+5E = Sounds like a swishing of air made from swinging a large object?
+5F = Norfair bouncy ball enemy?
+60 = Sounds VERY suitable for a mini-crocomire, but needs to be with a Crocomire/Kraid BGM
+61 = Starts off like a power bomb but truncates before getting very high pitched
+62 = Scraping noise?
+63 = Mother Brain explosion shot
+64 = Similar to #61
+65 = Swooping horsefly thing from brinstar
+66 = Space pirate noise
+67 = Space pirate shooting noise
+68 = Sounds like same instrument used to make the Kraid/Crocomire boss anticipation BGM
+69 = Completely unrecognizable
+6A = Puffing noise from those super missile giving cacti things.
+6B = Mother Brain eye beam
+6C = Subtle knocking noise
+6D = Super missile explosion?
+6E = Mother Brain (first form) oww noise
+6F = Mother Brain (second form) scream
+70 = Snail enemy rolling noise
+71 = Nothing?
+72 = Shitroid feeling sorry noise
+73 = Draygon roar/Phantoon scream (Both work flawlessly)
+74 = Crocomire roar/Shitroid dies (Both work flawlessly)
+75 = Collapsing Crocomire bones (works everywhere o.O)
+76 = Super missile explosion?
+77 = Crocomire death throes in lava pit
+78 = Shitroid feeding off of Samus in Tourian and Maridia BGM/Shitroid feeding off of Mother Brain during with battle's BGM.
+79 = Phantoon death throes?
+7A = More Phantoon death throes?
+7B = Even more Phantoon death throes?
+7C = Botwoon barking
+7D = Sad Metroid :(
+7E = Mother Brain roar
+7F = Mother Brain is chargin her laser
+
+
+LIBRARY 3 SOUNDS
+Doc'd by Kejardon
+
+Known library 3 JSLs:
+$809125
+$80912F
+$809139
+$809143
+$80914D
+
+00 = Nothing
+01 = Clear sounds from this library?
+02 = Low Health alarm
+03 = Speedrun
+04 = Land from jump (loud)
+05 = Land from jump (soft)
+06 = Footstep
+07 = Opening door
+08 = Closing door
+09 = Hit a red door with a missile
+0A = Frozen enemy
+0B = Elevator moving
+0C = Super jump charged
+0D = Typewriter? (during intro text)
+0E = Gate moving
+0F = Super jump
+10 = Similar to bomb, but not as long. Unsure (might be for boss explosions)
+11 = Sounds kinda like a block breaking
+12 = Clear sounds from this library?
+13 = Bomb explosion
+14 = Samus's ship door opening
+15 = Samus's ship door closing
+16 = Block break --> explosion (that's what it sounds like at least)
+17 = Space Pirate beam
+18 = Nothing
+19 = 'Busy' sound.
+1A = Nothing
+1B = Same instrument as busy sound, random notes
+1C = Sounds similar to normal beam
+1D = Phantoon's eye flames
+1E = Bomb explosion
+1F = Missile firing, but very very slightly higher pitched; Kraid firing belly spikes
+20 = Nothing
+21 = Single spinjump sound
+22 = 3 bubbly sounds; Crocomire sinking into acid
+23 = Low tone that lasts for about 2 seconds and ends abruptly
+24 = Same as above #23, but with a short fade-out
+25 = Stop speed running sound?
+26 = Low tone that repeats twice and fades out; similar to #23 and #24
+27 = Similar to #23, but slightly buzzier sounding
+28 = Sounds like Saboten/Mini Kraid when they shoot spikes; repeats 6 times quickly
+29 = Similar to #28, but repeats 5 times at a faster rate; Phantoon's super missile reaction
+2A = Quiet sound of the "L" and "R" buttons on the pause screen blinking
+2B = Repeating speed booster sound after Samus has reached max speed
+2C = Ceres doors opening
+2D = Low repeating sound when Samus' energy is being drained or refilled by various things
+2E = Loud tone that plays 3 descending notes; the rhythm makes me think of enemy hurt sounds
+2F = Nothing
+30+ = Locks up sound and music
+<<-- [top of page] -->>
+

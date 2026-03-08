@@ -2,7 +2,12 @@ package com.supermetroid.editor.ui
 
 import java.io.ByteArrayInputStream
 import java.io.File
-import javax.sound.sampled.*
+import javax.sound.sampled.AudioFileFormat
+import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioInputStream
+import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.Clip
+import javax.sound.sampled.LineEvent
 
 class SoundPlayer {
     private var clip: Clip? = null
