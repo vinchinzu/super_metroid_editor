@@ -84,25 +84,25 @@ fun RoomPropertiesPanel(
     val savedFx = roomEdits?.fxChange
     val savedState = roomEdits?.stateDataChange
 
-    // FX edit state
-    var editFxType by remember(room.roomId) { mutableStateOf(savedFx?.fxType ?: defaultFx?.fxType ?: 0) }
-    var editLiquidStart by remember(room.roomId) { mutableStateOf(savedFx?.liquidSurfaceStart ?: defaultFx?.liquidSurfaceStart ?: 0xFFFF) }
-    var editLiquidNew by remember(room.roomId) { mutableStateOf(savedFx?.liquidSurfaceNew ?: defaultFx?.liquidSurfaceNew ?: 0xFFFF) }
-    var editLiquidSpeed by remember(room.roomId) { mutableStateOf(savedFx?.liquidSpeed ?: defaultFx?.liquidSpeed ?: 0) }
-    var editLiquidDelay by remember(room.roomId) { mutableStateOf(savedFx?.liquidDelay ?: defaultFx?.liquidDelay ?: 0) }
-    var editFxBitA by remember(room.roomId) { mutableStateOf(savedFx?.fxBitA ?: defaultFx?.fxBitA ?: 0x02) }
-    var editFxBitB by remember(room.roomId) { mutableStateOf(savedFx?.fxBitB ?: defaultFx?.fxBitB ?: 0x02) }
-    var editPaletteBlend by remember(room.roomId) { mutableStateOf(savedFx?.paletteBlend ?: defaultFx?.paletteBlend ?: 0) }
+    // FX edit state — keyed by (roomId, stateIdx) so fields reset on state switch
+    var editFxType by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.fxType ?: defaultFx?.fxType ?: 0) }
+    var editLiquidStart by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.liquidSurfaceStart ?: defaultFx?.liquidSurfaceStart ?: 0xFFFF) }
+    var editLiquidNew by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.liquidSurfaceNew ?: defaultFx?.liquidSurfaceNew ?: 0xFFFF) }
+    var editLiquidSpeed by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.liquidSpeed ?: defaultFx?.liquidSpeed ?: 0) }
+    var editLiquidDelay by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.liquidDelay ?: defaultFx?.liquidDelay ?: 0) }
+    var editFxBitA by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.fxBitA ?: defaultFx?.fxBitA ?: 0x02) }
+    var editFxBitB by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.fxBitB ?: defaultFx?.fxBitB ?: 0x02) }
+    var editPaletteBlend by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedFx?.paletteBlend ?: defaultFx?.paletteBlend ?: 0) }
 
-    // State data edit state
+    // State data edit state — keyed by (roomId, stateIdx) so fields reset on state switch
     val origTileset = stateData["tileset"] ?: room.tileset
     val origMusicData = stateData["musicData"] ?: room.musicData
     val origMusicTrack = stateData["musicTrack"] ?: room.musicTrack
     val origBgScrolling = stateData["bgScrolling"] ?: room.bgScrolling
-    var editTileset by remember(room.roomId) { mutableStateOf(savedState?.tileset ?: origTileset) }
-    var editMusicData by remember(room.roomId) { mutableStateOf(savedState?.musicData ?: origMusicData) }
-    var editMusicTrack by remember(room.roomId) { mutableStateOf(savedState?.musicTrack ?: origMusicTrack) }
-    var editBgScrolling by remember(room.roomId) { mutableStateOf(savedState?.bgScrolling ?: origBgScrolling) }
+    var editTileset by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedState?.tileset ?: origTileset) }
+    var editMusicData by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedState?.musicData ?: origMusicData) }
+    var editMusicTrack by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedState?.musicTrack ?: origMusicTrack) }
+    var editBgScrolling by remember(room.roomId, selectedStateIdx) { mutableStateOf(savedState?.bgScrolling ?: origBgScrolling) }
 
     fun syncFxToState() {
         val change = FxChange(

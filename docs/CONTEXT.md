@@ -44,21 +44,27 @@ Key fields for the sprite editor:
 | +$3C | 2 | Resistances ptr | Bank $B4 |
 | +$3E | 2 | Name ptr | Bank $B4 |
 
-### Palette formula
-The palette block starts at `$(aiBank):(palPtr)`. Some enemies store multiple 32-byte palette
-rows (row 0 = base/shared colors, row 1 = sprite colors). Others have only a single row.
-
-**Auto-detection heuristic**: check if data at `palPtr + 0x20` is valid BGR555 (all 16 words
-<= 0x7FFF). If so, use row 1 (+0x20). Otherwise, use row 0 (palPtr directly). This correctly
-handles both multi-row enemies (Zoomer, Skree) and single-row enemies (Zeela, Sidehopper, Cacatac).
+### Palette loading
+The game's `ProcessEnemyTilesets` ($A0:8D64) loads exactly 32 bytes (one 16-color palette row)
+from `$(bank):$(palPtr)` — always row 0, directly at the pointer address:
+```c
+memcpy(&target_palettes[(LOBYTE(ET->vram_dst) + 8) * 16],
+       RomPtrWithBank(ED->bank, ED->palette_ptr), 32);
+```
+**Do NOT try to auto-detect row 0 vs row 1** — the game always uses row 0.
+The `vram_dst` low byte + 8 selects the CGRAM destination row (8-15 = OBJ palettes).
 
 See `EnemySpriteGraphics.readEnemyPalette()` for implementation.
 
 ### Tile data loading
+**Bit 15 of `tileDataSize` is a flag**, not part of the size. The game masks it off:
+`actual_size = tile_data_size & 0x7FFF`. When bit 15 is set, the VRAM offset calculation
+changes (`(vram_dst & 0x3000) >> 3` instead of sequential), but the tile count is the same.
+
 `GRAPHADR = $(bank at +$38):(offset at +$36-37)` points to an LZ5-compressed block.
-The game decompresses the full block but only loads the first `tileDataSize` bytes for this species.
+The game decompresses the full block but only loads the first `tileDataSize & 0x7FFF` bytes.
 Multiple enemies can share the same GRAPHADR block with different tileDataSizes.
-Bosses (Phantoon, etc.) may use separate DMA-based tile loading instead of GRAPHADR.
+Bosses (Phantoon, etc.) use separate DMA-based tile loading instead of GRAPHADR.
 
 ## Room Scroll System
 
@@ -214,6 +220,12 @@ The init function at `$(aiBank):$(initAI)` sets up the instruction list pointer 
 - `LDA abs,y; STA $0F92,x` — direction table lookup (first entry used)
 - `TYA; STA $0F92,x` — value from Y register
 - JSR following — scans subroutine calls for the patterns above
+- **Cross-function trace** — when a JSR target loads from an enemy instance variable
+  (`BF addr,x` or `BD addr,x`) then stores to `$0F92,x`, the scanner traces back to
+  the caller to find where that variable was set (via `STA long,x` / `STA abs,x`),
+  then resolves the source value. This handles enemies like Sidehopper whose init
+  stores the instruction list to $7E:7800,x via a table lookup, then calls a helper
+  that copies it to $0F92,x.
 
 The instruction list uses 4-byte entries `[word0, word1]`. Two formats exist:
 - **Standard**: word0 < 0x8000 → `[timer, spritemap_ptr]`
@@ -224,10 +236,15 @@ Tile numbers in spritemaps include the SNES name table select bit (bit 8). For r
 `local_tile_index = tile_number & 0xFF` maps into the decompressed tile data.
 16x16 sprites use a 2x2 grid: tiles `[N, N+1, N+16, N+17]` in the 16-tile-wide VRAM layout.
 
+### Kraid "Body (full height)" view
+The $A7:A0C8 tilemap references tiles loaded dynamically during the Kraid fight as he rises.
+These tiles are not present in the static room tileset or the Kraid tile block at $B9:FA38.
+Other body views (initial, rising 1, rising 2) render accurately from static data.
+
 ### Current coverage
-Working: Zoomer, Zeela, Skree, Cacatac (auto-detected via init tracing).
-Not yet: Sidehopper (nested JSR with computed values), Waver (different AI structure).
+Working: Zoomer, Zeela, Sidehopper, Skree, Cacatac (auto-detected via init tracing).
 Phantoon uses BG2 tilemaps (PhantoonSpritemap.kt), not OAM spritemaps.
+Kraid uses BG2 tilemaps + room tileset injection (KraidSpritemap.kt).
 
 ## Enemy Sprite Tests
 
@@ -238,7 +255,10 @@ Phantoon uses BG2 tilemaps (PhantoonSpritemap.kt), not OAM spritemaps.
   4-entry GFX hardware limit enforcement, B4 free space terminator guard, vanilla species skip,
   multi-room relocation overlap prevention.
 - `EnemySpritemapTest.kt` — OAM spritemap parsing, instruction list tracing, assembled sprite
-  rendering (Zoomer, Zeela, Skree, Cacatac), animation frame extraction, OAM entry validation.
+  rendering (Zoomer, Zeela, Sidehopper, Skree, Cacatac), animation frame extraction, OAM entry validation.
+- `EnemyTileScanTest.kt` — GRAPHADR decompression, tileDataSize 0x7FFF mask, palette row 0 verification
+  against game's ProcessEnemyTilesets, spritemap assembly for all editor enemies (including Sidehopper
+  cross-function trace), fill rate and dimension validation.
 - `PhantoonSpritemapRoundtripTest.kt` — Phantoon-specific: body render pixel-perfect match against
   reference PNG, edit roundtrip (paint → applyEdits → re-render), pixel-to-tile mapping.
 

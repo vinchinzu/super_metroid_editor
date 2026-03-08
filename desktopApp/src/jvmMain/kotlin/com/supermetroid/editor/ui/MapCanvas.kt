@@ -1582,6 +1582,10 @@ fun MapCanvas(
                                                                         destDropExpanded = false
                                                                         destRoomSearch = ""
                                                                         if (rid != currentDoor.destRoomPtr) {
+                                                                            val derivedCap = romParser?.deriveDoorCapPosition(
+                                                                                rid, currentDoor.direction,
+                                                                                currentDoor.screenX, currentDoor.screenY
+                                                                            )
                                                                             val match = romParser?.findVanillaDoorMatch(
                                                                                 rid, currentDoor.direction,
                                                                                 currentDoor.screenX, currentDoor.screenY
@@ -1590,7 +1594,7 @@ fun MapCanvas(
                                                                                 currentDoor.copy(
                                                                                     destRoomPtr = rid,
                                                                                     entryCode = match?.entryCode ?: 0,
-                                                                                    doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                                                    doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
                                                                                 ))
                                                                         }
                                                                     },
@@ -1634,7 +1638,14 @@ fun MapCanvas(
                                                                         dirDropExpanded = false
                                                                         val newDir = di + (if (isBubble) 4 else 0)
                                                                         val newBitflag = (newDir shl 8) or (currentDoor.bitflag and 0xFF)
-                                                                        editorState.updateDoor(propsBts, currentDoor.copy(bitflag = newBitflag))
+                                                                        val derivedCap = romParser?.deriveDoorCapPosition(
+                                                                            currentDoor.destRoomPtr, newDir,
+                                                                            currentDoor.screenX, currentDoor.screenY
+                                                                        )
+                                                                        editorState.updateDoor(propsBts, currentDoor.copy(
+                                                                            bitflag = newBitflag,
+                                                                            doorCapCode = derivedCap ?: currentDoor.doorCapCode
+                                                                        ))
                                                                     },
                                                                     modifier = Modifier.height(26.dp)
                                                                 )
@@ -1646,24 +1657,28 @@ fun MapCanvas(
 
                                                 // Screen X (0x00–0xFF)
                                                 ByteDropdown("Screen X:", currentDoor.screenX) { v ->
+                                                    val derivedCap = romParser?.deriveDoorCapPosition(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
                                                     val match = romParser?.findVanillaDoorMatch(
                                                         currentDoor.destRoomPtr, currentDoor.direction, v, currentDoor.screenY)
                                                     editorState.updateDoor(propsBts, currentDoor.copy(
                                                         screenX = v,
                                                         entryCode = match?.entryCode ?: currentDoor.entryCode,
-                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                        doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
                                                     ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
                                                 // Screen Y (0x00–0xFF)
                                                 ByteDropdown("Screen Y:", currentDoor.screenY) { v ->
+                                                    val derivedCap = romParser?.deriveDoorCapPosition(
+                                                        currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
                                                     val match = romParser?.findVanillaDoorMatch(
                                                         currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, v)
                                                     editorState.updateDoor(propsBts, currentDoor.copy(
                                                         screenY = v,
                                                         entryCode = match?.entryCode ?: currentDoor.entryCode,
-                                                        doorCapCode = match?.doorCapCode ?: currentDoor.doorCapCode
+                                                        doorCapCode = derivedCap ?: match?.doorCapCode ?: currentDoor.doorCapCode
                                                     ))
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
@@ -1714,22 +1729,56 @@ fun MapCanvas(
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                                // Door cap position / Entry ASM pointers (advanced)
+                                                // Door cap position with auto-derive
+                                                val autoCap = remember(currentDoor.destRoomPtr, currentDoor.direction, currentDoor.screenX, currentDoor.screenY) {
+                                                    romParser?.deriveDoorCapPosition(
+                                                        currentDoor.destRoomPtr, currentDoor.direction,
+                                                        currentDoor.screenX, currentDoor.screenY
+                                                    )
+                                                }
                                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                                     Text("Door Cap:", fontSize = 9.sp, color = labelColor, modifier = Modifier.width(72.dp))
-                                                    var scrollText by remember(currentDoor) {
+                                                    var capText by remember(currentDoor) {
                                                         mutableStateOf("0x${currentDoor.doorCapCode.toString(16).uppercase().padStart(4, '0')}")
                                                     }
                                                     AppTextInput(
-                                                        value = scrollText,
+                                                        value = capText,
                                                         onValueChange = { v ->
-                                                            scrollText = v
+                                                            capText = v
                                                             v.removePrefix("0x").removePrefix("0X").toIntOrNull(16)?.let {
                                                                 editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = it))
                                                             }
                                                         },
                                                         modifier = Modifier.weight(1f),
                                                         fontSize = 10.sp, monospace = true
+                                                    )
+                                                    if (autoCap != null) {
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Surface(
+                                                            modifier = Modifier.height(24.dp)
+                                                                .clickable {
+                                                                    editorState.updateDoor(propsBts, currentDoor.copy(doorCapCode = autoCap))
+                                                                },
+                                                            shape = MaterialTheme.shapes.small,
+                                                            color = if (currentDoor.doorCapCode == autoCap) MaterialTheme.colorScheme.primaryContainer
+                                                                    else MaterialTheme.colorScheme.tertiaryContainer
+                                                        ) {
+                                                            Text(
+                                                                "Auto",
+                                                                fontSize = 8.sp,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                if (autoCap != null && currentDoor.doorCapCode != autoCap) {
+                                                    val capX = autoCap and 0xFF
+                                                    val capY = (autoCap shr 8) and 0xFF
+                                                    Text(
+                                                        "Suggested: 0x${autoCap.toString(16).uppercase().padStart(4, '0')} ($capX, $capY)",
+                                                        fontSize = 8.sp,
+                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                        modifier = Modifier.padding(start = 72.dp)
                                                     )
                                                 }
                                                 Spacer(modifier = Modifier.height(2.dp))

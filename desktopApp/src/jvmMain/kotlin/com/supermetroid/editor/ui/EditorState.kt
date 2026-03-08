@@ -2459,6 +2459,17 @@ class EditorState {
                 code.add(0x08) // PHP
                 code.addAll(listOf(0xC2, 0x20)) // REP #$20
 
+                // Skip flag-setting in Mother Brain's room ($8F:DD58).
+                // MB's AI uses event flags at $D820-$D821 for its multi-phase
+                // state machine (MB1→MB2→Baby Metroid→escape). Force-ORing
+                // boss/Tourian event bits every frame prevents these transitions.
+                // Flags are already in WRAM from prior rooms, so skipping here is safe.
+                code.addAll(listOf(0xAD, 0x9B, 0x07))         // LDA $079B (room_ptr)
+                code.addAll(listOf(0xC9, 0x58, 0xDD))         // CMP #$DD58
+                // BEQ to the PLP;RTL at the end — offset will be patched below
+                val beqPos = code.size
+                code.addAll(listOf(0xF0, 0x00))                // BEQ .done (placeholder)
+
                 // Boss flags + associated event flags (long addressing for WRAM from bank $DF)
                 if (enabledBosses.isNotEmpty()) {
                     val byAddr = mutableMapOf<Int, Int>()
@@ -2500,6 +2511,13 @@ class EditorState {
 
                 code.add(0x28) // PLP
                 code.add(0x6B) // RTL
+
+                // Patch the BEQ offset to jump to PLP (skip the flag-setting body)
+                val plpPos = code.size - 2  // position of PLP
+                val branchOffset = plpPos - (beqPos + 2)  // +2 for the BEQ instruction size
+                if (branchOffset in 0..127) {
+                    code[beqPos + 1] = branchOffset
+                }
 
                 // Write payload at PC $2FF040
                 for ((i, b) in code.withIndex()) {
@@ -2776,7 +2794,21 @@ class EditorState {
                     val orientation = (dc.bitflag shr 8) and 0xFF
                     val dirName = arrayOf("Right","Left","Down","Up")[orientation and 3]
                     val capStr = if (orientation and 0x04 != 0) " +cap" else ""
-                    println("Room 0x$roomKey door $doorIndex: orient=$orientation($dirName$capStr) cap=(${dc.doorCapCode and 0xFF},${(dc.doorCapCode shr 8) and 0xFF}) entry=0x${dc.entryCode.toString(16)}")
+                    val capX = dc.doorCapCode and 0xFF
+                    val capY = (dc.doorCapCode shr 8) and 0xFF
+                    println("Room 0x$roomKey door $doorIndex: orient=$orientation($dirName$capStr) cap=($capX,$capY) entry=0x${dc.entryCode.toString(16)}")
+
+                    val destRoom = romParser.readRoomHeader(dc.destRoomPtr)
+                    if (destRoom != null) {
+                        val maxX = destRoom.width * 16
+                        val maxY = destRoom.height * 16
+                        if (capX >= maxX || capY >= maxY) {
+                            println("WARN: Room 0x$roomKey door $doorIndex cap position ($capX,$capY) " +
+                                "is out of bounds for destination room 0x${dc.destRoomPtr.toString(16)} " +
+                                "(${destRoom.width}x${destRoom.height} screens = ${maxX}x${maxY} blocks). " +
+                                "This will spawn a corrupt closing door PLM!")
+                        }
+                    }
 
                     romData[entryPc] = (dc.destRoomPtr and 0xFF).toByte()
                     romData[entryPc + 1] = ((dc.destRoomPtr shr 8) and 0xFF).toByte()
@@ -2854,16 +2886,18 @@ class EditorState {
                     romData[offset + 1] = ((value shr 8) and 0xFF).toByte()
                 }
 
+                val originalSpeciesIds = originalEnemies.map { it.id }.toSet()
                 var off = writePc
                 for (e in modified) {
                     writeU16(off, e.id)
                     writeU16(off + 2, e.x)
                     writeU16(off + 4, e.y)
                     writeU16(off + 6, e.initParam)
-                    // Preserve vanilla enemies' exact properties; ensure bit 0x2000
-                    // (spritemap_pointer init) is set for user-added/updated enemies.
-                    // Some vanilla enemies (bosses) intentionally omit 0x2000.
-                    val props = if (e in originalSet) e.properties else (e.properties or 0x2000)
+                    // Only force 0x2000 (spritemap init) for truly NEW species not
+                    // present in the vanilla population. If the user modified an
+                    // existing enemy's properties, respect their exact value.
+                    val props = if (e in originalSet || e.id in originalSpeciesIds) e.properties
+                                else (e.properties or 0x2000)
                     writeU16(off + 8, props)
                     writeU16(off + 10, e.extra1)
                     writeU16(off + 12, e.extra2)

@@ -408,6 +408,21 @@ private fun KraidComponentDetail(
             }
         }
 
+        if (comp is KraidComponent.Body && comp.def.name == "Body (full height)") {
+            Surface(
+                color = Color(0xFF2A2A1A),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Some tiles in this view are loaded dynamically during the " +
+                    "fight as Kraid rises. Tiles not present in the static tileset " +
+                    "may render incorrectly. Other body views are fully accurate.",
+                    fontSize = 9.sp, color = Color(0xFFCCCC88),
+                    lineHeight = 12.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+        }
+
         Surface(
             color = Color(0xFF1A2A1A),
             shape = RoundedCornerShape(6.dp),

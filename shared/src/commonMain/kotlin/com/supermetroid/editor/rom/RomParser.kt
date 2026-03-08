@@ -553,7 +553,7 @@ class RomParser(internal val romData: ByteArray) {
                     }
                     return results
                 }
-                0xE5EB, 0xE5FF -> {
+                0xE5EB -> {
                     if (pos + 5 < romData.size) {
                         val arg = readUInt16At(pos + 2)
                         val statePtr = readUInt16At(pos + 4)
@@ -579,7 +579,7 @@ class RomParser(internal val romData: ByteArray) {
                     }
                     pos += 5
                 }
-                0xE640, 0xE652, 0xE669, 0xE678 -> {
+                0xE5FF, 0xE640, 0xE652, 0xE669, 0xE678 -> {
                     if (pos + 3 < romData.size) {
                         val statePtr = readUInt16At(pos + 2)
                         val statePc = snesToPc(0x8F0000 or statePtr)
@@ -943,6 +943,83 @@ class RomParser(internal val romData: ByteArray) {
         if (offset + 1 >= levelData.size) return null
         val word = (levelData[offset].toInt() and 0xFF) or ((levelData[offset + 1].toInt() and 0xFF) shl 8)
         return (word shr 12) and 0x0F
+    }
+
+    /**
+     * Return the BTS byte at (bx, by) in decompressed level data.
+     * BTS data starts immediately after the layer1 tile words.
+     */
+    fun btsAt(levelData: ByteArray, blocksWide: Int, blocksTall: Int, bx: Int, by: Int): Int? {
+        if (levelData.size < 2 || bx < 0 || bx >= blocksWide || by < 0 || by >= blocksTall) return null
+        val layer1Size = (levelData[0].toInt() and 0xFF) or ((levelData[1].toInt() and 0xFF) shl 8)
+        val btsStart = 2 + layer1Size
+        val idx = by * blocksWide + bx
+        val offset = btsStart + idx
+        if (offset >= levelData.size) return null
+        return levelData[offset].toInt() and 0xFF
+    }
+
+    /**
+     * Auto-derive the closing door cap position for a door entering [destRoomId]
+     * from direction [direction] (0=Right,1=Left,2=Down,3=Up) at entry screen
+     * ([screenX],[screenY]).
+     *
+     * Scans the destination room's level data for type-9 (door) blocks on the
+     * entry edge, then picks the topmost/leftmost block on the matching screen.
+     * Returns (capY shl 8) or capX as a doorCapCode, or null if no door blocks found.
+     */
+    fun deriveDoorCapPosition(destRoomId: Int, direction: Int, screenX: Int, screenY: Int): Int? {
+        val room = readRoomHeader(destRoomId) ?: return null
+        if (room.levelDataPtr == 0) return null
+        val levelData = try { decompressLZ2(room.levelDataPtr) } catch (_: Exception) { return null }
+
+        val blocksWide = room.width * 16
+        val blocksTall = room.height * 16
+        val dir = direction and 0x03
+
+        data class DoorBlock(val bx: Int, val by: Int)
+        val doorBlocks = mutableListOf<DoorBlock>()
+
+        when (dir) {
+            0 -> { // Right: entering from left edge (x=0)
+                val screenStartY = screenY * 16
+                val screenEndY = screenStartY + 16
+                for (by in screenStartY until minOf(screenEndY, blocksTall)) {
+                    if (blockTypeAt(levelData, blocksWide, blocksTall, 0, by) == 0x9)
+                        doorBlocks.add(DoorBlock(0, by))
+                }
+            }
+            1 -> { // Left: entering from right edge (x=blocksWide-1)
+                val edgeX = blocksWide - 1
+                val screenStartY = screenY * 16
+                val screenEndY = screenStartY + 16
+                for (by in screenStartY until minOf(screenEndY, blocksTall)) {
+                    if (blockTypeAt(levelData, blocksWide, blocksTall, edgeX, by) == 0x9)
+                        doorBlocks.add(DoorBlock(edgeX, by))
+                }
+            }
+            2 -> { // Down: entering from top edge (y=0)
+                val screenStartX = screenX * 16
+                val screenEndX = screenStartX + 16
+                for (bx in screenStartX until minOf(screenEndX, blocksWide)) {
+                    if (blockTypeAt(levelData, blocksWide, blocksTall, bx, 0) == 0x9)
+                        doorBlocks.add(DoorBlock(bx, 0))
+                }
+            }
+            3 -> { // Up: entering from bottom edge (y=blocksTall-1)
+                val edgeY = blocksTall - 1
+                val screenStartX = screenX * 16
+                val screenEndX = screenStartX + 16
+                for (bx in screenStartX until minOf(screenEndX, blocksWide)) {
+                    if (blockTypeAt(levelData, blocksWide, blocksTall, bx, edgeY) == 0x9)
+                        doorBlocks.add(DoorBlock(bx, edgeY))
+                }
+            }
+        }
+
+        if (doorBlocks.isEmpty()) return null
+        val best = doorBlocks.first()
+        return (best.by shl 8) or best.bx
     }
 
     /**

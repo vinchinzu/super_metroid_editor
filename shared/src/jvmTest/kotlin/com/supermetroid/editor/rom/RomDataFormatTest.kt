@@ -144,6 +144,42 @@ class RomDataFormatTest {
         }
 
         @Test
+        fun `Mother Brain room has 3 states with E5FF as 4-byte condition`() {
+            val parser = loadTestRom() ?: return
+            val offsets = parser.findAllStateDataOffsets(0xDD58)
+            assertEquals(3, offsets.size,
+                "MB room should have 3 states (E5FF boss dead, E612 event, E5E6 default)")
+
+            val states = parser.parseRoomStates(0xDD58)
+            assertEquals(3, states.size,
+                "parseRoomStates should also find 3 states for MB room")
+
+            assertEquals(0xE5FF, states[0].conditionCode, "First state should be E5FF")
+            assertEquals(0xE612, states[1].conditionCode, "Second state should be E612")
+            assertEquals(0xE5E6, states[2].conditionCode, "Third state should be E5E6 (default)")
+
+            for (state in states) {
+                val data = parser.readStateData(state.stateDataPcOffset)
+                val tileset = data["tileset"] ?: -1
+                assertEquals(14, tileset,
+                    "All MB states should use tileset 14, got $tileset for ${state.conditionName}")
+            }
+        }
+
+        @Test
+        fun `findAllStateDataOffsets and parseRoomStates agree on state count for all tested rooms`() {
+            val parser = loadTestRom() ?: return
+            val testRooms = listOf(0x91F8, 0x92FD, 0x9804, 0xDD58, 0x93D5)
+            for (roomId in testRooms) {
+                val offsets = parser.findAllStateDataOffsets(roomId)
+                val states = parser.parseRoomStates(roomId)
+                assertEquals(offsets.size, states.size,
+                    "Room 0x${roomId.toString(16)}: findAllStateDataOffsets (${offsets.size}) " +
+                    "and parseRoomStates (${states.size}) disagree on state count")
+            }
+        }
+
+        @Test
         fun `all states for a room have the same level data size`() {
             val parser = loadTestRom() ?: return
             val offsets = parser.findAllStateDataOffsets(0x91F8)

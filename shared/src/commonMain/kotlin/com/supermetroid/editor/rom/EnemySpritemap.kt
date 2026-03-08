@@ -260,15 +260,16 @@ class EnemySpritemap(private val romParser: RomParser) {
 
     /**
      * Scan the init function for `STA $0F92,x` and trace back to find the
-     * instruction list pointer value. Also follows JSR calls within the AI bank.
+     * instruction list pointer value. Also follows JSR calls within the AI bank,
+     * including cross-function tracing for indirect stores (LDA abs,x pattern).
      */
     private fun findInstructionListPointer(rom: ByteArray, initPc: Int, aiBank: Int): Int? {
         // First try the main init function
         val result = scanForInstrListPtr(rom, initPc, aiBank)
         if (result != null) return result
 
-        // If not found, follow JSR calls in the first 60 bytes
-        val jsrLimit = minOf(60, rom.size - initPc - 2)
+        // If not found, follow JSR calls in the first 80 bytes
+        val jsrLimit = minOf(80, rom.size - initPc - 2)
         for (i in 0 until jsrLimit) {
             val pc = initPc + i
             if (rom[pc].toInt() and 0xFF == 0x20) { // JSR abs
@@ -277,10 +278,115 @@ class EnemySpritemap(private val romParser: RomParser) {
                 if (jsrPc >= 0 && jsrPc + 10 < rom.size) {
                     val jsrResult = scanForInstrListPtr(rom, jsrPc, aiBank)
                     if (jsrResult != null) return jsrResult
+
+                    // Cross-function trace: the JSR target may load from an
+                    // enemy instance variable (LDA abs,x; STA $0F92,x).
+                    // Trace back to the caller to find where that var was set.
+                    val varOffset = scanForIndirectVar(rom, jsrPc)
+                    if (varOffset != null) {
+                        val crossRef = traceVarSetInCaller(rom, initPc, aiBank, varOffset)
+                        if (crossRef != null) return crossRef
+                    }
                 }
             }
         }
 
+        return null
+    }
+
+    private data class IndirectVarRef(val address: Int, val isLong: Boolean)
+
+    /**
+     * In a subroutine, find a load-then-store pattern to $0F92,x and return
+     * the source variable address. Handles both absolute (BD) and long (BF)
+     * addressing modes — bank $7E enemy vars use long addressing.
+     */
+    private fun scanForIndirectVar(rom: ByteArray, startPc: Int): IndirectVarRef? {
+        val scanLimit = minOf(60, rom.size - startPc - 7)
+        for (i in 0 until scanLimit) {
+            val pc = startPc + i
+            if (rom[pc].toInt() and 0xFF != 0x9D) continue
+            if (rom[pc + 1].toInt() and 0xFF != 0x92) continue
+            if (rom[pc + 2].toInt() and 0xFF != 0x0F) continue
+
+            // BF xx xx xx = LDA long,x (4-byte instruction, bank $7E enemy vars)
+            for (back in 4..8) {
+                if (i >= back && rom[pc - back].toInt() and 0xFF == 0xBF) {
+                    val addr = readU16(rom, pc - back + 1) or
+                        ((rom[pc - back + 3].toInt() and 0xFF) shl 16)
+                    return IndirectVarRef(addr, isLong = true)
+                }
+            }
+            // BD xx xx = LDA abs,x (3-byte instruction)
+            for (back in 3..6) {
+                if (i >= back && rom[pc - back].toInt() and 0xFF == 0xBD) {
+                    return IndirectVarRef(readU16(rom, pc - back + 1), isLong = false)
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * In the caller (init function), find a store to the same variable
+     * and trace back to find the source value. Handles both STA abs,x (9D)
+     * and STA long,x (9F) addressing modes.
+     */
+    private fun traceVarSetInCaller(rom: ByteArray, callerPc: Int, aiBank: Int, varRef: IndirectVarRef): Int? {
+        val scanLimit = minOf(160, rom.size - callerPc - 7)
+
+        for (i in 0 until scanLimit) {
+            val pc = callerPc + i
+            if (varRef.isLong) {
+                if (rom[pc].toInt() and 0xFF != 0x9F) continue
+                if (pc + 3 >= rom.size) continue
+                val addr = readU16(rom, pc + 1) or
+                    ((rom[pc + 3].toInt() and 0xFF) shl 16)
+                if (addr != varRef.address) continue
+            } else {
+                if (rom[pc].toInt() and 0xFF != 0x9D) continue
+                val addr = readU16(rom, pc + 1)
+                if (addr != varRef.address) continue
+            }
+
+            val result = traceValueSource(rom, pc, i, aiBank)
+            if (result != null) return result
+        }
+        return null
+    }
+
+    /**
+     * Common value-source tracing: given a STA instruction at [staPc],
+     * search the preceding bytes for an LDA pattern that reveals the value.
+     */
+    private fun traceValueSource(rom: ByteArray, staPc: Int, offsetFromStart: Int, aiBank: Int): Int? {
+        for (back in 3..10) {
+            if (offsetFromStart < back) continue
+            val src = staPc - back
+            val op = rom[src].toInt() and 0xFF
+            when (op) {
+                0xA9 -> return readU16(rom, src + 1)          // LDA #$xxxx
+                0xB9 -> {                                      // LDA $xxxx,y (table)
+                    val tableAddr = readU16(rom, src + 1)
+                    val tablePc = romParser.snesToPc((aiBank shl 16) or tableAddr)
+                    if (tablePc >= 0 && tablePc + 1 < rom.size)
+                        return readU16(rom, tablePc)
+                }
+                0xA0 -> {                                      // LDY #$xxxx then TYA
+                    val possibleTya = rom.getOrNull(staPc - 1)?.toInt()?.and(0xFF)
+                    if (possibleTya == 0x98 || back == 3)
+                        return readU16(rom, src + 1)
+                }
+            }
+        }
+        // Also check TYA (98) immediately before the STA, with LDY #imm earlier
+        if (offsetFromStart >= 1 && rom[staPc - 1].toInt() and 0xFF == 0x98) {
+            for (j in 2..30) {
+                if (offsetFromStart >= j && rom[staPc - j].toInt() and 0xFF == 0xA0) {
+                    return readU16(rom, staPc - j + 1)
+                }
+            }
+        }
         return null
     }
 
@@ -295,29 +401,8 @@ class EnemySpritemap(private val romParser: RomParser) {
             if (rom[pc + 2].toInt() and 0xFF != 0x0F) continue
 
             // Found STA $0F92,x. Trace back for the value source.
-
-            // Pattern 1: LDA #$xxxx (A9 xx xx) at i-3
-            if (i >= 3 && rom[pc - 3].toInt() and 0xFF == 0xA9) {
-                return readU16(rom, pc - 2)
-            }
-
-            // Pattern 2: LDA $xxxx,y (B9 xx xx) at i-3 — table lookup, read first entry
-            if (i >= 3 && rom[pc - 3].toInt() and 0xFF == 0xB9) {
-                val tableAddr = readU16(rom, pc - 2)
-                val tablePc = romParser.snesToPc((aiBank shl 16) or tableAddr)
-                if (tablePc >= 0 && tablePc + 1 < rom.size) {
-                    return readU16(rom, tablePc)
-                }
-            }
-
-            // Pattern 3: TYA (98) at i-1, preceded by LDY #$xxxx (A0 xx xx) nearby
-            if (i >= 1 && rom[pc - 1].toInt() and 0xFF == 0x98) {
-                for (j in 2..30) {
-                    if (i >= j && rom[pc - j].toInt() and 0xFF == 0xA0) {
-                        return readU16(rom, pc - j + 1)
-                    }
-                }
-            }
+            val result = traceValueSource(rom, pc, i, aiBank)
+            if (result != null) return result
         }
 
         return null
