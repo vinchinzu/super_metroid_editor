@@ -1,0 +1,877 @@
+package com.supermetroid.editor.ui
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.key.Key
+import com.supermetroid.editor.data.AppConfig
+import com.supermetroid.editor.data.RoomInfo
+import com.supermetroid.editor.emulator.EmulatorBackend
+import com.supermetroid.editor.emulator.EmulatorCapabilities
+import com.supermetroid.editor.emulator.EmulatorInput
+import com.supermetroid.editor.emulator.EmulatorRegistry
+import com.supermetroid.editor.emulator.FrameHolder
+import com.supermetroid.editor.emulator.GameSnapshot
+import com.supermetroid.editor.emulator.LibretroBackend
+import com.supermetroid.editor.emulator.SessionConfig
+import com.supermetroid.editor.emulator.SessionState
+import com.supermetroid.editor.emulator.StateInfo
+import com.supermetroid.editor.emulator.StepResult
+import com.supermetroid.editor.emulator.TracePoint
+import com.supermetroid.editor.integration.EditorDoorExport
+import com.supermetroid.editor.integration.EditorNavGraph
+import com.supermetroid.editor.integration.EditorNavNode
+import com.supermetroid.editor.integration.EditorRoomExport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
+import kotlinx.serialization.json.Json
+import java.awt.image.BufferedImage
+import java.io.File
+import java.util.Base64
+import javax.imageio.ImageIO
+import kotlin.math.max
+
+private const val SCREEN_PIXELS = 256f
+private val ACTION_LABELS = listOf("B", "Y", "Select", "Start", "Up", "Down", "Left", "Right", "A", "X", "L", "R")
+private val DEFAULT_SAVE_SLOTS = listOf(
+    EmulatorSaveSlot("Checkpoint 1", "EditorCheckpoint01"),
+    EmulatorSaveSlot("Checkpoint 2", "EditorCheckpoint02"),
+    EmulatorSaveSlot("Checkpoint 3", "EditorCheckpoint03"),
+    EmulatorSaveSlot("Checkpoint 4", "EditorCheckpoint04"),
+)
+
+private val AREA_ORIGINS = mapOf(
+    6 to Pair(0f, 0f),    // Ceres
+    0 to Pair(0f, 7f),    // Crateria
+    1 to Pair(0f, 17f),   // Brinstar
+    3 to Pair(18f, 10f),  // Wrecked Ship
+    2 to Pair(17f, 20f),  // Norfair
+    4 to Pair(33f, 18f),  // Maridia
+    5 to Pair(14f, 31f),  // Tourian
+)
+
+data class WorldTracePoint(
+    val roomId: Int,
+    val roomName: String,
+    val x: Float,
+    val y: Float,
+)
+
+data class LocalRoomPoint(
+    val x: Float,
+    val y: Float,
+)
+
+data class EmulatorSaveSlot(
+    val label: String,
+    val stateName: String,
+)
+
+data class RoomMapOverlay(
+    val routeLabel: String? = null,
+    val plannedRoute: List<LocalRoomPoint> = emptyList(),
+    val liveTrace: List<LocalRoomPoint> = emptyList(),
+    val currentPosition: LocalRoomPoint? = null,
+    val focusPoint: LocalRoomPoint? = null,
+    val startAnchor: LocalRoomPoint? = null,
+    val targetAnchor: LocalRoomPoint? = null,
+)
+
+data class AreaBounds(
+    val minMapX: Int,
+    val minMapY: Int,
+    val maxMapX: Int,
+    val maxMapY: Int,
+)
+
+data class LoadedNavGraph(
+    val graph: EditorNavGraph,
+) {
+    val nodesByRoomId: Map<Int, EditorNavNode> = graph.nodes.associateBy { it.roomId }
+    val areaBounds: Map<Int, AreaBounds> = graph.nodes
+        .groupBy { it.area }
+        .mapValues { (_, nodes) ->
+            AreaBounds(
+                minMapX = nodes.minOf { it.mapX },
+                minMapY = nodes.minOf { it.mapY },
+                maxMapX = nodes.maxOf { it.mapX + it.widthScreens },
+                maxMapY = nodes.maxOf { it.mapY + it.heightScreens },
+            )
+        }
+
+    fun roomPoint(roomId: Int, pixelX: Int, pixelY: Int): WorldTracePoint? {
+        val node = nodesByRoomId[roomId] ?: return null
+        val bounds = areaBounds[node.area] ?: return null
+        val origin = AREA_ORIGINS[node.area] ?: Pair(node.area * 12f, 0f)
+        return WorldTracePoint(
+            roomId = roomId,
+            roomName = node.name,
+            x = origin.first + (node.mapX - bounds.minMapX) + (pixelX / SCREEN_PIXELS),
+            y = origin.second + (node.mapY - bounds.minMapY) + (pixelY / SCREEN_PIXELS),
+        )
+    }
+
+    fun roomCenter(roomId: Int): WorldTracePoint? {
+        val node = nodesByRoomId[roomId] ?: return null
+        return roomPoint(
+            roomId = roomId,
+            pixelX = (node.widthScreens * SCREEN_PIXELS / 2f).toInt(),
+            pixelY = (node.heightScreens * SCREEN_PIXELS / 2f).toInt(),
+        )
+    }
+}
+
+class EmulatorWorkspaceState(
+    private val backendFactory: (() -> EmulatorBackend)? = null,
+) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private var backend: EmulatorBackend? = null
+    var frameHolder: FrameHolder? = null
+        private set
+    private var stepInFlight = false
+    private val pressedKeys = mutableSetOf<Key>()
+    private var lastFollowedRoomId: Int? = null
+    private val roomExportCache = mutableMapOf<Int, EditorRoomExport>()
+    private var currentRomPath: String? = null
+
+    var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
+    var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
+    var requestedControlMode by mutableStateOf("manual")
+    var selectedBackendName by mutableStateOf("libretro")
+
+    var statusMessage by mutableStateOf("Click Play to start the emulator.")
+        private set
+    var capabilities by mutableStateOf<EmulatorCapabilities?>(null)
+        private set
+    var session by mutableStateOf(SessionState())
+        private set
+    var snapshot by mutableStateOf<GameSnapshot?>(null)
+        private set
+    var frameBitmap by mutableStateOf<ImageBitmap?>(null)
+        private set
+    var recordingPath by mutableStateOf<String?>(null)
+        private set
+    var bridgeRoundTripMs by mutableStateOf(0f)
+        private set
+    var emulatedFps by mutableStateOf(0f)
+        private set
+    var viewportFps by mutableStateOf(0f)
+        private set
+    var lastStepRepeat by mutableStateOf(0)
+        private set
+    var sessionBootStateName by mutableStateOf<String?>(null)
+        private set
+    var lastCheckpointSlotName by mutableStateOf<String?>(null)
+        private set
+    var isConnected by mutableStateOf(false)
+        private set
+    var isRunning by mutableStateOf(false)
+        private set
+    var isBusy by mutableStateOf(false)
+        private set
+    var audioMuted by mutableStateOf(false)
+        private set
+
+    var saveStates by mutableStateOf<List<StateInfo>>(emptyList())
+        private set
+    var selectedStateName by mutableStateOf<String?>(null)
+    var navGraph by mutableStateOf<LoadedNavGraph?>(null)
+        private set
+
+    val plannedRouteRoomIds = mutableStateListOf<Int>()
+    val saveSlots: List<EmulatorSaveSlot> = DEFAULT_SAVE_SLOTS
+
+    suspend fun loadNavGraph() {
+        val navFile = File(navExportDir, "nav_graph.json")
+        roomExportCache.clear()
+        if (!navFile.isFile) {
+            navGraph = null
+            statusMessage = "Nav graph not found at ${navFile.absolutePath}"
+            persistConfig()
+            if (isConnected) configureBridge()
+            return
+        }
+        navGraph = withContext(Dispatchers.IO) {
+            json.decodeFromString(EditorNavGraph.serializer(), navFile.readText())
+        }.let(::LoadedNavGraph)
+        statusMessage = "Loaded nav graph (${navGraph?.graph?.nodes?.size ?: 0} rooms)"
+        persistConfig()
+        if (isConnected) configureBridge()
+    }
+
+    suspend fun connectBridge() {
+        if (isConnected) return
+        isBusy = true
+        try {
+            persistConfig()
+            val b = backendFactory?.invoke()
+                ?: EmulatorRegistry.create(selectedBackendName)
+            backend = b
+            frameHolder = (b as? LibretroBackend)?.frameHolder
+            val caps = b.connect()
+            capabilities = caps
+            configureBridge()
+            isConnected = true
+            statusMessage = "Connected to ${caps.backendName}"
+            refreshInventory()
+        } catch (e: Exception) {
+            backend = null
+            isConnected = false
+            statusMessage = "Connection failed: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    fun disconnectBridge() {
+        isRunning = false
+        backend?.close()
+        backend = null
+        frameHolder = null
+        isConnected = false
+        capabilities = null
+        session = SessionState()
+        snapshot = null
+        frameBitmap = null
+        bridgeRoundTripMs = 0f
+        emulatedFps = 0f
+        viewportFps = 0f
+        lastStepRepeat = 0
+        sessionBootStateName = null
+        lastCheckpointSlotName = null
+        statusMessage = "Disconnected"
+    }
+
+    suspend fun refreshInventory() {
+        val b = backend ?: return
+        isBusy = true
+        try {
+            val states = b.listStates()
+            saveStates = states.sortedBy { it.name.lowercase() }
+            if (selectedStateName == null) selectedStateName = saveStates.firstOrNull()?.name
+            statusMessage = "Inventory refreshed"
+        } catch (e: Exception) {
+            statusMessage = "Inventory refresh failed: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun startSession() {
+        val b = backend ?: return
+        val stateName = selectedStateName ?: saveStates.firstOrNull()?.name
+        isBusy = true
+        try {
+            val result = b.startSession(
+                SessionConfig(
+                    romPath = currentRomPath,
+                    stateName = stateName,
+                    navExportDir = navExportDir,
+                    controlMode = requestedControlMode,
+                )
+            )
+            applyStepResult(result)
+            sessionBootStateName = stateName
+            isRunning = true
+            bridgeRoundTripMs = 0f
+            emulatedFps = 0f
+            viewportFps = 0f
+            lastStepRepeat = 0
+            statusMessage = result.message ?: "Session started: $stateName"
+        } catch (e: Exception) {
+            statusMessage = "Failed to start session: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun closeSession() {
+        val b = backend ?: return
+        isRunning = false
+        isBusy = true
+        try {
+            val result = b.closeSession()
+            applyStepResult(result)
+            if (!session.active) {
+                snapshot = null
+                frameBitmap = null
+                bridgeRoundTripMs = 0f
+                emulatedFps = 0f
+                viewportFps = 0f
+                lastStepRepeat = 0
+            }
+            statusMessage = result.message ?: "Session closed"
+        } catch (e: Exception) {
+            statusMessage = "Failed to close session: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun refreshSnapshot() {
+        val b = backend ?: return
+        if (!session.active) return
+        if (isBusy || stepInFlight) return
+        isBusy = true
+        try {
+            val snap = b.snapshot()
+            applySnapshot(snap)
+        } catch (e: Exception) {
+            statusMessage = "Snapshot failed: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun stepFrame(
+        repeat: Int = 1,
+        includeFrame: Boolean = true,
+        includeTrace: Boolean = true,
+    ) {
+        val b = backend ?: return
+        if (!session.active || isBusy || stepInFlight) return
+        stepInFlight = true
+        val previousFrameCounter = session.frameCounter
+        val startedAt = System.nanoTime()
+        try {
+            val result = b.step(
+                EmulatorInput(
+                    buttons = currentAction(),
+                    repeat = repeat,
+                    includeFrame = includeFrame,
+                    includeTrace = includeTrace,
+                )
+            )
+            applyStepResult(result)
+            updateLoopMetrics(
+                previousFrameCounter = previousFrameCounter,
+                currentFrameCounter = result.session.frameCounter,
+                elapsedNanos = System.nanoTime() - startedAt,
+                repeat = repeat,
+                frameIncluded = includeFrame,
+            )
+        } catch (e: Exception) {
+            statusMessage = "Step failed: ${e.message}"
+            isRunning = false
+        } finally {
+            stepInFlight = false
+        }
+    }
+
+    suspend fun saveQuickState(name: String = "EditorQuickSave") {
+        val b = backend ?: return
+        if (!session.active) return
+        selectedStateName = name
+        isBusy = true
+        try {
+            b.saveState(name)
+            statusMessage = "Saved $name"
+            refreshInventory()
+        } catch (e: Exception) {
+            statusMessage = "Save failed: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun loadSelectedState() {
+        val b = backend ?: return
+        val stateName = selectedStateName ?: return
+        loadStateByName(b, stateName)
+    }
+
+    suspend fun resetToSessionStart() {
+        val b = backend ?: return
+        val stateName = sessionBootStateName ?: selectedStateName ?: return
+        selectedStateName = stateName
+        loadStateByName(b, stateName)
+    }
+
+    suspend fun saveSlot(slot: EmulatorSaveSlot) {
+        selectedStateName = slot.stateName
+        rememberCheckpointSlot(slot)
+        saveQuickState(slot.stateName)
+    }
+
+    suspend fun loadSlot(slot: EmulatorSaveSlot) {
+        val b = backend ?: return
+        if (!hasSavedSlot(slot)) {
+            statusMessage = "${slot.label} is empty"
+            return
+        }
+        selectedStateName = slot.stateName
+        rememberCheckpointSlot(slot)
+        loadStateByName(b, slot.stateName)
+    }
+
+    suspend fun saveSlot(index: Int) {
+        val slot = saveSlots.getOrNull(index) ?: return
+        saveSlot(slot)
+    }
+
+    suspend fun reloadLastCheckpoint() {
+        val preferred = saveSlots.firstOrNull { it.stateName == lastCheckpointSlotName && hasSavedSlot(it) }
+            ?: saveSlots.firstOrNull { hasSavedSlot(it) }
+        if (preferred == null) {
+            statusMessage = "No checkpoint slot saved yet"
+            return
+        }
+        loadSlot(preferred)
+    }
+
+    fun hasSavedSlot(slot: EmulatorSaveSlot): Boolean {
+        return saveStates.any { it.name == slot.stateName }
+    }
+
+    fun isLastCheckpointSlot(slot: EmulatorSaveSlot): Boolean {
+        return slot.stateName == lastCheckpointSlotName
+    }
+
+    fun checkpointSlotHotkey(slot: EmulatorSaveSlot): String {
+        val index = saveSlots.indexOfFirst { it.stateName == slot.stateName }
+        return when (index) {
+            0 -> "F1"
+            1 -> "F2"
+            2 -> "F3"
+            3 -> "F4"
+            else -> ""
+        }
+    }
+
+    fun checkpointSlotReloadHotkey(slot: EmulatorSaveSlot): String {
+        val hotkey = checkpointSlotHotkey(slot)
+        return if (hotkey.isBlank()) "" else "Shift+$hotkey"
+    }
+
+    fun selectedStateInfo(): StateInfo? {
+        val stateName = selectedStateName ?: return null
+        return saveStates.firstOrNull { it.name == stateName }
+    }
+
+    fun sessionBootStateInfo(): StateInfo? {
+        val stateName = sessionBootStateName ?: return null
+        return saveStates.firstOrNull { it.name == stateName }
+    }
+
+    fun displayPath(path: String?): String? {
+        val raw = path?.takeIf { it.isNotBlank() } ?: return null
+        val marker = "${File.separator}custom_integrations${File.separator}"
+        val markerIndex = raw.indexOf(marker)
+        if (markerIndex >= 0) {
+            return raw.substring(markerIndex + 1)
+        }
+        return raw
+    }
+
+    private fun rememberCheckpointSlot(slot: EmulatorSaveSlot) {
+        lastCheckpointSlotName = slot.stateName
+    }
+
+    private suspend fun loadStateByName(b: EmulatorBackend, stateName: String) {
+        isBusy = true
+        try {
+            val result = b.loadState(stateName)
+            applyStepResult(result)
+            statusMessage = result.message ?: "Loaded $stateName"
+        } catch (e: Exception) {
+            statusMessage = "Load failed: ${e.message}"
+        } finally {
+            isBusy = false
+        }
+    }
+
+    suspend fun setRecording(@Suppress("UNUSED_PARAMETER") active: Boolean) {
+        // Recording is not supported by the libretro backend
+    }
+
+    fun setLoopRunning(running: Boolean) {
+        isRunning = running
+    }
+
+    fun toggleAudioMute() {
+        val b = backend as? LibretroBackend ?: return
+        audioMuted = !audioMuted
+        b.audioMuted = audioMuted
+    }
+
+    fun updateKey(key: Key, down: Boolean) {
+        when {
+            down -> pressedKeys.add(key)
+            else -> pressedKeys.remove(key)
+        }
+    }
+
+    fun clearCheckpointModifierKeys() {
+        pressedKeys.remove(Key.ShiftLeft)
+        pressedKeys.remove(Key.ShiftRight)
+    }
+
+    fun currentAction(): List<Int> {
+        val action = MutableList(12) { 0 }
+        fun on(key: Key) = pressedKeys.contains(key)
+
+        if (on(Key.DirectionRight)) action[7] = 1
+        if (on(Key.DirectionLeft)) action[6] = 1
+        if (on(Key.DirectionUp)) action[4] = 1
+        if (on(Key.DirectionDown)) action[5] = 1
+
+        if (on(Key.Z)) action[0] = 1
+        if (on(Key.X)) action[8] = 1
+        if (on(Key.A)) action[1] = 1
+        if (on(Key.S)) action[9] = 1
+        if (on(Key.Q)) action[10] = 1
+        if (on(Key.W)) action[11] = 1
+        if (on(Key.Enter)) action[3] = 1
+        if (on(Key.ShiftLeft) || on(Key.ShiftRight) || on(Key.Tab)) action[2] = 1
+
+        // Stable-retro does not like conflicting D-pad directions.
+        if (action[6] == 1 && action[7] == 1) {
+            action[6] = 0
+            action[7] = 0
+        }
+        if (action[4] == 1 && action[5] == 1) {
+            action[4] = 0
+            action[5] = 0
+        }
+        return action
+    }
+
+    fun activeInputSummary(): String {
+        val action = snapshot?.lastAction?.takeIf { it.isNotEmpty() } ?: currentAction()
+        return inputSummary(action)
+    }
+
+    fun requestedInputSummary(): String {
+        val action = snapshot?.lastRequestedAction ?: return "none"
+        return inputSummary(action)
+    }
+
+    fun preSanitizeInputSummary(): String {
+        val action = snapshot?.lastActionPreSanitize ?: return "none"
+        return inputSummary(action)
+    }
+
+    private fun inputSummary(action: List<Int>): String {
+        val active = action.mapIndexedNotNull { index, value ->
+            ACTION_LABELS.getOrNull(index)?.takeIf { value != 0 }
+        }
+        return if (active.isEmpty()) "none" else active.joinToString(" ")
+    }
+
+    fun controllerSummary(): String {
+        val currentSnapshot = snapshot
+        return when {
+            currentSnapshot?.controllerConnected == true && !currentSnapshot.controllerName.isNullOrBlank() ->
+                currentSnapshot.controllerName!!
+            currentSnapshot?.controllerConnected == true -> "connected"
+            else -> "none"
+        }
+    }
+
+    fun appendPlannedRoom(roomId: Int) {
+        if (plannedRouteRoomIds.lastOrNull() == roomId) return
+        plannedRouteRoomIds.add(roomId)
+    }
+
+    fun updateFollowLiveRoom(value: Boolean) {
+        followLiveRoom = value
+        persistConfig()
+    }
+
+    fun updateNavExportDir(value: String) {
+        navExportDir = value
+    }
+
+    fun updateRomPath(value: String?) {
+        currentRomPath = value?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    fun clearPlannedRoute() {
+        plannedRouteRoomIds.clear()
+    }
+
+    fun updateRequestedControlMode(value: String) {
+        requestedControlMode = value
+    }
+
+    fun removeLastPlannedRoom() {
+        if (plannedRouteRoomIds.isNotEmpty()) plannedRouteRoomIds.removeLast()
+    }
+
+    fun liveTracePoints(): List<WorldTracePoint> {
+        val loaded = navGraph ?: return emptyList()
+        val currentSnapshot = snapshot ?: return emptyList()
+        return currentSnapshot.trace.mapNotNull { loaded.roomPoint(it.roomId, it.x, it.y) }
+    }
+
+    fun centerOfGravity(): WorldTracePoint? {
+        val points = liveTracePoints()
+        if (points.isEmpty()) return null
+        val roomName = points.last().roomName
+        return WorldTracePoint(
+            roomId = points.last().roomId,
+            roomName = roomName,
+            x = points.sumOf { it.x.toDouble() }.toFloat() / points.size,
+            y = points.sumOf { it.y.toDouble() }.toFloat() / points.size,
+        )
+    }
+
+    fun plannedRoutePoints(): List<WorldTracePoint> {
+        val loaded = navGraph ?: return emptyList()
+        return plannedRouteRoomIds.mapNotNull { loaded.roomCenter(it) }
+    }
+
+    fun roomMapOverlay(room: RoomInfo?): RoomMapOverlay? {
+        val currentRoom = room ?: return null
+        val roomExport = roomExport(currentRoom.getRoomIdAsInt()) ?: return null
+        val currentSnapshot = snapshot
+        val expectedTrace = currentSnapshot?.expectedTrace
+            ?.filter { it.roomId == roomExport.roomId }
+            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
+            .orEmpty()
+        val liveTrace = currentSnapshot?.trace
+            ?.filter { it.roomId == roomExport.roomId }
+            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
+            .orEmpty()
+        val currentPosition = when {
+            currentSnapshot?.doorTransition == true -> null
+            currentSnapshot?.roomId == roomExport.roomId -> {
+                val samusX = currentSnapshot.samusX
+                val samusY = currentSnapshot.samusY
+                if (samusX != null && samusY != null) {
+                    LocalRoomPoint(samusX.toFloat(), samusY.toFloat())
+                } else {
+                    null
+                }
+            }
+            liveTrace.isNotEmpty() -> liveTrace.last()
+            else -> null
+        }
+        val plannedRoute = when {
+            expectedTrace.isNotEmpty() -> expectedTrace
+            else -> landingSiteRoute(roomExport)?.second.orEmpty()
+        }
+        val routeLabel = when {
+            expectedTrace.isNotEmpty() -> currentSnapshot?.expectedTraceLabel ?: "Expected path (sm_landing_site)"
+            else -> landingSiteRoute(roomExport)?.first
+        }
+        val focusPoint = shipPoint(roomExport)
+            ?: currentPosition
+            ?: plannedRoute.firstOrNull()
+        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null) return null
+        return RoomMapOverlay(
+            routeLabel = routeLabel,
+            plannedRoute = plannedRoute,
+            liveTrace = liveTrace,
+            currentPosition = currentPosition,
+            focusPoint = focusPoint,
+            startAnchor = plannedRoute.firstOrNull(),
+            targetAnchor = plannedRoute.lastOrNull(),
+        )
+    }
+
+    fun roomToFollow(rooms: List<RoomInfo>): RoomInfo? {
+        if (!followLiveRoom) return null
+        val roomId = snapshot?.roomId ?: return null
+        if (roomId == lastFollowedRoomId) return null
+        val room = rooms.firstOrNull { it.getRoomIdAsInt() == roomId } ?: return null
+        lastFollowedRoomId = roomId
+        return room
+    }
+
+    suspend fun configureBridge() {
+        // No-op for libretro backend (no external bridge to configure)
+    }
+
+    private suspend fun applyStepResult(result: StepResult) {
+        session = result.session
+        if (result.states.isNotEmpty()) saveStates = result.states.sortedBy { it.name.lowercase() }
+        if (result.recordingPath != null) recordingPath = result.recordingPath
+        result.message?.let { statusMessage = it }
+        applySnapshot(result.snapshot)
+    }
+
+    private suspend fun applySnapshot(incoming: GameSnapshot) {
+        // Fast path: in-process libretro backend provides frames via FrameHolder
+        val fh = frameHolder
+        if (fh != null) {
+            val directFrame = fh.latestFrame
+            val merged = mergeSnapshot(snapshot, incoming)
+            snapshot = merged
+            if (directFrame != null) {
+                frameBitmap = directFrame
+            }
+            return
+        }
+
+        // Slow path: fallback for backends that use Base64 frames
+        val decodedFrame = incoming
+            .takeIf { it.frameRgb24Base64 != null }
+            ?.let { withContext(Dispatchers.Default) { decodeFrame(it) } }
+        val merged = mergeSnapshot(snapshot, incoming)
+        snapshot = merged
+        if (decodedFrame != null) {
+            frameBitmap = decodedFrame
+        }
+    }
+
+    private fun decodeFrame(snap: GameSnapshot): ImageBitmap? {
+        val base64 = snap.frameRgb24Base64 ?: return null
+        if (snap.frameWidth <= 0 || snap.frameHeight <= 0) return null
+        val bytes = try {
+            Base64.getDecoder().decode(base64)
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        val width = snap.frameWidth
+        val height = snap.frameHeight
+        if (looksLikePng(bytes)) {
+            return ByteArrayInputStream(bytes).use { stream ->
+                ImageIO.read(stream)?.toComposeImageBitmap()
+            }
+        }
+
+        if (bytes.size < width * height * 3) {
+            return ByteArrayInputStream(bytes).use { stream ->
+                ImageIO.read(stream)?.toComposeImageBitmap()
+            }
+        }
+
+        val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        var idx = 0
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val r = bytes[idx].toInt() and 0xFF
+                val g = bytes[idx + 1].toInt() and 0xFF
+                val b = bytes[idx + 2].toInt() and 0xFF
+                image.setRGB(x, y, (r shl 16) or (g shl 8) or b)
+                idx += 3
+            }
+        }
+        return image.toComposeImageBitmap()
+    }
+
+    private fun looksLikePng(bytes: ByteArray): Boolean {
+        if (bytes.size < 8) return false
+        val pngSignature = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+        )
+        return pngSignature.indices.all { index -> bytes[index] == pngSignature[index] }
+    }
+
+    private fun mergeSnapshot(previous: GameSnapshot?, incoming: GameSnapshot): GameSnapshot {
+        val expectedTrace = if (incoming.traceIncluded || previous == null) incoming.expectedTrace else previous.expectedTrace
+        val trace = if (incoming.traceIncluded || previous == null) incoming.trace else previous.trace
+        return incoming.copy(
+            expectedTrace = expectedTrace,
+            trace = trace,
+        )
+    }
+
+    private fun updateLoopMetrics(
+        previousFrameCounter: Int,
+        currentFrameCounter: Int,
+        elapsedNanos: Long,
+        repeat: Int,
+        frameIncluded: Boolean,
+    ) {
+        if (elapsedNanos <= 0L) return
+        val elapsedSeconds = elapsedNanos / 1_000_000_000f
+        if (elapsedSeconds <= 0f) return
+        lastStepRepeat = repeat
+        bridgeRoundTripMs = smoothMetric(bridgeRoundTripMs, elapsedNanos / 1_000_000f)
+        val frameDelta = maxOf(0, currentFrameCounter - previousFrameCounter)
+        if (frameDelta > 0) {
+            emulatedFps = smoothMetric(emulatedFps, frameDelta / elapsedSeconds)
+        }
+        if (frameIncluded) {
+            viewportFps = smoothMetric(viewportFps, 1f / elapsedSeconds)
+        }
+    }
+
+    private fun smoothMetric(current: Float, sample: Float): Float {
+        return if (current <= 0f) sample else (current * 0.75f) + (sample * 0.25f)
+    }
+
+    private fun persistConfig() {
+        AppConfig.update {
+            copy(
+                emulatorNavExportDir = navExportDir,
+                emulatorFollowLiveRoom = followLiveRoom,
+                emulatorBackend = selectedBackendName,
+            )
+        }
+    }
+
+    private fun roomExport(roomId: Int): EditorRoomExport? {
+        roomExportCache[roomId]?.let { return it }
+        val roomFile = File(navExportDir, "rooms/room_${roomId.toString(16).uppercase().padStart(4, '0')}.json")
+        if (!roomFile.isFile) return null
+        return runCatching {
+            json.decodeFromString(EditorRoomExport.serializer(), roomFile.readText())
+        }.getOrNull()?.also { roomExportCache[roomId] = it }
+    }
+
+    private fun landingSiteRoute(room: EditorRoomExport): Pair<String, List<LocalRoomPoint>>? {
+        if (room.handle != "landingSite") return null
+        val ship = shipPoint(room)
+            ?: return null
+        val targetDoor = room.doors
+            .asSequence()
+            .filter { it.direction == "Left" && !it.isElevator }
+            .filter { it.sourceBlockX != null && it.sourceBlockY != null }
+            .sortedByDescending { it.sourceBlockY ?: -1 }
+            .firstOrNull()
+            ?: return null
+        val doorPoint = doorPoint(targetDoor) ?: return null
+        return "Ship -> left door" to listOf(ship, doorPoint)
+    }
+
+    private fun shipPoint(room: EditorRoomExport): LocalRoomPoint? {
+        val ship = room.enemies
+            .firstOrNull { it.name == "Samus' Ship" }
+            ?: room.enemies.firstOrNull { it.name.startsWith("Samus' Ship") }
+            ?: return null
+        return LocalRoomPoint(ship.pixelX.toFloat(), ship.pixelY.toFloat())
+    }
+
+    private fun doorPoint(door: EditorDoorExport): LocalRoomPoint? {
+        val blockX = door.sourceBlockX ?: return null
+        val blockY = door.sourceBlockY ?: return null
+        return LocalRoomPoint(
+            x = blockX * 16f + 8f,
+            y = blockY * 16f + 8f,
+        )
+    }
+
+    internal fun setNavGraphForTest(graph: LoadedNavGraph) {
+        navGraph = graph
+    }
+
+    internal fun setSnapshotForTest(value: GameSnapshot) {
+        snapshot = value
+    }
+
+    internal fun setRoomExportForTest(value: EditorRoomExport) {
+        roomExportCache[value.roomId] = value
+    }
+}
+
+internal fun navGraphExtent(graph: LoadedNavGraph): Pair<Float, Float> {
+    var maxX = 0f
+    var maxY = 0f
+    for (node in graph.graph.nodes) {
+        val point = graph.roomCenter(node.roomId) ?: continue
+        maxX = max(maxX, point.x + node.widthScreens)
+        maxY = max(maxY, point.y + node.heightScreens)
+    }
+    return Pair(maxX, maxY)
+}
+
+internal fun tracePointFor(graph: LoadedNavGraph, point: TracePoint): WorldTracePoint? {
+    return graph.roomPoint(point.roomId, point.x, point.y)
+}

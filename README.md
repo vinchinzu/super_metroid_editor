@@ -75,6 +75,116 @@ Grab the latest release for your platform from [GitHub Releases](https://github.
 
 Requires JDK 17+ and a C++ compiler (Xcode CLI tools on macOS, `g++` on Linux, MinGW on Windows).
 
+### Quickstart with mise
+
+The repo now includes a local `mise` toolchain for the BizHawk-first emulator checks.
+
+```bash
+mise install
+mise run test_bizhawk
+mise run test_stable_retro
+mise run test
+```
+
+`test_bizhawk` runs the Lua syntax checks, Python bridge compile checks, and the full JVM test suite, including the BizHawk socket-backed backend tests.
+
+### Libretro Backend (Embedded Emulator)
+
+The `libretro` backend loads a SNES core in-process via JNA — no external emulator window needed.
+
+**Install a SNES libretro core:**
+
+```bash
+# Arch / Manjaro
+sudo pacman -S libretro-snes9x
+
+# Debian / Ubuntu
+sudo apt install libretro-snes9x
+
+# Or download from the libretro buildbot:
+# https://buildbot.libretro.com/nightly/linux/x86_64/latest/snes9x_libretro.so.zip
+# Place the .so in /usr/lib/libretro/ or ~/.config/retroarch/cores/
+```
+
+The editor auto-discovers cores in `/usr/lib/libretro/`, `~/.config/retroarch/cores/`, and `./cores/`.
+You can also set an explicit path via the `SMEDIT_LIBRETRO_CORE` environment variable or `libretroCorePath` in `~/.smedit/config.json`.
+
+**Usage:** In the Emu tab, select "libretro" from the backend dropdown, set the ROM path, then Connect → Start Session.
+
+### Stable-Retro Runtime
+
+The `gym-retro` backend still uses the original `stable_retro` runtime from `add_emulator`.
+
+For the local runtime data sync:
+
+```bash
+../.venv/bin/python tools/sync_sm_runtime_data.py --source-game-dir ..
+```
+
+For a full stable-retro bridge smoke test:
+
+```bash
+mise run test_stable_retro
+```
+
+That smoke path expects:
+
+- a Python env with `stable_retro` and `pygame`
+- the reverse-SM runtime at `../sm` (or `SM_RUNTIME_DIR`)
+- Super Metroid integration data under `custom_integrations/SuperMetroid-Snes`
+
+`tools/ci/test_stable_retro.sh` auto-syncs integration data from the sibling game repo before it runs the bridge smoke.
+
+### Manual BizHawk Bring-Up
+
+#### Linux Prerequisites
+
+BizHawk ships with luasocket DLLs for Windows only. On Linux you need the
+native `.so` equivalents so the TCP bridge can run:
+
+```bash
+# Arch / Manjaro
+sudo pacman -S lua-socket
+
+# Debian / Ubuntu
+sudo apt install lua-socket
+
+# Fedora
+sudo dnf install lua-socket
+```
+
+Then copy the shared libraries into BizHawk's Lua directory:
+
+```bash
+# Adjust the Lua version (5.4) and BizHawk path if yours differ
+cp /usr/lib/lua/5.4/socket/core.so ~/.bizhawk/Lua/socket/core.so
+cp /usr/lib/lua/5.4/mime/core.so   ~/.bizhawk/Lua/mime/core.so
+cp /usr/share/lua/5.4/socket.lua   ~/.bizhawk/Lua/socket.lua
+cp /usr/share/lua/5.4/mime.lua     ~/.bizhawk/Lua/mime.lua
+```
+
+Without these files BizHawk will fail with
+`module 'socket' not found` when loading `bridge.lua`.
+
+#### Running
+
+To open the editor straight into the emulator workspace and auto-boot a BizHawk `ZebesStart` savestate:
+
+```bash
+./test_bizhawk.sh /path/to/SuperMetroid.sfc /path/to/EmuHawk
+```
+
+That script looks for `ZebesStart.state` in this order:
+
+- `SMEDIT_STATE_DIR`
+- `<rom dir>/editor_states`
+- `./editor_states`
+- parent folders above the editor repo
+
+It forces the BizHawk backend, opens the `Emu` tab, and starts the session automatically.
+
+If a packaged desktop launcher already exists under `desktopApp/build/compose/binaries/main/app`, the script uses it first. Otherwise it falls back to `mise exec java@17 -- ./gradlew :desktopApp:run`.
+
 ```bash
 # Clone with submodules (required for SPC audio)
 git clone --recurse-submodules git@github.com:kennycason/super_metroid_editor.git

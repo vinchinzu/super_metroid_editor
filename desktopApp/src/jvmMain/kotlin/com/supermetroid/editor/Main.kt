@@ -14,10 +14,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -28,16 +34,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -57,7 +64,9 @@ import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.ui.DraggableDividerHorizontal
 import com.supermetroid.editor.ui.DraggableDividerVertical
 import com.supermetroid.editor.ui.EditorState
+import com.supermetroid.editor.ui.EmulatorWorkspaceState
 import com.supermetroid.editor.ui.EnemySpriteViewer
+import com.supermetroid.editor.ui.FloatingEmulatorWindow
 import com.supermetroid.editor.ui.KraidSpriteEditor
 import com.supermetroid.editor.ui.LocalSwingWindow
 import com.supermetroid.editor.ui.MapCanvas
@@ -80,14 +89,19 @@ import com.supermetroid.editor.ui.blockTypeName
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 fun main() = application {
     val roomRepository = remember { RoomRepository() }
+    val scope = rememberCoroutineScope()
     var romParser by remember { mutableStateOf<RomParser?>(null) }
     var romFileName by remember { mutableStateOf<String?>(null) }
     var selectedRoom by remember { mutableStateOf<RoomInfo?>(null) }
     var rooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
+    var romLoadInFlight by remember { mutableStateOf(false) }
     val editorState = remember { EditorState() }
 
     fun pickDefaultRoom(allRooms: List<RoomInfo>, romPath: String): RoomInfo? {
@@ -109,22 +123,30 @@ fun main() = application {
         }
     }
 
+    suspend fun loadRomParser(path: String): RomParser = withContext(Dispatchers.IO) {
+        RomParser.loadRom(path)
+    }
+
     // Load rooms on startup
     LaunchedEffect(Unit) {
-        rooms = roomRepository.getAllRooms()
-        
-        // Auto-load last ROM if available
-        val lastRomPath = RomPreferences.getLastRomPath()
-        if (lastRomPath != null) {
+        rooms = withContext(Dispatchers.IO) { roomRepository.getAllRooms() }
+
+        // Auto-load requested ROM first, then fall back to last ROM if available.
+        val bootRomPath = RomPreferences.getLastRomPath()
+        if (bootRomPath != null) {
             try {
-                romParser = RomParser.loadRom(lastRomPath)
-                romFileName = File(lastRomPath).nameWithoutExtension
-                editorState.initForRom(lastRomPath)
+                romLoadInFlight = true
+                romParser = loadRomParser(bootRomPath)
+                romFileName = File(bootRomPath).nameWithoutExtension
+                RomPreferences.setLastRomPath(bootRomPath)
+                editorState.initForRom(bootRomPath)
                 if (selectedRoom == null) {
-                    selectedRoom = pickDefaultRoom(rooms, lastRomPath)
+                    selectedRoom = pickDefaultRoom(rooms, bootRomPath)
                 }
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
+            } finally {
+                romLoadInFlight = false
             }
         }
     }
@@ -163,6 +185,7 @@ fun main() = application {
     ) {
         CompositionLocalProvider(LocalSwingWindow provides window) {
         MaterialTheme {
+            var emulatorEnabled by remember { mutableStateOf(false) }
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
@@ -177,6 +200,7 @@ fun main() = application {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
+                            enabled = !romLoadInFlight,
                             onClick = {
                                 val fileDialog = FileDialog(null as Frame?, "Open Super Metroid ROM", FileDialog.LOAD)
                                 fileDialog.setFilenameFilter { _, name ->
@@ -187,26 +211,48 @@ fun main() = application {
                                 val selectedFile = fileDialog.file
                                 if (selectedFile != null) {
                                     val file = File(fileDialog.directory, selectedFile)
-                                    try {
-                                        romParser = RomParser.loadRom(file.absolutePath)
-                                        romFileName = file.nameWithoutExtension
-                                        RomPreferences.setLastRomPath(file.absolutePath)
-                                        editorState.initForRom(file.absolutePath)
-                                        selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
-                                    } catch (e: Exception) { e.printStackTrace() }
+                                    scope.launch {
+                                        romLoadInFlight = true
+                                        try {
+                                            romParser = loadRomParser(file.absolutePath)
+                                            romFileName = file.nameWithoutExtension
+                                            RomPreferences.setLastRomPath(file.absolutePath)
+                                            editorState.initForRom(file.absolutePath)
+                                            selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        } finally {
+                                            romLoadInFlight = false
+                                        }
+                                    }
                                 }
                             }
-                        ) { Text("Open ROM...") }
+                        ) { Text(if (romLoadInFlight) "Loading ROM..." else "Open ROM...") }
                         if (romFileName != null) {
                             Text("Loaded: $romFileName", style = MaterialTheme.typography.bodySmall, fontSize = 12.sp)
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    // Right side: Save + Export
+                    // Right side: EMU toggle + Save + Export
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        OutlinedButton(
+                            onClick = { emulatorEnabled = !emulatorEnabled },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (emulatorEnabled) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surface,
+                            ),
+                        ) {
+                            Icon(
+                                Icons.Default.Gamepad,
+                                contentDescription = "Toggle emulator",
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("EMU", fontSize = 11.sp)
+                        }
                         Button(
                             onClick = { editorState.saveProject(romParser) },
                             enabled = romParser != null
@@ -229,10 +275,11 @@ fun main() = application {
                 // Main content: resizable left column + right canvas
                 var leftColumnWidthDp by remember { mutableStateOf(280f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
-                var leftTab by remember { mutableStateOf(0) } // 0 = Rooms, 1 = Tilesets, 2 = Patches, 3 = Sound, 4 = Sprites
+                var leftTab by remember { mutableStateOf(0) }
                 var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
+                val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
                 var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -597,6 +644,16 @@ fun main() = application {
                                 }
                             }
                         }
+                    }
+
+                    // ── Floating emulator overlay ──
+                    if (emulatorEnabled) {
+                        FloatingEmulatorWindow(
+                            workspaceState = emulatorWorkspaceState,
+                            editorState = editorState,
+                            romParser = romParser,
+                            onClose = { emulatorEnabled = false },
+                        )
                     }
                 }
             }

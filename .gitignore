@@ -31,8 +31,12 @@ dist/
 *.pkg
 *.app
 
-# Logs
+# Logs & JVM crash dumps
 *.log
+hs_err_pid*
+core.*
+*.pyc
+__pycache__/
 
 # ROM files (don't commit ROMs)
 *.smc
@@ -41,3 +45,12 @@ dist/
 *.wav
 # But keep test-resources directory structure
 !test-resources/.gitkeep
+
+# Libretro cores (downloaded .so/.dylib/.dll)
+cores/
+
+# Emulator/runtime outputs
+custom_integrations/
+editor_recordings/
+editor_states/
+export/sm_nav/
