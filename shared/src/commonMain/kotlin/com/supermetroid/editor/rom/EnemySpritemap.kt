@@ -92,13 +92,15 @@ class EnemySpritemap(private val romParser: RomParser) {
     }
 
     /**
-     * Find the first valid spritemap for an enemy species by tracing the
+     * Find the best default spritemap for an enemy species by tracing the
      * init function's instruction list setup.
      *
      * Strategy:
      * 1. Scan init function for `STA $0F92,x` (9D 92 0F)
      * 2. Trace back to find the source value (immediate, table lookup, or Y register)
-     * 3. Follow the instruction list to find the first animation frame with a valid spritemap
+     * 3. If a direction table is found, try ALL entries and pick the widest sprite
+     *    (floor-facing directions are wider than wall-crawling directions)
+     * 4. Follow the instruction list to find the first animation frame with a valid spritemap
      */
     fun findDefaultSpritemap(speciesId: Int): Spritemap? {
         val rom = romParser.getRomData()
@@ -110,8 +112,26 @@ class EnemySpritemap(private val romParser: RomParser) {
         val initPc = romParser.snesToPc((aiBank shl 16) or initAiPtr)
         if (initPc < 0 || initPc + 20 > rom.size) return null
 
+        // Read tile data size to validate spritemap results
+        val rawTileSize = readU16(rom, headerPc)
+        val tileCount = (rawTileSize and 0x7FFF) / BYTES_PER_TILE
+
+        // Check if there's a direction table — if so, try all directions and pick best
+        val dirTableAddr = findDirectionTableAddress(rom, initPc, aiBank)
+        if (dirTableAddr != null) {
+            val tablePc = romParser.snesToPc((aiBank shl 16) or dirTableAddr)
+            if (tablePc >= 0 && tablePc + 8 <= rom.size) {
+                val dirSmap = findBestDirectionSpritemap(rom, tablePc, aiBank)
+                // Validate that tile indices fit within the species' tile data
+                if (dirSmap != null && spritemapFitsTileData(dirSmap, tileCount)) {
+                    return dirSmap
+                }
+            }
+        }
+
+        // No direction table or invalid results — use direct instruction list pointer
         val instrListPtr = findInstructionListPointer(rom, initPc, aiBank) ?: return null
-        return findFirstSpritemap(rom, instrListPtr, aiBank)
+        return findFirstSpritemap(rom, instrListPtr, aiBank, tileCount)
     }
 
     /**
@@ -129,6 +149,63 @@ class EnemySpritemap(private val romParser: RomParser) {
 
         val instrListPtr = findInstructionListPointer(rom, initPc, aiBank) ?: return emptyList()
         return parseAnimationFrames(rom, instrListPtr, aiBank, maxFrames)
+    }
+
+    /**
+     * Find the direction table address from the init function, if one exists.
+     * Matches the specific pattern: `TAY; LDA $xxxx,y; STA $0F92,x`
+     * which is the standard SNES enemy direction table lookup.
+     * Returns the 16-bit SNES offset of the table within the AI bank, or null.
+     */
+    private fun findDirectionTableAddress(rom: ByteArray, initPc: Int, aiBank: Int): Int? {
+        val scanLimit = minOf(120, rom.size - initPc - 5)
+        for (i in 0 until scanLimit) {
+            val pc = initPc + i
+            if (rom[pc].toInt() and 0xFF != 0x9D) continue
+            if (rom[pc + 1].toInt() and 0xFF != 0x92) continue
+            if (rom[pc + 2].toInt() and 0xFF != 0x0F) continue
+
+            // Found STA $0F92,x — look for the exact pattern:
+            // A8       TAY
+            // B9 xx xx LDA $xxxx,y
+            // 9D 92 0F STA $0F92,x  (we're here)
+            if (i >= 4 &&
+                rom[pc - 4].toInt() and 0xFF == 0xA8 &&  // TAY
+                rom[pc - 3].toInt() and 0xFF == 0xB9) {  // LDA abs,y
+                return readU16(rom, pc - 2)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Try all entries in a direction table and return the spritemap with the
+     * widest bounding box. Floor-facing directions produce wider sprites than
+     * wall-crawling directions, so this picks the most recognizable orientation.
+     */
+    private fun findBestDirectionSpritemap(rom: ByteArray, tablePc: Int, aiBank: Int): Spritemap? {
+        var bestSmap: Spritemap? = null
+        var bestWidth = -1
+
+        for (dir in 0 until 4) {
+            if (tablePc + dir * 2 + 1 >= rom.size) break
+            val instrListPtr = readU16(rom, tablePc + dir * 2)
+            if (instrListPtr == 0) continue
+
+            val smap = findFirstSpritemap(rom, instrListPtr, aiBank) ?: continue
+
+            // Calculate bounding box width
+            val minX = smap.entries.minOf { it.xOffset }
+            val maxX = smap.entries.maxOf { it.xOffset + (if (it.is16x16) 16 else 8) }
+            val width = maxX - minX
+
+            if (width > bestWidth) {
+                bestWidth = width
+                bestSmap = smap
+            }
+        }
+
+        return bestSmap
     }
 
     /**
@@ -291,6 +368,15 @@ class EnemySpritemap(private val romParser: RomParser) {
             }
         }
 
+        // Some init functions store to an enemy variable (e.g. $7E:7800,x) early,
+        // then load from it and store to $0F92,x much later (past 120 bytes).
+        // Scan with a wider range for indirect var patterns in the init function itself.
+        val varRef = scanForIndirectVar(rom, initPc, scanRange = 200)
+        if (varRef != null) {
+            val crossRef = traceVarSetInCaller(rom, initPc, aiBank, varRef)
+            if (crossRef != null) return crossRef
+        }
+
         return null
     }
 
@@ -301,8 +387,8 @@ class EnemySpritemap(private val romParser: RomParser) {
      * the source variable address. Handles both absolute (BD) and long (BF)
      * addressing modes — bank $7E enemy vars use long addressing.
      */
-    private fun scanForIndirectVar(rom: ByteArray, startPc: Int): IndirectVarRef? {
-        val scanLimit = minOf(60, rom.size - startPc - 7)
+    private fun scanForIndirectVar(rom: ByteArray, startPc: Int, scanRange: Int = 60): IndirectVarRef? {
+        val scanLimit = minOf(scanRange, rom.size - startPc - 7)
         for (i in 0 until scanLimit) {
             val pc = startPc + i
             if (rom[pc].toInt() and 0xFF != 0x9D) continue
@@ -408,13 +494,24 @@ class EnemySpritemap(private val romParser: RomParser) {
         return null
     }
 
-    private fun findFirstSpritemap(rom: ByteArray, instrListPtr: Int, aiBank: Int): Spritemap? {
+    private fun findFirstSpritemap(
+        rom: ByteArray, instrListPtr: Int, aiBank: Int, tileCount: Int = Int.MAX_VALUE
+    ): Spritemap? {
+        return findFirstSpritemapImpl(rom, instrListPtr, aiBank, tileCount, depth = 0)
+    }
+
+    private fun findFirstSpritemapImpl(
+        rom: ByteArray, instrListPtr: Int, aiBank: Int, tileCount: Int, depth: Int
+    ): Spritemap? {
         val ilPc = romParser.snesToPc((aiBank shl 16) or instrListPtr)
         if (ilPc < 0) return null
 
-        // Format A: [timer(2), spritemap(2)] — standard
+        // Format A: [timer(2), spritemap_ptr(2)] — standard
+        // Entries with timer >= 0x8000 are handler/control opcodes (skipped).
+        // Spritemap pointers must be in the LoROM ROM range ($8000-$FFFF) since
+        // addresses $0000-$7FFF are WRAM/hardware on SNES, not valid data locations.
         var offset = 0
-        for (frame in 0 until 32) {
+        for (frame in 0 until 64) {
             if (ilPc + offset + 3 >= rom.size) break
             val word0 = readU16(rom, ilPc + offset)
             val word1 = readU16(rom, ilPc + offset + 2)
@@ -423,17 +520,38 @@ class EnemySpritemap(private val romParser: RomParser) {
             if (word0 == 0 && word1 == 0) break
             if (word0 >= 0x8000) continue
             if (word0 == 0) continue
+            if (word1 < 0x8000) continue
 
             val smapSnes = (aiBank shl 16) or word1
             val smap = parseSpritemap(smapSnes)
-            if (smap != null) return smap
+            if (smap != null && spritemapFitsTileData(smap, tileCount)) return smap
         }
 
-        // Format B: [handler(2), timer(2)] — some enemies use this format where
-        // the handler pointer doubles as/contains spritemap data.
-        // Also try each word0 as a potential spritemap pointer.
+        // Some enemies (e.g. Sidehopper) use a 2-level AI structure where handler
+        // params in the first instruction list point to secondary instruction lists
+        // that contain the actual animation frames. Follow handler params one level deep.
+        if (depth < 1) {
+            offset = 0
+            for (frame in 0 until 16) {
+                if (ilPc + offset + 3 >= rom.size) break
+                val word0 = readU16(rom, ilPc + offset)
+                val word1 = readU16(rom, ilPc + offset + 2)
+                offset += 4
+
+                if (word0 == 0 && word1 == 0) break
+                // Handler entry: word0 >= 0x8000, param (word1) is a valid LoROM address
+                if (word0 >= 0x8000 && word1 in 0x8000..0xFFFF) {
+                    val sub = findFirstSpritemapImpl(rom, word1, aiBank, tileCount, depth + 1)
+                    if (sub != null && sub.entries.size >= 3 && isPlausibleSpritemap(sub)
+                        && spritemapFitsTileData(sub, tileCount)) return sub
+                }
+            }
+        }
+
+        // Format B fallback: try word1/word0 as direct spritemap addresses.
+        // Use strict validation to avoid matching random ROM data.
         offset = 0
-        for (frame in 0 until 32) {
+        for (frame in 0 until 64) {
             if (ilPc + offset + 3 >= rom.size) break
             val word0 = readU16(rom, ilPc + offset)
             val word1 = readU16(rom, ilPc + offset + 2)
@@ -441,15 +559,57 @@ class EnemySpritemap(private val romParser: RomParser) {
 
             if (word0 == 0 && word1 == 0) break
 
-            // Try word0 as a spritemap pointer (handler-based format)
+            // Try word1 as spritemap (handler's param may be a spritemap pointer)
+            if (word1 > 0 && word1 < 0x8000) {
+                val smapSnes = (aiBank shl 16) or word1
+                val smap = parseSpritemap(smapSnes)
+                if (smap != null && isPlausibleSpritemap(smap)) return smap
+            }
+            // Try word0 as spritemap
             if (word0 > 0) {
                 val smapSnes = (aiBank shl 16) or word0
                 val smap = parseSpritemap(smapSnes)
-                if (smap != null) return smap
+                if (smap != null && isPlausibleSpritemap(smap)) return smap
             }
         }
 
         return null
+    }
+
+    /**
+     * Check if all tile indices in the spritemap would fit within [tileCount] tiles
+     * arranged in a 16-tile-wide VRAM grid. Used to validate direction table results.
+     */
+    private fun spritemapFitsTileData(smap: Spritemap, tileCount: Int): Boolean {
+        for (entry in smap.entries) {
+            val local = entry.tileNum and 0xFF
+            if (entry.is16x16) {
+                // 16x16 uses tiles [N, N+1, N+16, N+17]
+                val maxTile = maxOf(local + 1, local + 17)
+                if (maxTile >= tileCount) return false
+            } else {
+                if (local >= tileCount) return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * Validate that a parsed spritemap looks like real sprite data, not random code bytes.
+     * Used to filter false positives in Format B fallback.
+     */
+    private fun isPlausibleSpritemap(smap: Spritemap): Boolean {
+        if (smap.entries.size > 24) return false
+        val nameTableBits = smap.entries.map { it.tileNum and 0x100 }.toSet()
+        // All entries should use the same name table (0 or 1)
+        if (nameTableBits.size > 1) return false
+        // Bounding box should be reasonable
+        val minX = smap.entries.minOf { it.xOffset }
+        val maxX = smap.entries.maxOf { it.xOffset + (if (it.is16x16) 16 else 8) }
+        val minY = smap.entries.minOf { it.yOffset }
+        val maxY = smap.entries.maxOf { it.yOffset + (if (it.is16x16) 16 else 8) }
+        if (maxX - minX > 128 || maxY - minY > 128) return false
+        return true
     }
 
     private fun parseAnimationFrames(

@@ -83,7 +83,7 @@ fun EnemySpriteViewer(
         val td = tileData ?: return@remember null
         val gfx = EnemySpriteGraphics(rp)
         gfx.loadFromRaw(listOf(td))
-        gfx.renderSheet(pal)
+        gfx.renderSheet(pal, 16)  // 16 columns = SNES VRAM layout for OAM tiles
     }
 
     Column(

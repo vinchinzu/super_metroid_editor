@@ -3,7 +3,9 @@ package com.supermetroid.editor.rom
 /**
  * Handles boss/enemy sprite tile graphics for the sprite editor.
  *
- * Super Metroid enemy sprites are stored as LZ5-compressed 4bpp tile blocks in bank $B7.
+ * Super Metroid enemy sprites are stored as 4bpp tile blocks. Boss sprites (Phantoon, Kraid)
+ * use LZ5-compressed data in banks $B7/$B9. Regular enemy sprites use raw (uncompressed)
+ * 4bpp data at the GRAPHADR address in the species header.
  * Each 8x8 tile = 32 bytes (standard SNES 4bpp interleaved format):
  *   - Bytes  0-15: bitplanes 0+1 interleaved (2 bytes per row × 8 rows)
  *   - Bytes 16-31: bitplanes 2+3 interleaved (2 bytes per row × 8 rows)
@@ -173,8 +175,9 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
         }
 
         /**
-         * Load and render enemy tile data directly from ROM using GRAPHADR.
-         * Decompresses the full block, then truncates to tileDataSize.
+         * Load enemy tile data directly from ROM using GRAPHADR.
+         * The GRAPHADR field points to raw (uncompressed) 4bpp tile data in ROM.
+         * We copy exactly tileDataSize bytes starting at the GRAPHADR address.
          * @return raw 4bpp tile bytes (tileDataSize bytes) or null
          */
         fun loadEnemyTileData(romParser: RomParser, speciesId: Int): ByteArray? {
@@ -182,16 +185,9 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             val tileDataSize = stats.first
             if (tileDataSize <= 0) return null
             val block = readGraphicsBlock(romParser, speciesId) ?: return null
-            return try {
-                val fullData = romParser.decompressLZ5AtPc(block.pcAddress)
-                if (fullData.size >= tileDataSize) {
-                    fullData.copyOf(tileDataSize)
-                } else {
-                    fullData
-                }
-            } catch (_: Exception) {
-                null
-            }
+            val rom = romParser.getRomData()
+            if (block.pcAddress + tileDataSize > rom.size) return null
+            return rom.copyOfRange(block.pcAddress, block.pcAddress + tileDataSize)
         }
 
         /** Extract a ≤16-color palette from an ARGB pixel array (index 0 = transparent). */
