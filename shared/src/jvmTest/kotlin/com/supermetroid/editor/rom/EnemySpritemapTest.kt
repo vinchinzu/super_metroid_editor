@@ -61,6 +61,17 @@ class EnemySpritemapTest {
     }
 
     @Test
+    fun `parse Sidehopper spritemap via cross-function LDA abs,x trace`() {
+        val rp = loadTestRom() ?: return
+        val smap = EnemySpritemap(rp)
+
+        val sidehopperSmap = smap.findDefaultSpritemap(0xD93F)
+        assertNotNull(sidehopperSmap, "Should find Sidehopper spritemap via cross-function trace")
+        assertTrue(sidehopperSmap!!.entries.size >= 3,
+            "Sidehopper should have at least 3 OAM entries (has ${sidehopperSmap.entries.size})")
+    }
+
+    @Test
     fun `render assembled sprites for supported enemies`() {
         val rp = loadTestRom() ?: return
         val smap = EnemySpritemap(rp)
@@ -68,6 +79,7 @@ class EnemySpritemapTest {
         val enemies = mapOf(
             0xDCFF to "Zoomer",
             0xDC7F to "Zeela",
+            0xD93F to "Sidehopper",
             0xD7FF to "Skree",
             0xCFFF to "Cacatac",
         )

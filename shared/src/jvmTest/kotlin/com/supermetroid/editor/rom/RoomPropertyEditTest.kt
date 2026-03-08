@@ -306,6 +306,96 @@ class RoomPropertyEditTest {
             "Two empty StateDataChanges should be equal (no changes to apply)")
     }
 
+    // ─── Multi-state per-state field variation (regression for remember-key bug) ──
+
+    @Test
+    fun `multi-state rooms have per-state music and tileset values`() {
+        val parser = loadTestRom() ?: return
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
+        assertTrue(allStates.size >= 2,
+            "Landing Site needs multiple states for this test, got ${allStates.size}")
+
+        val stateFields = allStates.map { off ->
+            val data = parser.readStateData(off)
+            Triple(data["tileset"]!!, data["musicData"]!!, data["musicTrack"]!!)
+        }
+
+        println("Landing Site per-state fields:")
+        for ((i, f) in stateFields.withIndex()) {
+            println("  State #$i: tileset=${f.first}, musicData=0x${f.second.toString(16)}, musicTrack=0x${f.third.toString(16)}")
+        }
+
+        for ((i, f) in stateFields.withIndex()) {
+            assertTrue(f.first in 0..29, "State #$i tileset ${f.first} out of range")
+            assertTrue(f.second in 0..0xFF, "State #$i musicData out of byte range")
+            assertTrue(f.third in 0..0xFF, "State #$i musicTrack out of byte range")
+        }
+    }
+
+    @Test
+    fun `StateDataChange is empty when edit matches orig - prevents false positives`() {
+        val parser = loadTestRom() ?: return
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
+        assertTrue(allStates.size >= 2)
+
+        for ((i, stateOff) in allStates.withIndex()) {
+            val data = parser.readStateData(stateOff)
+            val origTileset = data["tileset"]!!
+            val origMusicData = data["musicData"]!!
+            val origMusicTrack = data["musicTrack"]!!
+            val origBg = data["bgScrolling"]!!
+
+            val change = StateDataChange(
+                tileset = origTileset.takeIf { it != origTileset },
+                musicData = origMusicData.takeIf { it != origMusicData },
+                musicTrack = origMusicTrack.takeIf { it != origMusicTrack },
+                bgScrolling = origBg.takeIf { it != origBg }
+            )
+            assertEquals(StateDataChange(), change,
+                "State #$i: editing to match orig values should produce empty change (no false positive)")
+        }
+    }
+
+    @Test
+    fun `stale edit from one state produces false positive against different state`() {
+        val parser = loadTestRom() ?: return
+        val allStates = parser.findAllStateDataOffsets(0x91F8)
+        assertTrue(allStates.size >= 2, "Need multi-state room")
+
+        val state0Data = parser.readStateData(allStates[0])
+        val state1Data = parser.readStateData(allStates.last())
+
+        val music0 = state0Data["musicData"]!!
+        val music1 = state1Data["musicData"]!!
+
+        if (music0 == music1) {
+            println("Both states have same musicData ($music0), checking tileset instead")
+            val ts0 = state0Data["tileset"]!!
+            val ts1 = state1Data["tileset"]!!
+            if (ts0 != ts1) {
+                val staleChange = StateDataChange(
+                    tileset = ts0.takeIf { it != ts1 }
+                )
+                assertNotEquals(StateDataChange(), staleChange,
+                    "Stale tileset from state 0 ($ts0) compared against state 1 ($ts1) should flag a false positive")
+                println("Confirmed: stale tileset $ts0 vs orig $ts1 produces false StateDataChange(tileset=$ts0)")
+            } else {
+                println("Both states have identical tileset and music - cannot reproduce cross-state scenario with this room")
+            }
+            return
+        }
+
+        val staleChange = StateDataChange(
+            musicData = music0.takeIf { it != music1 }
+        )
+        assertNotEquals(StateDataChange(), staleChange,
+            "Stale musicData from state 0 (0x${music0.toString(16)}) compared against " +
+            "state 1's orig (0x${music1.toString(16)}) should flag a false positive - " +
+            "this is the bug that caused blank screen on new game")
+        println("Confirmed: stale musicData 0x${music0.toString(16)} vs orig 0x${music1.toString(16)} " +
+                "produces false StateDataChange - the remember-key bug would cause this")
+    }
+
     // ─── Multi-room scroll analysis ─────────────────────────────────
 
     @Test

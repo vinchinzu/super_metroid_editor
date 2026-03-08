@@ -108,9 +108,10 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
 
         /**
          * Read a 16-color ARGB palette from a species header.
-         * Palette address = $(aiBank):(palPtr + 0x20), where:
-         *   - aiBank is at species header +$0C
-         *   - palPtr is at species header +$02
+         *
+         * The game's ProcessEnemyTilesets ($A0:8D64) loads exactly 32 bytes
+         * (1 palette row) from $(bank):$(palette_ptr) — i.e. row 0:
+         *   memcpy(&target_palettes[...], RomPtrWithBank(ED->bank, ED->palette_ptr), 32);
          */
         fun readEnemyPalette(romParser: RomParser, speciesId: Int): IntArray? {
             val rom = romParser.getRomData()
@@ -120,26 +121,8 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
                 ((rom[headerPc + 3].toInt() and 0xFF) shl 8)
             val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
 
-            // Enemy palette blocks can have multiple 32-byte rows.
-            // Row 1 (+0x20) is the standard sprite palette in many enemies,
-            // but some have only 1 row. Detect by checking for valid BGR555:
-            // valid BGR555 values have bit 15 clear (max 0x7FFF).
-            val row1Snes = (aiBank shl 16) or ((palPtr + 0x20) and 0xFFFF)
-            val row1Pc = romParser.snesToPc(row1Snes)
-            val row1Valid = row1Pc >= 0 && row1Pc + 32 <= rom.size && run {
-                (0 until 16).all { i ->
-                    val w = (rom[row1Pc + i * 2].toInt() and 0xFF) or
-                        ((rom[row1Pc + i * 2 + 1].toInt() and 0xFF) shl 8)
-                    w <= 0x7FFF
-                }
-            }
-
-            val palPc = if (row1Valid) {
-                row1Pc
-            } else {
-                val row0Snes = (aiBank shl 16) or (palPtr and 0xFFFF)
-                romParser.snesToPc(row0Snes)
-            }
+            val palSnes = (aiBank shl 16) or (palPtr and 0xFFFF)
+            val palPc = romParser.snesToPc(palSnes)
             if (palPc < 0 || palPc + 32 > rom.size) return null
 
             val pal = IntArray(16)
@@ -160,7 +143,8 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
             val rom = romParser.getRomData()
             val pc = romParser.snesToPc(0xA00000 or speciesId)
             if (pc < 0 || pc + 8 > rom.size) return null
-            val tileSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
+            val rawTileSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
+            val tileSize = rawTileSize and 0x7FFF // bit 15 is a VRAM offset flag, not size
             val hp = (rom[pc + 4].toInt() and 0xFF) or ((rom[pc + 5].toInt() and 0xFF) shl 8)
             val damage = (rom[pc + 6].toInt() and 0xFF) or ((rom[pc + 7].toInt() and 0xFF) shl 8)
             return Triple(tileSize, hp, damage)

@@ -57,7 +57,7 @@ The final entry is always `E5E6` (default), whose 26-byte state data follows inl
 | `E652` | Morph ball + missiles collected   | 2-byte state ptr | 4 |
 | `E669` | Power bombs collected             | 2-byte state ptr | 4 |
 | `E5EB` | Door pointer = [X] *(unused)*     | 2-byte arg + 2-byte state ptr | 6 |
-| `E5FF` | Main area boss dead *(unused)*    | 2-byte arg + 2-byte state ptr | 6 |
+| `E5FF` | Main area boss dead               | 2-byte state ptr | 4 |
 | `E640` | Morph ball collected *(unused)*   | 2-byte state ptr | 4 |
 | `E678` | Speed booster collected *(unused)*| 2-byte state ptr | 4 |
 
