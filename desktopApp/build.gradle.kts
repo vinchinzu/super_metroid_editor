@@ -1,5 +1,6 @@
 plugins {
     kotlin("multiplatform")
+    kotlin("plugin.serialization") version "1.9.0"
     id("org.jetbrains.compose")
 }
 
@@ -24,6 +25,12 @@ kotlin {
                 
                 // JSON parsing
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
+                // JNA (for libretro core loading)
+                implementation("net.java.dev.jna:jna:5.14.0")
+
+                // Jamepad (SDL2-based gamepad support)
+                implementation("com.badlogicgames.jamepad:jamepad:2.30.0.0")
             }
         }
         val jvmTest by getting {
@@ -33,6 +40,26 @@ kotlin {
             }
         }
     }
+}
+
+tasks.register<JavaExec>("benchmark") {
+    description = "Run emulator backend benchmark (libretro/snes9x)"
+    group = "verification"
+    dependsOn("jvmMainClasses")
+    mainClass.set("com.supermetroid.editor.benchmark.EmulatorBenchmarkKt")
+    val jvmTarget = kotlin.targets.getByName("jvm")
+    val mainCompilation = jvmTarget.compilations.getByName("main")
+    classpath = mainCompilation.output.allOutputs + mainCompilation.runtimeDependencyFiles!!
+    workingDir = rootProject.projectDir
+    // Forward benchmark env vars
+    listOf("SMEDIT_ROM_PATH", "SMEDIT_LIBRETRO_CORE", "BENCH_BACKENDS", "BENCH_FRAMES", "BENCH_WARMUP_FRAMES").forEach { key ->
+        System.getenv(key)?.let { environment(key, it) }
+    }
+}
+
+// Ensure the libretro core is built before running or packaging
+tasks.named("jvmMainClasses") {
+    dependsOn(rootProject.tasks.named("buildLibretroCore"))
 }
 
 compose.desktop {

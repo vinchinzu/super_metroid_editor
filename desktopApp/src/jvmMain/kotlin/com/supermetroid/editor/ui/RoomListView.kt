@@ -34,7 +34,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -128,27 +127,6 @@ fun RoomListView(
 
     val showAreaHeaders = sortMode == RoomSortMode.AREA && searchQuery.isBlank()
     val totalRoomCount = rooms.size
-
-    // Scroll to selected room when it changes
-    LaunchedEffect(selectedRoom?.handle, filteredSortedRooms) {
-        val handle = selectedRoom?.handle ?: return@LaunchedEffect
-        val idx = filteredSortedRooms.indexOfFirst { it.handle == handle }
-        if (idx >= 0) {
-            // When using area headers, account for header items before this index
-            val headerOffset = if (showAreaHeaders) {
-                val seenAreas = mutableSetOf<Int>()
-                var headers = 0
-                for (i in 0 until idx) {
-                    val a = roomAreas[filteredSortedRooms[i].handle] ?: -1
-                    if (a >= 0 && seenAreas.add(a)) headers++
-                }
-                val thisArea = roomAreas[filteredSortedRooms[idx].handle] ?: -1
-                if (thisArea >= 0 && seenAreas.add(thisArea)) headers++
-                headers
-            } else 0
-            listState.animateScrollToItem(idx + headerOffset)
-        }
-    }
 
     Card(
         modifier = modifier,

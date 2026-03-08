@@ -75,6 +75,19 @@ Grab the latest release for your platform from [GitHub Releases](https://github.
 
 Requires JDK 17+ and a C++ compiler (Xcode CLI tools on macOS, `g++` on Linux, MinGW on Windows).
 
+### Embedded Emulator (snes9x via libretro)
+
+The editor includes an embedded SNES emulator powered by snes9x, loaded in-process via JNA. The snes9x core is built from source as a git submodule (`tools/snes9x`).
+
+The emulator runs in a floating draggable/resizable window. Click the **EMU** button in the toolbar to toggle it. Press **Play** to export a patched ROM with all current edits applied and start the emulator.
+
+**Controller support:** Bluetooth SNES controllers (and other SDL-compatible gamepads) are supported via Jamepad/SDL2. Save state combos follow the Super Metroid practice ROM pattern:
+- `R + Y + SELECT` — Save state to current slot
+- `L + Y + SELECT` — Load state from current slot
+- `L + R + Y + D-Pad Up/Down` — Cycle save slot number
+
+**Keyboard controls:** Arrow keys for D-pad, Z/X/A/S for B/A/Y/X, Q/W for L/R, Enter for Start, Tab for Select.
+
 ```bash
 # Clone with submodules (required for SPC audio)
 git clone --recurse-submodules git@github.com:kennycason/super_metroid_editor.git
