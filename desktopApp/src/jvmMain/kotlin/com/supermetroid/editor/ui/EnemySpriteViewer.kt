@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +19,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,7 +47,6 @@ import com.supermetroid.editor.rom.RomParser
 import java.awt.image.BufferedImage
 
 @Composable
-@Suppress("UNUSED_PARAMETER")
 fun EnemySpriteViewer(
     entry: EnemySpriteGraphics.Companion.EnemySpriteEntry,
     romParser: RomParser?,
@@ -56,6 +61,38 @@ fun EnemySpriteViewer(
         return
     }
 
+    // Pixel editor state
+    var editingPixels by remember { mutableStateOf<IntArray?>(null) }
+    var editingWidth by remember { mutableStateOf(0) }
+    var editingHeight by remember { mutableStateOf(0) }
+    var editingPalette by remember { mutableStateOf<IntArray?>(null) }
+    var editingReference by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var refreshKey by remember { mutableStateOf(0) }
+
+    // If pixel editor is open, show it full-screen
+    val ep = editingPixels
+    if (ep != null) {
+        SpritePixelEditor(
+            label = "${entry.name} Tile Sheet",
+            initialPixels = ep,
+            imageWidth = editingWidth,
+            imageHeight = editingHeight,
+            fixedPalette = editingPalette,
+            referenceImage = editingReference,
+            onApply = { pixels ->
+                editorState.applyEnemyTileSheetEdits(rp, entry.speciesId, pixels, editingWidth, editingHeight)
+                refreshKey++
+            },
+            onClose = {
+                editingPixels = null
+                editingPalette = null
+                editingReference = null
+            },
+            modifier = modifier
+        )
+        return
+    }
+
     val stats = remember(entry.speciesId) {
         EnemySpriteGraphics.readSpeciesStats(rp, entry.speciesId)
     }
@@ -66,11 +103,11 @@ fun EnemySpriteViewer(
         EnemySpriteGraphics.readGraphicsBlock(rp, entry.speciesId)
     }
 
-    val tileData = remember(entry.speciesId) {
-        EnemySpriteGraphics.loadEnemyTileData(rp, entry.speciesId)
+    val tileData = remember(entry.speciesId, refreshKey) {
+        editorState.loadEnemyTileData(rp, entry.speciesId)
     }
 
-    val assembledSprite = remember(entry.speciesId) {
+    val assembledSprite = remember(entry.speciesId, refreshKey) {
         val pal = palette ?: return@remember null
         val td = tileData ?: return@remember null
         val smap = EnemySpritemap(rp)
@@ -78,12 +115,12 @@ fun EnemySpriteViewer(
         smap.renderSpritemap(defaultSmap, td, pal)
     }
 
-    val tileSheet = remember(entry.speciesId) {
+    val tileSheet = remember(entry.speciesId, refreshKey) {
         val pal = palette ?: return@remember null
         val td = tileData ?: return@remember null
         val gfx = EnemySpriteGraphics(rp)
         gfx.loadFromRaw(listOf(td))
-        gfx.renderSheet(pal, 16)  // 16 columns = SNES VRAM layout for OAM tiles
+        gfx.renderSheet(pal, 16)
     }
 
     Column(
@@ -217,9 +254,10 @@ fun EnemySpriteViewer(
             }
         }
 
-        // Tile sheet preview
+        // Tile sheet preview with Edit button
         if (tileSheet != null) {
             val (pixels, w, h) = tileSheet
+            val hasCustom = editorState.hasCustomEnemyTiles(entry.speciesId)
             val bitmap = remember(pixels, w, h) {
                 val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
                 img.setRGB(0, 0, w, h, pixels, 0, w)
@@ -231,8 +269,69 @@ fun EnemySpriteViewer(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Tile Sheet [ROM]", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Tile Sheet", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Surface(
+                                color = if (hasCustom) Color(0xFF333366) else Color(0xFF336633),
+                                shape = RoundedCornerShape(3.dp)
+                            ) {
+                                Text(
+                                    if (hasCustom) "CUSTOM" else "ROM",
+                                    fontSize = 7.sp,
+                                    color = if (hasCustom) Color(0xFF8888FF) else Color(0xFF88FF88),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Button(
+                                onClick = {
+                                    val pal = palette ?: return@Button
+                                    // Build reference bitmap from assembled sprite
+                                    val refBitmap = assembledSprite?.let { sprite ->
+                                        val img = BufferedImage(sprite.width, sprite.height, BufferedImage.TYPE_INT_ARGB)
+                                        img.setRGB(0, 0, sprite.width, sprite.height, sprite.pixels, 0, sprite.width)
+                                        img.toComposeImageBitmap()
+                                    }
+                                    editingPixels = pixels.copyOf()
+                                    editingWidth = w
+                                    editingHeight = h
+                                    editingPalette = pal
+                                    editingReference = refBitmap
+                                },
+                                modifier = Modifier.height(28.dp),
+                                contentPadding = ButtonDefaults.ContentPadding.let {
+                                    androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                }
+                            ) {
+                                Text("Edit Tiles", fontSize = 10.sp)
+                            }
+                            if (hasCustom) {
+                                Button(
+                                    onClick = {
+                                        editorState.resetEnemyTiles(entry.speciesId)
+                                        refreshKey++
+                                    },
+                                    modifier = Modifier.height(28.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                    ),
+                                    contentPadding = ButtonDefaults.ContentPadding.let {
+                                        androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                    }
+                                ) {
+                                    Text("Reset", fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
                     Divider(modifier = Modifier.padding(vertical = 2.dp))
 
                     val checkerSize = 4
@@ -273,8 +372,7 @@ fun EnemySpriteViewer(
                 ) {
                     Text("Could not load tile data",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("The GRAPHADR field in this enemy's species header may be invalid,\n" +
-                        "or the compressed tile data could not be decompressed.",
+                    Text("The GRAPHADR field in this enemy's species header may be invalid.",
                         fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         lineHeight = 14.sp)
                 }

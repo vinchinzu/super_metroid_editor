@@ -316,6 +316,59 @@ class EditorState {
         dirty = true
     }
 
+    // ── Enemy tile-sheet editing (raw 4bpp) ──────────────────────────────────
+
+    /**
+     * Load the effective tile data for an enemy species.
+     * Returns custom project data if present, otherwise raw ROM data.
+     */
+    fun loadEnemyTileData(romParser: com.supermetroid.editor.rom.RomParser, speciesId: Int): ByteArray? {
+        val key = "enemy:${speciesId.toString(16).uppercase()}"
+        val customB64 = project.customGfx.spriteTileBlocks[key]
+        if (customB64 != null) {
+            try {
+                return java.util.Base64.getDecoder().decode(customB64)
+            } catch (_: Exception) { /* fall through to ROM */ }
+        }
+        return com.supermetroid.editor.rom.EnemySpriteGraphics.loadEnemyTileData(romParser, speciesId)
+    }
+
+    /**
+     * Apply pixel edits to an enemy's tile sheet. Converts ARGB pixels back to
+     * raw 4bpp tile data and stores in the project.
+     */
+    fun applyEnemyTileSheetEdits(
+        romParser: com.supermetroid.editor.rom.RomParser,
+        speciesId: Int,
+        pixels: IntArray,
+        w: Int,
+        h: Int
+    ) {
+        val palette = com.supermetroid.editor.rom.EnemySpriteGraphics.readEnemyPalette(romParser, speciesId) ?: return
+        val tileData = loadEnemyTileData(romParser, speciesId) ?: return
+        val gfx = com.supermetroid.editor.rom.EnemySpriteGraphics(romParser)
+        gfx.loadFromRaw(listOf(tileData))
+        gfx.importFromArgb(pixels, w, h, palette, 16)
+        val rawBlocks = gfx.getRawBlocks() ?: return
+        val raw = rawBlocks.firstOrNull() ?: return
+        val key = "enemy:${speciesId.toString(16).uppercase()}"
+        project.customGfx.spriteTileBlocks[key] = java.util.Base64.getEncoder().encodeToString(raw)
+        dirty = true
+    }
+
+    /** Whether the project has custom tile data for this enemy. */
+    fun hasCustomEnemyTiles(speciesId: Int): Boolean {
+        val key = "enemy:${speciesId.toString(16).uppercase()}"
+        return project.customGfx.spriteTileBlocks.containsKey(key)
+    }
+
+    /** Reset custom enemy tile data to ROM defaults. */
+    fun resetEnemyTiles(speciesId: Int) {
+        val key = "enemy:${speciesId.toString(16).uppercase()}"
+        project.customGfx.spriteTileBlocks.remove(key)
+        dirty = true
+    }
+
     // ── Boss sprite tile-sheet editing ───────────────────────────────────────
 
     /**

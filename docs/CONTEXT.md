@@ -111,8 +111,8 @@ Screenshots and reference images for SMILE editors (BTS, enemy, FX, PLM).
 | +$0C | 1 | aiBank | Bank for AI, palette, AND spritemap data |
 | +$12 | 2 | initAI | Init function pointer (in aiBank) |
 | +$14 | 2 | parts | Sub-pieces (0 = 1 part) |
-| +$36 | 2 | GRAPHADR offset | Compressed tile data offset |
-| +$38 | 1 | GRAPHADR bank | Compressed tile data bank |
+| +$36 | 2 | GRAPHADR offset | Raw 4bpp tile data offset |
+| +$38 | 1 | GRAPHADR bank | Raw 4bpp tile data bank |
 | +$39 | 1 | Layer control | 02=front, 05=behind Samus, 0B=behind BG |
 | +$3A | 2 | Drop chances ptr | Bank $B4 |
 | +$3C | 2 | Resistances ptr | Bank $B4 |

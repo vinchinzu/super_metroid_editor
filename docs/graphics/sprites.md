@@ -32,8 +32,8 @@ the header offset within bank $A0.
 | +$10 | 2 | ??? | Unknown |
 | +$12 | 2 | initAI | Init function pointer (in aiBank) |
 | +$14 | 2 | parts | Number of sub-pieces (0 = 1 part) |
-| +$36 | 2 | GRAPHADR offset | 16-bit LE offset of compressed tile data |
-| +$38 | 1 | GRAPHADR bank | Bank byte for compressed tile data |
+| +$36 | 2 | GRAPHADR offset | 16-bit LE offset of raw 4bpp tile data |
+| +$38 | 1 | GRAPHADR bank | Bank byte for tile data |
 | +$39 | 1 | Layer control | 02=front, 05=behind Samus, 0B=behind BG |
 | +$3A | 2 | Drop chances ptr | Bank $B4 |
 | +$3C | 2 | Resistances ptr | Bank $B4 |
@@ -46,15 +46,17 @@ the header offset within bank $A0.
 When bit 15 is set, the VRAM offset calculation changes from sequential
 (`(vram_dst & 0x3000) >> 3` instead of linear), but the tile count is the same.
 
-### GRAPHADR — Compressed Tile Source
+### GRAPHADR — Tile Data Source
 
 `GRAPHADR = $(bank at +$38):(offset at +$36-37)`
 
-Points to LZ5-compressed tile data in the ROM. The game decompresses the full block
-but only loads the first `tileDataSize & 0x7FFF` bytes into VRAM.
+Points to **raw (uncompressed) 4bpp tile data** in the ROM for regular enemies.
+The game copies exactly `tileDataSize & 0x7FFF` bytes from this address into VRAM.
 
-Multiple enemies can share the same GRAPHADR block with different tileDataSizes.
-Bosses (Phantoon, Kraid, etc.) use separate DMA-based tile loading instead.
+Multiple enemies can share the same GRAPHADR block with different tileDataSizes
+(each species uses the first N bytes of the shared block).
+
+Bosses (Phantoon, Kraid, etc.) use separate LZ5-compressed DMA-based tile loading instead.
 
 ### Palette Loading
 
@@ -201,19 +203,44 @@ Draygon body has 32767 HP (effectively invincible to normal attacks).
 
 ## Editor-Supported Enemies
 
-The editor currently supports live sprite rendering for these enemies
-(via `EnemySpriteGraphics.EDITOR_ENEMIES`):
+The editor supports **110+ enemies** via `EnemySpriteGraphics.EDITOR_ENEMIES`, with live tile sheet
+rendering, OAM spritemap assembly, and pixel editing for all of them.
 
-### Auto-Detected via Init Tracing (OAM)
-- Zoomer, Zeela, Sidehopper, Skree, Cacatac
+### Categories
 
-### BG2 Tilemap Rendering
-- Phantoon (`PhantoonSpritemap.kt`)
-- Kraid (`KraidSpritemap.kt`)
+| Category | Examples | Count |
+|----------|----------|-------|
+| Boss | Phantoon, Kraid, Crocomire, Draygon, Ridley, Mother Brain, Big Metroid | 9 |
+| Mini-Boss | Spore Spawn, Botwoon, Mini Kraid, Torizo, Golden Torizo | 5 |
+| Wall Crawlers | Zoomer, Zeela, Geemer, Beetom, Sova | 5 |
+| Hoppers | Sidehopper, Dessgeega, Bull | 6 |
+| Flyers | Skree, Reo, Waver, Alcoon, Fireflea, Atomic, Mella | 11 |
+| Kihunters | Kihunter, Kzan, Kihunter (Green) | 3 |
+| Rippers | Ripper, Ripper II variants | 3 |
+| Stationary/Plants | Cacatac, Boyon, Yapping Maw, Viola, Powamp, etc. | 17 |
+| Aquatic/Maridia | Sciser, Oum, Skultera, Ebi, Zebbo | 7 |
+| Norfair | Holtz, Rinka, Squeept, Geruta, Hibashi, Lavaman | 8 |
+| Spawners | Zeb, Zebbo, Gamet, Geega, Dori | 6 |
+| Space Pirates | 12 variants (Norfair, Maridia, Tourian, Mk.II, Mk.III) | 12 |
+| Hachi (Bees) | Hachi 1-3 | 3 |
+| Friendly/Misc | Etecoon, Samus' Ship, Chozo Statues | 5 |
+| Mechanisms | Door Shutters, Shattered Glass | 4 |
+
+### Rendering Modes
+
+- **OAM Spritemap Assembly** — Standard enemies: init function tracing → instruction list → spritemap → assembled sprite
+- **BG2 Tilemap Rendering** — Phantoon (`PhantoonSpritemap.kt`), Kraid (`KraidSpritemap.kt`)
+- **Raw Tile Sheet** — All enemies show their 4bpp tile sheet with pixel editing support
+
+### Pixel Editing
+
+All enemies support tile sheet pixel editing via `SpritePixelEditor`. Custom tile data is stored
+in the project file under `customGfx.spriteTileBlocks["enemy:<speciesId>"]` and exported to the
+patched ROM.
 
 ### Pre-Rendered PNG Fallbacks
-All other enemies use static PNG sprites stored in
-`desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`.
+Enemies without successful OAM spritemap tracing still display their tile sheet.
+Static PNG sprites are also stored in `desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`.
 
 ---
 
@@ -221,7 +248,7 @@ All other enemies use static PNG sprites stored in
 
 ```
 Species Header ($A0)
-  ├── GRAPHADR → LZ5 decompress → raw 4bpp tile data
+  ├── GRAPHADR → raw 4bpp tile data (direct ROM copy, NOT compressed)
   ├── palPtr + aiBank → 32-byte palette (16 colors)
   ├── initAI → trace instruction list → spritemap pointers
   └── tileDataSize & 0x7FFF → bytes to load
