@@ -13,7 +13,9 @@ import com.supermetroid.editor.emulator.EmulatorBackend
 import com.supermetroid.editor.emulator.EmulatorCapabilities
 import com.supermetroid.editor.emulator.EmulatorInput
 import com.supermetroid.editor.emulator.EmulatorRegistry
+import com.supermetroid.editor.emulator.FrameHolder
 import com.supermetroid.editor.emulator.GameSnapshot
+import com.supermetroid.editor.emulator.LibretroBackend
 import com.supermetroid.editor.emulator.ModelInfo
 import com.supermetroid.editor.emulator.SessionConfig
 import com.supermetroid.editor.emulator.SessionState
@@ -130,6 +132,8 @@ class EmulatorWorkspaceState(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private var backend: EmulatorBackend? = null
+    var frameHolder: FrameHolder? = null
+        private set
     private var stepInFlight = false
     private val pressedKeys = mutableSetOf<Key>()
     private var lastFollowedRoomId: Int? = null
@@ -171,6 +175,8 @@ class EmulatorWorkspaceState(
         private set
     var isBusy by mutableStateOf(false)
         private set
+    var audioMuted by mutableStateOf(false)
+        private set
 
     var saveStates by mutableStateOf<List<StateInfo>>(emptyList())
         private set
@@ -210,6 +216,7 @@ class EmulatorWorkspaceState(
             val b = backendFactory?.invoke()
                 ?: EmulatorRegistry.create(selectedBackendName)
             backend = b
+            frameHolder = (b as? LibretroBackend)?.frameHolder
             val caps = b.connect()
             capabilities = caps
             configureBridge()
@@ -229,6 +236,7 @@ class EmulatorWorkspaceState(
         isRunning = false
         backend?.close()
         backend = null
+        frameHolder = null
         isConnected = false
         capabilities = null
         session = SessionState()
@@ -511,6 +519,12 @@ class EmulatorWorkspaceState(
         isRunning = running
     }
 
+    fun toggleAudioMute() {
+        val b = backend as? LibretroBackend ?: return
+        audioMuted = !audioMuted
+        b.audioMuted = audioMuted
+    }
+
     fun updateKey(key: Key, down: Boolean) {
         when {
             down -> pressedKeys.add(key)
@@ -715,6 +729,19 @@ class EmulatorWorkspaceState(
     }
 
     private suspend fun applySnapshot(incoming: GameSnapshot) {
+        // Fast path: in-process libretro backend provides frames via FrameHolder
+        val fh = frameHolder
+        if (fh != null) {
+            val directFrame = fh.latestFrame
+            val merged = mergeSnapshot(snapshot, incoming)
+            snapshot = merged
+            if (directFrame != null) {
+                frameBitmap = directFrame
+            }
+            return
+        }
+
+        // Slow path: remote backends (BizHawk, gym-retro) use Base64
         val decodedFrame = incoming
             .takeIf { it.frameRgb24Base64 != null }
             ?.let { withContext(Dispatchers.Default) { decodeFrame(it) } }

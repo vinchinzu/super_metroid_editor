@@ -241,6 +241,7 @@ fun EmulatorWorkspace(
                                 "record_on" -> workspaceState.setRecording(true)
                                 "record_off" -> workspaceState.setRecording(false)
                                 "sync_config" -> workspaceState.configureBridge()
+                                "toggle_mute" -> workspaceState.toggleAudioMute()
                             }
                         }
                     })
@@ -460,6 +461,14 @@ private fun EmulatorControlCard(
                     enabled = workspaceState.session.active && !workspaceState.isBusy,
                 ) {
                     Text(if (workspaceState.session.recording) "Stop Rec" else "Record", fontSize = 12.sp)
+                }
+                if (workspaceState.selectedBackendName == "libretro") {
+                    OutlinedButton(
+                        onClick = { onAction("toggle_mute") },
+                        enabled = workspaceState.isConnected,
+                    ) {
+                        Text(if (workspaceState.audioMuted) "Unmute" else "Mute", fontSize = 12.sp)
+                    }
                 }
             }
             Text(

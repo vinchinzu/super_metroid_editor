@@ -44,6 +44,8 @@ data class AppSettings(
     val bizhawkPort: Int = 43884,
     val emulatorNavExportDir: String = defaultNavExportDir(),
     val emulatorFollowLiveRoom: Boolean = true,
+    val libretroCorePath: String? = null,
+    val libretroAudioEnabled: Boolean = true,
 )
 
 object AppConfig {

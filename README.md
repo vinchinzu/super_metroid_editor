@@ -88,6 +88,29 @@ mise run test
 
 `test_bizhawk` runs the Lua syntax checks, Python bridge compile checks, and the full JVM test suite, including the BizHawk socket-backed backend tests.
 
+### Libretro Backend (Embedded Emulator)
+
+The `libretro` backend loads a SNES core in-process via JNA — no external emulator window needed.
+
+**Install a SNES libretro core:**
+
+```bash
+# Arch / Manjaro
+sudo pacman -S libretro-snes9x
+
+# Debian / Ubuntu
+sudo apt install libretro-snes9x
+
+# Or download from the libretro buildbot:
+# https://buildbot.libretro.com/nightly/linux/x86_64/latest/snes9x_libretro.so.zip
+# Place the .so in /usr/lib/libretro/ or ~/.config/retroarch/cores/
+```
+
+The editor auto-discovers cores in `/usr/lib/libretro/`, `~/.config/retroarch/cores/`, and `./cores/`.
+You can also set an explicit path via the `SMEDIT_LIBRETRO_CORE` environment variable or `libretroCorePath` in `~/.smedit/config.json`.
+
+**Usage:** In the Emu tab, select "libretro" from the backend dropdown, set the ROM path, then Connect → Start Session.
+
 ### Stable-Retro Runtime
 
 The `gym-retro` backend still uses the original `stable_retro` runtime from `add_emulator`.
@@ -113,6 +136,37 @@ That smoke path expects:
 `tools/ci/test_stable_retro.sh` auto-syncs integration data from the sibling game repo before it runs the bridge smoke.
 
 ### Manual BizHawk Bring-Up
+
+#### Linux Prerequisites
+
+BizHawk ships with luasocket DLLs for Windows only. On Linux you need the
+native `.so` equivalents so the TCP bridge can run:
+
+```bash
+# Arch / Manjaro
+sudo pacman -S lua-socket
+
+# Debian / Ubuntu
+sudo apt install lua-socket
+
+# Fedora
+sudo dnf install lua-socket
+```
+
+Then copy the shared libraries into BizHawk's Lua directory:
+
+```bash
+# Adjust the Lua version (5.4) and BizHawk path if yours differ
+cp /usr/lib/lua/5.4/socket/core.so ~/.bizhawk/Lua/socket/core.so
+cp /usr/lib/lua/5.4/mime/core.so   ~/.bizhawk/Lua/mime/core.so
+cp /usr/share/lua/5.4/socket.lua   ~/.bizhawk/Lua/socket.lua
+cp /usr/share/lua/5.4/mime.lua     ~/.bizhawk/Lua/mime.lua
+```
+
+Without these files BizHawk will fail with
+`module 'socket' not found` when loading `bridge.lua`.
+
+#### Running
 
 To open the editor straight into the emulator workspace and auto-boot a BizHawk `ZebesStart` savestate:
 
