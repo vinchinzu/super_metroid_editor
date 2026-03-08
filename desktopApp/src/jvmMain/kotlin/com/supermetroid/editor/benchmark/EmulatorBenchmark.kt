@@ -7,20 +7,17 @@ import com.supermetroid.editor.emulator.SessionConfig
 import kotlinx.coroutines.runBlocking
 
 /**
- * Headless benchmark comparing libretro vs stable-retro (gym-retro) backends.
+ * Headless benchmark for the libretro (snes9x) emulator backend.
  *
  * Usage:
- *   ./gradlew :desktopApp:run -PmainClass=com.supermetroid.editor.benchmark.EmulatorBenchmarkKt
- *
- * Or use the shell wrapper:
- *   ./tools/benchmark_backends.sh /path/to/rom.sfc
+ *   ./gradlew :desktopApp:benchmark
  *
  * Environment:
  *   SMEDIT_ROM_PATH       - path to Super Metroid ROM (.sfc)
  *   SMEDIT_LIBRETRO_CORE  - (optional) explicit core path
  *   BENCH_WARMUP_FRAMES   - warmup frames (default 60)
  *   BENCH_FRAMES          - benchmark frames (default 600)
- *   BENCH_BACKENDS        - comma-separated list (default "libretro,gym-retro")
+ *   BENCH_BACKENDS        - comma-separated list (default "libretro")
  */
 fun main() {
     val romPath = System.getenv("SMEDIT_ROM_PATH")?.trim()?.takeIf { it.isNotEmpty() }

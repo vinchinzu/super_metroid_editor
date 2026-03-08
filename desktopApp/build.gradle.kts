@@ -43,7 +43,7 @@ kotlin {
 }
 
 tasks.register<JavaExec>("benchmark") {
-    description = "Run emulator backend benchmark (libretro vs gym-retro)"
+    description = "Run emulator backend benchmark (libretro/snes9x)"
     group = "verification"
     dependsOn("jvmMainClasses")
     mainClass.set("com.supermetroid.editor.benchmark.EmulatorBenchmarkKt")
