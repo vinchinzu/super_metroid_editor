@@ -2,7 +2,6 @@ package com.supermetroid.editor.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,18 +19,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -94,6 +97,12 @@ fun FloatingEmulatorWindow(
     // Resizable width (height derived from aspect ratio)
     var windowWidth by remember { mutableStateOf(512f) }
 
+    // Fast forward state
+    var fastForwarding by remember { mutableStateOf(false) }
+
+    // Save/load slot dropdown state
+    var showSaveMenu by remember { mutableStateOf(false) }
+
     // Derived height: title bar + video (proportional) + control bar
     val videoHeight = windowWidth / SNES_ASPECT
     val totalHeight = TITLE_BAR_HEIGHT + videoHeight + CONTROL_BAR_HEIGHT
@@ -118,13 +127,25 @@ fun FloatingEmulatorWindow(
                 delay(waitMs)
                 continue
             }
-            val repeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
-            pendingFrames = (pendingFrames - repeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
+            val baseRepeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
+            val repeat = if (fastForwarding) (baseRepeat * 4).coerceAtMost(16) else baseRepeat
+            pendingFrames = (pendingFrames - baseRepeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
             workspaceState.stepFrame(
                 repeat = repeat,
                 includeFrame = tick % FRAME_REFRESH_INTERVAL == 0L,
                 includeTrace = tick % TRACE_REFRESH_INTERVAL == 0L,
             )
+            // Process gamepad combo actions (save/load/slot cycle)
+            workspaceState.pendingComboAction?.let { combo ->
+                workspaceState.pendingComboAction = null
+                val ws = workspaceState
+                when (combo) {
+                    "save" -> ws.saveQuickState("slot_${ws.saveSlotIndex}")
+                    "load" -> ws.loadNamedState("slot_${ws.saveSlotIndex}")
+                    "slot_up" -> ws.saveSlotIndex = (ws.saveSlotIndex + 1) % 129
+                    "slot_down" -> ws.saveSlotIndex = (ws.saveSlotIndex - 1 + 129) % 129
+                }
+            }
             tick += 1
             if (pendingFrames > MAX_STEP_REPEAT * 2) {
                 pendingFrames = MAX_STEP_REPEAT.toDouble()
@@ -186,20 +207,31 @@ fun FloatingEmulatorWindow(
                         )
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Resize handle: drag horizontally to resize
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (workspaceState.gamepadManager.isConnected) {
+                        Icon(
+                            Icons.Default.Gamepad,
+                            contentDescription = "Gamepad connected",
+                            modifier = Modifier.size(14.dp),
+                            tint = Color(0xFF4CAF50),
+                        )
+                    }
+                    // Resize handle: drag to resize
                     Text(
                         "\u2921", // diagonal resize arrow
-                        fontSize = 14.sp,
+                        fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier
+                            .size(24.dp, 24.dp)
                             .pointerInput(Unit) {
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()
                                     windowWidth = (windowWidth + dragAmount.x).coerceIn(MIN_WIDTH, MAX_WIDTH)
                                 }
-                            }
-                            .padding(horizontal = 4.dp),
+                            },
                     )
                     IconButton(
                         onClick = onClose,
@@ -316,24 +348,12 @@ fun FloatingEmulatorWindow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
-                // Rewind (load last checkpoint)
-                IconButton(
-                    onClick = { scope.launch { workspaceState.reloadLastCheckpoint() } },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(Icons.Default.FastRewind, "Reload checkpoint", Modifier.size(18.dp))
-                }
-
-                Spacer(Modifier.width(4.dp))
-
                 // Play / Pause
                 IconButton(
                     onClick = {
                         scope.launch {
                             if (!workspaceState.isConnected) workspaceState.connectBridge()
                             if (workspaceState.isConnected && !workspaceState.session.active) {
-                                // Build patched ROM before playing
                                 val rp = romParser
                                 if (rp != null) {
                                     val patchedPath = editorState.exportToRom(rp)
@@ -364,13 +384,18 @@ fun FloatingEmulatorWindow(
 
                 Spacer(Modifier.width(4.dp))
 
-                // Fast forward (step multiple frames)
+                // Fast forward (hold to speed up)
                 IconButton(
-                    onClick = { scope.launch { workspaceState.stepFrame(repeat = 4) } },
+                    onClick = { fastForwarding = !fastForwarding },
                     enabled = workspaceState.session.active && !workspaceState.isBusy,
                     modifier = Modifier.size(30.dp),
                 ) {
-                    Icon(Icons.Default.FastForward, "Fast forward", Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.FastForward, "Fast forward",
+                        Modifier.size(18.dp),
+                        tint = if (fastForwarding) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 Spacer(Modifier.width(4.dp))
@@ -400,7 +425,98 @@ fun FloatingEmulatorWindow(
                     Icon(Icons.Default.Refresh, "Restart with latest patches", Modifier.size(18.dp))
                 }
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(4.dp))
+
+                // Pipe separator
+                Text(
+                    "|",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                )
+
+                Spacer(Modifier.width(4.dp))
+
+                // SAVE text button
+                Surface(
+                    onClick = {
+                        scope.launch { workspaceState.saveQuickState("slot_${workspaceState.saveSlotIndex}") }
+                    },
+                    enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    color = Color.Transparent,
+                    shape = RoundedCornerShape(4.dp),
+                ) {
+                    Text(
+                        "SAVE",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+
+                Spacer(Modifier.width(2.dp))
+
+                // LOAD text button
+                Surface(
+                    onClick = {
+                        scope.launch { workspaceState.loadNamedState("slot_${workspaceState.saveSlotIndex}") }
+                    },
+                    enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    color = Color.Transparent,
+                    shape = RoundedCornerShape(4.dp),
+                ) {
+                    Text(
+                        "LOAD",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+
+                Spacer(Modifier.width(2.dp))
+
+                // Slot number + dropdown
+                Box {
+                    Surface(
+                        onClick = { showSaveMenu = !showSaveMenu },
+                        color = Color.Transparent,
+                        shape = RoundedCornerShape(4.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 2.dp),
+                        ) {
+                            Text(
+                                "${workspaceState.saveSlotIndex}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Icon(
+                                Icons.Default.ArrowDropDown, "Select slot",
+                                Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showSaveMenu,
+                        onDismissRequest = { showSaveMenu = false },
+                        modifier = Modifier.widthIn(max = 80.dp),
+                    ) {
+                        for (i in 0..128) {
+                            DropdownMenuItem(
+                                text = { Text("$i", fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
+                                onClick = { workspaceState.saveSlotIndex = i; showSaveMenu = false },
+                                modifier = Modifier.height(24.dp),
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(4.dp))
 
                 // Mute toggle
                 IconButton(

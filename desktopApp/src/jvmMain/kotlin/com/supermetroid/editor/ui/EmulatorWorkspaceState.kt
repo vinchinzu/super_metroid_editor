@@ -134,9 +134,11 @@ class EmulatorWorkspaceState(
         private set
     private var stepInFlight = false
     private val pressedKeys = mutableSetOf<Key>()
+    val gamepadManager = com.supermetroid.editor.controller.GamepadManager()
     private var lastFollowedRoomId: Int? = null
     private val roomExportCache = mutableMapOf<Int, EditorRoomExport>()
     private var currentRomPath: String? = null
+    private var comboConsumedUntilRelease = false
 
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
@@ -175,6 +177,10 @@ class EmulatorWorkspaceState(
         private set
     var audioMuted by mutableStateOf(false)
         private set
+    var saveSlotIndex by mutableStateOf(0)
+
+    /** Combo action queued by gamepad detection, consumed by the frame loop. */
+    var pendingComboAction by mutableStateOf<String?>(null)
 
     var saveStates by mutableStateOf<List<StateInfo>>(emptyList())
         private set
@@ -216,6 +222,7 @@ class EmulatorWorkspaceState(
             capabilities = caps
             configureBridge()
             isConnected = true
+            gamepadManager.init()
             statusMessage = "Connected to ${caps.backendName}"
             refreshInventory()
         } catch (e: Exception) {
@@ -229,6 +236,7 @@ class EmulatorWorkspaceState(
 
     fun disconnectBridge() {
         isRunning = false
+        gamepadManager.close()
         backend?.close()
         backend = null
         frameHolder = null
@@ -384,6 +392,13 @@ class EmulatorWorkspaceState(
         loadStateByName(b, stateName)
     }
 
+    suspend fun loadNamedState(name: String) {
+        val b = backend ?: return
+        if (!session.active) return
+        selectedStateName = name
+        loadStateByName(b, name)
+    }
+
     suspend fun resetToSessionStart() {
         val b = backend ?: return
         val stateName = sessionBootStateName ?: selectedStateName ?: return
@@ -514,6 +529,7 @@ class EmulatorWorkspaceState(
         val action = MutableList(12) { 0 }
         fun on(key: Key) = pressedKeys.contains(key)
 
+        // Keyboard input
         if (on(Key.DirectionRight)) action[7] = 1
         if (on(Key.DirectionLeft)) action[6] = 1
         if (on(Key.DirectionUp)) action[4] = 1
@@ -528,7 +544,52 @@ class EmulatorWorkspaceState(
         if (on(Key.Enter)) action[3] = 1
         if (on(Key.ShiftLeft) || on(Key.ShiftRight) || on(Key.Tab)) action[2] = 1
 
-        // Stable-retro does not like conflicting D-pad directions.
+        // Gamepad input (merged — either source can activate a button)
+        val pad = gamepadManager.poll()
+        if (pad != null) {
+            // Detect save/load combos before merging buttons.
+            // R+Y+SELECT = save, L+Y+SELECT = load,
+            // L+R+Y+UP = slot up, L+R+Y+DOWN = slot down
+            val pL = pad[10] == 1
+            val pR = pad[11] == 1
+            val pY = pad[1] == 1
+            val pSel = pad[2] == 1
+            val pUp = pad[4] == 1
+            val pDown = pad[5] == 1
+
+            val comboActive = when {
+                pL && pR && pY && pUp -> "slot_up"
+                pL && pR && pY && pDown -> "slot_down"
+                pR && pY && pSel && !pL -> "save"
+                pL && pY && pSel && !pR -> "load"
+                else -> null
+            }
+
+            if (comboActive != null && !comboConsumedUntilRelease) {
+                pendingComboAction = comboActive
+                comboConsumedUntilRelease = true
+                statusMessage = when (comboActive) {
+                    "save" -> "Saving slot $saveSlotIndex..."
+                    "load" -> "Loading slot $saveSlotIndex..."
+                    "slot_up" -> "Slot ${(saveSlotIndex + 1) % 129}"
+                    "slot_down" -> "Slot ${(saveSlotIndex - 1 + 129) % 129}"
+                    else -> ""
+                }
+            } else if (comboActive == null) {
+                comboConsumedUntilRelease = false
+                for (i in action.indices) {
+                    if (pad[i] == 1) action[i] = 1
+                }
+            }
+            // While combo is held, suppress all gamepad input to emulator
+        }
+        // Surface gamepad connect/disconnect events
+        gamepadManager.statusEvent?.let {
+            statusMessage = it
+            gamepadManager.statusEvent = null
+        }
+
+        // Cancel conflicting D-pad directions.
         if (action[6] == 1 && action[7] == 1) {
             action[6] = 0
             action[7] = 0

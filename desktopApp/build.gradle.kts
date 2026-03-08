@@ -28,6 +28,9 @@ kotlin {
 
                 // JNA (for libretro core loading)
                 implementation("net.java.dev.jna:jna:5.14.0")
+
+                // Jamepad (SDL2-based gamepad support)
+                implementation("com.badlogicgames.jamepad:jamepad:2.30.0.0")
             }
         }
         val jvmTest by getting {

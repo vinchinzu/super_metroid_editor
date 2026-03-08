@@ -589,6 +589,19 @@ fun main() = application {
                                     }
                                 }
 
+                                // Track emulator status changes for transient display
+                                val emuStatus = emulatorWorkspaceState.statusMessage
+                                var showEmuTransient by remember { mutableStateOf(false) }
+                                var lastEmuStatus by remember { mutableStateOf("") }
+                                LaunchedEffect(emuStatus) {
+                                    if (emuStatus != lastEmuStatus && emuStatus.isNotEmpty()) {
+                                        lastEmuStatus = emuStatus
+                                        showEmuTransient = true
+                                        delay(4000)
+                                        showEmuTransient = false
+                                    }
+                                }
+
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                                     shape = RectangleShape,
@@ -603,6 +616,14 @@ fun main() = application {
                                         if (showTransient && es.statusMessage.isNotEmpty()) {
                                             Text(
                                                 es.statusMessage,
+                                                fontSize = 9.sp,
+                                                fontFamily = monoFont,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        } else if (showEmuTransient && emuStatus.isNotEmpty()) {
+                                            Text(
+                                                "[EMU] $emuStatus",
                                                 fontSize = 9.sp,
                                                 fontFamily = monoFont,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
