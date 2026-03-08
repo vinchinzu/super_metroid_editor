@@ -42,7 +42,6 @@ import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.KraidSpriteEditor
 import com.supermetroid.editor.ui.blockTypeName
 import com.supermetroid.editor.ui.LocalSwingWindow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
 import com.supermetroid.editor.data.RomPreferences
@@ -499,8 +498,8 @@ fun main() = application {
                             }
 
                             // ─── Bottom status bar ───────────────────────
-                            if (editorState != null) {
-                                val es = editorState!!
+                            run {
+                                val es = editorState
                                 val statusTs = es.statusMessageTimestamp
                                 var showTransient by remember { mutableStateOf(false) }
                                 LaunchedEffect(statusTs) {
