@@ -1,6 +1,5 @@
 package com.supermetroid.editor.benchmark
 
-import com.supermetroid.editor.data.AppConfig
 import com.supermetroid.editor.emulator.EmulatorBackend
 import com.supermetroid.editor.emulator.EmulatorInput
 import com.supermetroid.editor.emulator.LibretroBackend
@@ -82,11 +81,7 @@ fun main() {
     if (backends.contains("libretro")) {
         println("── libretro (no audio — raw speed) ───────────────")
         try {
-            // Temporarily disable audio
-            val saved = AppConfig.load()
-            AppConfig.save(saved.copy(libretroAudioEnabled = false))
             val result = benchmarkBackend("libretro-no-audio", romPath, warmupFrames, benchFrames)
-            AppConfig.save(saved) // restore
             results.add(result)
             printResult(result)
         } catch (e: Exception) {
@@ -136,7 +131,7 @@ data class BenchResult(
 fun benchmarkBackend(backendName: String, romPath: String, warmupFrames: Int, benchFrames: Int): BenchResult {
     val backend: EmulatorBackend = when (backendName) {
         "libretro" -> LibretroBackend()
-        "libretro-no-audio" -> LibretroBackend()
+        "libretro-no-audio" -> LibretroBackend(audioEnabledOverride = false)
         "gym-retro" -> GymRetroBackend()
         else -> throw IllegalArgumentException("Unknown backend: $backendName")
     }

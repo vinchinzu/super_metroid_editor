@@ -15,6 +15,15 @@ cd "$(dirname "$0")/.."
 BACKENDS="libretro,gym-retro"
 FRAMES="${BENCH_FRAMES:-600}"
 WARMUP="${BENCH_WARMUP_FRAMES:-60}"
+CORE_SEARCH_DIRS=(
+    /usr/lib/libretro
+    /usr/lib64/libretro
+    /usr/local/lib/libretro
+    "$HOME/.config/retroarch/cores"
+    "$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+    ./cores
+    ../cores
+)
 
 # Parse args
 while [[ $# -gt 0 ]]; do
@@ -45,8 +54,11 @@ fi
 
 # Check libretro core if benchmarking it
 if [[ "$BACKENDS" == *"libretro"* ]]; then
-    CORE=$(find /usr/lib/libretro ~/.config/retroarch/cores ./cores 2>/dev/null \
-           -name 'snes9x_libretro.so' -o -name 'bsnes_libretro.so' 2>/dev/null | head -1)
+    CORE=$(
+        find "${CORE_SEARCH_DIRS[@]}" 2>/dev/null \
+            \( -name 'snes9x_libretro.so' -o -name 'bsnes_libretro.so' -o -name 'mesen-s_libretro.so' \) \
+            | head -1
+    )
     if [[ -z "${SMEDIT_LIBRETRO_CORE:-}" && -z "${CORE:-}" ]]; then
         echo "WARNING: No SNES libretro core found. libretro benchmark will fail."
         echo "Install:  sudo pacman -S libretro-snes9x"

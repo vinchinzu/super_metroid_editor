@@ -7,6 +7,7 @@ import com.supermetroid.editor.libretro.LibretroCoreDiscovery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.image.BufferedImage
+import java.awt.image.DataBufferInt
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -15,7 +16,9 @@ import java.util.concurrent.Executors
  * Video frames pass directly via [frameHolder] — no Base64, no TCP.
  * All libretro calls run on a single dedicated thread.
  */
-class LibretroBackend : EmulatorBackend {
+class LibretroBackend(
+    private val audioEnabledOverride: Boolean? = null,
+) : EmulatorBackend {
 
     override val name: String = "libretro"
     override var isConnected: Boolean = false
@@ -36,6 +39,7 @@ class LibretroBackend : EmulatorBackend {
     private var sessionActive = false
     private var frameCounter = 0
     private var currentRomPath: String? = null
+    private var frameImage: BufferedImage? = null
 
     private val stateDir = File(System.getProperty("user.home"), ".smedit/states/libretro").apply { mkdirs() }
 
@@ -50,34 +54,40 @@ class LibretroBackend : EmulatorBackend {
                     "Or set SMEDIT_LIBRETRO_CORE=/path/to/snes9x_libretro.so"
             )
 
+        val audioEnabled = audioEnabledOverride ?: settings.libretroAudioEnabled
         val c = LibretroCore(corePath)
-        onEmuThread { c.init() }
-        core = c
-        isConnected = true
-
-        val audioEnabled = settings.libretroAudioEnabled
-        if (audioEnabled) {
-            val a = LibretroAudioOutput()
-            a.start()
-            audio = a
+        var startedAudio: LibretroAudioOutput? = null
+        try {
+            onEmuThread { c.init() }
+            if (audioEnabled) {
+                startedAudio = LibretroAudioOutput().also { it.start() }
+            }
+            val sysInfo = onEmuThread { c.getSystemInfo() }
+            core = c
+            audio = startedAudio
+            isConnected = true
+            return EmulatorCapabilities(
+                backendName = "libretro (${sysInfo.getLibraryName() ?: "unknown"})",
+                supportsFrames = true,
+                supportsMemoryAccess = true,
+                supportsSaveStates = true,
+            )
+        } catch (e: Exception) {
+            runCatching { startedAudio?.close() }
+            runCatching { onEmuThread { c.close() } }
+            throw e
         }
-
-        val sysInfo = onEmuThread { c.getSystemInfo() }
-        return EmulatorCapabilities(
-            backendName = "libretro (${sysInfo.getLibraryName() ?: "unknown"})",
-            supportsFrames = true,
-            supportsMemoryAccess = true,
-            supportsSaveStates = true,
-        )
     }
 
     override suspend fun disconnect() {
         sessionActive = false
-        onEmuThread { core?.close() }
+        currentRomPath = null
+        runCatching { onEmuThread { core?.close() } }
         core = null
         audio?.close()
         audio = null
         frameHolder.clear()
+        frameImage = null
         isConnected = false
     }
 
@@ -85,36 +95,42 @@ class LibretroBackend : EmulatorBackend {
         val c = core ?: throw IllegalStateException("Not connected")
         val romPath = config.romPath
             ?: throw IllegalArgumentException("romPath is required for libretro backend")
-
-        val loaded = onEmuThread { c.loadGame(romPath) }
-        if (!loaded) throw IllegalStateException("Failed to load ROM: $romPath")
-
-        currentRomPath = romPath
-        frameCounter = 0
-        sessionActive = true
-
-        // Load initial state if specified
-        if (config.stateName != null) {
-            val stateFile = File(stateDir, "${config.stateName}.state")
-            if (stateFile.isFile) {
-                val data = withContext(Dispatchers.IO) { stateFile.readBytes() }
-                onEmuThread { c.unserializeState(data) }
+        val initialState = config.stateName
+            ?.let { stateName ->
+                val stateFile = File(stateDir, "$stateName.state")
+                if (stateFile.isFile) {
+                    withContext(Dispatchers.IO) { stateFile.readBytes() }
+                } else {
+                    null
+                }
             }
+
+        val capture = onEmuThread {
+            val loaded = c.loadGame(romPath)
+            check(loaded) { "Failed to load ROM: $romPath" }
+            if (initialState != null) {
+                c.unserializeState(initialState)
+            }
+            c.run()
+            captureStep(c, includeFrame = true)
         }
 
-        // Run one frame to populate video/audio
-        onEmuThread { c.run() }
-        frameCounter++
-        pushFrame(c)
+        currentRomPath = romPath
+        frameCounter = 1
+        sessionActive = true
+        pushFrame(capture.snapshot.frame)
+        audio?.writeSamples(capture.audioSamples)
 
-        return buildStepResult("Session started")
+        return buildStepResult(capture.snapshot, "Session started")
     }
 
     override suspend fun closeSession(): StepResult {
         sessionActive = false
+        onEmuThread { core?.unloadGame() }
         frameHolder.clear()
+        frameImage = null
         return StepResult(
-            session = SessionState(active = false, paused = true),
+            session = SessionState(active = false, paused = true, frameCounter = frameCounter),
             message = "Session closed",
         )
     }
@@ -122,30 +138,26 @@ class LibretroBackend : EmulatorBackend {
     override suspend fun step(input: EmulatorInput): StepResult {
         val c = core ?: throw IllegalStateException("Not connected")
         if (!sessionActive) throw IllegalStateException("No active session")
+        val repeat = input.repeat.coerceAtLeast(1)
 
-        onEmuThread {
+        val capture = onEmuThread {
             c.setInput(0, input.buttons)
-            for (i in 0 until input.repeat) {
+            repeat(repeat) {
                 c.run()
-                frameCounter++
             }
+            captureStep(c, includeFrame = input.includeFrame)
         }
+        frameCounter += repeat
 
-        // Push frame to FrameHolder
-        if (input.includeFrame) {
-            pushFrame(c)
-        }
+        pushFrame(capture.snapshot.frame)
+        audio?.writeSamples(capture.audioSamples)
 
-        // Drain audio
-        val audioSamples = onEmuThread { c.drainAudio() }
-        audio?.writeSamples(audioSamples)
-
-        return buildStepResult()
+        return buildStepResult(capture.snapshot)
     }
 
     override suspend fun snapshot(): GameSnapshot {
         val c = core ?: throw IllegalStateException("Not connected")
-        return buildSnapshot(c)
+        return buildSnapshot(onEmuThread { c.captureRuntimeSnapshot() })
     }
 
     override suspend fun saveState(name: String) {
@@ -163,14 +175,22 @@ class LibretroBackend : EmulatorBackend {
         if (!stateFile.isFile) throw IllegalStateException("State not found: $name")
 
         val data = withContext(Dispatchers.IO) { stateFile.readBytes() }
-        onEmuThread { c.unserializeState(data) }
-
-        // Run one frame to refresh video
-        onEmuThread { c.run() }
+        val romPath = currentRomPath ?: throw IllegalStateException("No ROM loaded for libretro state restore")
+        val capture = onEmuThread {
+            if (!c.isGameLoaded()) {
+                val loaded = c.loadGame(romPath)
+                check(loaded) { "Failed to load ROM: $romPath" }
+            }
+            c.unserializeState(data)
+            c.run()
+            captureStep(c, includeFrame = true)
+        }
         frameCounter++
-        pushFrame(c)
+        sessionActive = true
+        pushFrame(capture.snapshot.frame)
+        audio?.writeSamples(capture.audioSamples)
 
-        return buildStepResult("Loaded $name")
+        return buildStepResult(capture.snapshot, "Loaded $name")
     }
 
     override suspend fun listStates(): List<StateInfo> {
@@ -194,6 +214,7 @@ class LibretroBackend : EmulatorBackend {
 
     override fun close() {
         sessionActive = false
+        currentRomPath = null
         core?.let { c ->
             try { emuThread.submit { c.close() }.get() } catch (_: Exception) {}
         }
@@ -201,30 +222,38 @@ class LibretroBackend : EmulatorBackend {
         audio?.close()
         audio = null
         frameHolder.clear()
+        frameImage = null
         isConnected = false
         emuThread.shutdown()
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
-    private fun pushFrame(c: LibretroCore) {
-        val pixels = c.getFrameBuffer()
-        val w = c.getFrameWidth()
-        val h = c.getFrameHeight()
-        if (w <= 0 || h <= 0 || pixels.isEmpty()) return
+    private data class StepCapture(
+        val snapshot: LibretroCore.RuntimeSnapshot,
+        val audioSamples: ShortArray,
+    )
 
-        val image = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
-        image.setRGB(0, 0, w, h, pixels, 0, w)
+    private fun captureStep(c: LibretroCore, includeFrame: Boolean): StepCapture {
+        return StepCapture(
+            snapshot = c.captureRuntimeSnapshot(includeFrame = includeFrame),
+            audioSamples = c.drainAudio(),
+        )
+    }
+
+    private fun pushFrame(frame: LibretroCore.FrameSnapshot?) {
+        if (frame == null || frame.width <= 0 || frame.height <= 0 || frame.pixels.isEmpty()) return
+
+        val image = frameImage
+            ?.takeIf { it.width == frame.width && it.height == frame.height }
+            ?: BufferedImage(frame.width, frame.height, BufferedImage.TYPE_INT_ARGB).also { frameImage = it }
+        val raster = (image.raster.dataBuffer as DataBufferInt).data
+        System.arraycopy(frame.pixels, 0, raster, 0, frame.pixels.size)
         frameHolder.pushFrame(image.toComposeImageBitmap())
     }
 
-    private fun buildSnapshot(c: LibretroCore): GameSnapshot {
-        val wram = try {
-            onEmuThreadBlocking { c.readWram(0, 0x2000) }
-        } catch (_: Exception) {
-            null
-        }
-
+    private fun buildSnapshot(snapshot: LibretroCore.RuntimeSnapshot): GameSnapshot {
+        val wram = snapshot.wram
         return GameSnapshot(
             frameCounter = frameCounter,
             roomId = wram?.readWord(0x079B),
@@ -233,26 +262,21 @@ class LibretroBackend : EmulatorBackend {
             samusX = wram?.readWord(0x0AF6),
             samusY = wram?.readWord(0x0AFA),
             doorTransition = wram?.readWord(0x0998)?.let { it in 0x06..0x0B } ?: false,
-            frameWidth = c.getFrameWidth(),
-            frameHeight = c.getFrameHeight(),
+            frameWidth = snapshot.frameWidth,
+            frameHeight = snapshot.frameHeight,
         )
     }
 
-    private fun buildStepResult(message: String? = null): StepResult {
-        val c = core ?: return StepResult(message = message)
+    private fun buildStepResult(snapshot: LibretroCore.RuntimeSnapshot, message: String? = null): StepResult {
         return StepResult(
             session = SessionState(
                 active = sessionActive,
                 paused = !sessionActive,
                 frameCounter = frameCounter,
             ),
-            snapshot = buildSnapshot(c),
+            snapshot = buildSnapshot(snapshot),
             message = message,
         )
-    }
-
-    private fun <T> onEmuThreadBlocking(action: () -> T): T {
-        return emuThread.submit<T> { action() }.get()
     }
 
     private suspend fun <T> onEmuThread(action: () -> T): T {

@@ -9,6 +9,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ROM="${1:-custom_integrations/SuperMetroid-Snes/rom.sfc}"
+CORE_SEARCH_DIRS=(
+    /usr/lib/libretro
+    /usr/lib64/libretro
+    /usr/local/lib/libretro
+    "$HOME/.config/retroarch/cores"
+    "$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+    ./cores
+    ../cores
+)
 
 if [[ ! -f "$ROM" ]]; then
     echo "ROM not found: $ROM"
@@ -17,8 +26,11 @@ if [[ ! -f "$ROM" ]]; then
 fi
 
 # Check for libretro core
-CORE=$(find /usr/lib/libretro ~/.config/retroarch/cores ./cores 2>/dev/null \
-       -name 'snes9x_libretro.so' -o -name 'bsnes_libretro.so' 2>/dev/null | head -1)
+CORE=$(
+    find "${CORE_SEARCH_DIRS[@]}" 2>/dev/null \
+        \( -name 'snes9x_libretro.so' -o -name 'bsnes_libretro.so' -o -name 'mesen-s_libretro.so' \) \
+        | head -1
+)
 
 if [[ -z "${SMEDIT_LIBRETRO_CORE:-}" && -z "$CORE" ]]; then
     echo "No SNES libretro core found."
@@ -46,4 +58,4 @@ for STDCXX in /usr/lib/libstdc++.so.6 /usr/lib64/libstdc++.so.6 /usr/lib/x86_64-
     fi
 done
 
-exec ./gradlew :desktopApp:run
+exec ./gradlew --console=plain :desktopApp:run

@@ -46,7 +46,10 @@ import com.supermetroid.editor.ui.blockTypeName
 import com.supermetroid.editor.ui.LocalSwingWindow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.supermetroid.editor.data.RomPreferences
 import com.supermetroid.editor.ui.EditorState
 import com.supermetroid.editor.ui.RoomPropertiesPanel
@@ -56,10 +59,12 @@ import java.io.File
 fun main() = application {
     val launchConfig = remember { EditorLaunchConfig.fromEnvironment() }
     val roomRepository = remember { RoomRepository() }
+    val scope = rememberCoroutineScope()
     var romParser by remember { mutableStateOf<RomParser?>(null) }
     var romFileName by remember { mutableStateOf<String?>(null) }
     var selectedRoom by remember { mutableStateOf<RoomInfo?>(null) }
     var rooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
+    var romLoadInFlight by remember { mutableStateOf(false) }
     val editorState = remember { EditorState() }
 
     fun pickDefaultRoom(allRooms: List<RoomInfo>, romPath: String): RoomInfo? {
@@ -81,15 +86,20 @@ fun main() = application {
         }
     }
 
+    suspend fun loadRomParser(path: String): RomParser = withContext(Dispatchers.IO) {
+        RomParser.loadRom(path)
+    }
+
     // Load rooms on startup
     LaunchedEffect(Unit) {
-        rooms = roomRepository.getAllRooms()
+        rooms = withContext(Dispatchers.IO) { roomRepository.getAllRooms() }
 
         // Auto-load requested ROM first, then fall back to last ROM if available.
         val bootRomPath = launchConfig.romPath ?: RomPreferences.getLastRomPath()
         if (bootRomPath != null) {
             try {
-                romParser = RomParser.loadRom(bootRomPath)
+                romLoadInFlight = true
+                romParser = loadRomParser(bootRomPath)
                 romFileName = File(bootRomPath).nameWithoutExtension
                 RomPreferences.setLastRomPath(bootRomPath)
                 editorState.initForRom(bootRomPath)
@@ -99,6 +109,8 @@ fun main() = application {
                 }
             } catch (e: Exception) {
                 println("Failed to auto-load ROM: ${e.message}")
+            } finally {
+                romLoadInFlight = false
             }
         }
     }
@@ -151,6 +163,7 @@ fun main() = application {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
+                            enabled = !romLoadInFlight,
                             onClick = {
                                 val fileDialog = FileDialog(null as Frame?, "Open Super Metroid ROM", FileDialog.LOAD)
                                 fileDialog.setFilenameFilter { _, name ->
@@ -161,16 +174,23 @@ fun main() = application {
                                 val selectedFile = fileDialog.file
                                 if (selectedFile != null) {
                                     val file = File(fileDialog.directory, selectedFile)
-                                    try {
-                                        romParser = RomParser.loadRom(file.absolutePath)
-                                        romFileName = file.nameWithoutExtension
-                                        RomPreferences.setLastRomPath(file.absolutePath)
-                                        editorState.initForRom(file.absolutePath)
-                                        selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
-                                    } catch (e: Exception) { e.printStackTrace() }
+                                    scope.launch {
+                                        romLoadInFlight = true
+                                        try {
+                                            romParser = loadRomParser(file.absolutePath)
+                                            romFileName = file.nameWithoutExtension
+                                            RomPreferences.setLastRomPath(file.absolutePath)
+                                            editorState.initForRom(file.absolutePath)
+                                            selectedRoom = pickDefaultRoom(rooms, file.absolutePath)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        } finally {
+                                            romLoadInFlight = false
+                                        }
+                                    }
                                 }
                             }
-                        ) { Text("Open ROM...") }
+                        ) { Text(if (romLoadInFlight) "Loading ROM..." else "Open ROM...") }
                         if (romFileName != null) {
                             Text("Loaded: $romFileName", style = MaterialTheme.typography.bodySmall, fontSize = 12.sp)
                         }
@@ -526,8 +546,8 @@ fun main() = application {
                             }
 
                             // ─── Bottom status bar ───────────────────────
-                            if (editorState != null) {
-                                val es = editorState!!
+                            run {
+                                val es = editorState
                                 val statusTs = es.statusMessageTimestamp
                                 var showTransient by remember { mutableStateOf(false) }
                                 LaunchedEffect(statusTs) {
