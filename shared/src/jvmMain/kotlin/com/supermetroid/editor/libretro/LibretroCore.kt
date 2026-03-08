@@ -16,6 +16,19 @@ private const val RTLD_LOCAL = 0x00000  // default on Linux, but explicit for cl
  */
 class LibretroCore(private val corePath: String) {
 
+    data class FrameSnapshot(
+        val pixels: IntArray,
+        val width: Int,
+        val height: Int,
+    )
+
+    data class RuntimeSnapshot(
+        val wram: ByteArray?,
+        val frameWidth: Int,
+        val frameHeight: Int,
+        val frame: FrameSnapshot?,
+    )
+
     private lateinit var lib: LibretroLib
     private var gameLoaded = false
 
@@ -74,6 +87,9 @@ class LibretroCore(private val corePath: String) {
     }
 
     fun loadGame(romPath: String): Boolean {
+        if (gameLoaded) {
+            unloadGame()
+        }
         // Allocate native string for the path — must stay alive during retro_load_game
         val pathBytes = romPath.toByteArray(Charsets.UTF_8)
         val pathMem = Memory((pathBytes.size + 1).toLong())
@@ -94,6 +110,16 @@ class LibretroCore(private val corePath: String) {
         return loaded
     }
 
+    fun unloadGame() {
+        if (gameLoaded) {
+            lib.retro_unload_game()
+            gameLoaded = false
+        }
+        clearRuntimeBuffers()
+    }
+
+    fun isGameLoaded(): Boolean = gameLoaded
+
     fun run() {
         check(gameLoaded) { "No game loaded" }
         lib.retro_run()
@@ -111,12 +137,6 @@ class LibretroCore(private val corePath: String) {
         return info
     }
 
-    /** Returns a copy of the latest frame as ARGB8888 pixel data. */
-    fun getFrameBuffer(): IntArray = frameBuffer.copyOf()
-
-    fun getFrameWidth(): Int = frameWidth
-    fun getFrameHeight(): Int = frameHeight
-
     /** Drain all pending audio samples (interleaved stereo int16). */
     fun drainAudio(): ShortArray {
         val available = audioAvailable()
@@ -127,6 +147,29 @@ class LibretroCore(private val corePath: String) {
             audioReadPos++
         }
         return result
+    }
+
+    fun captureRuntimeSnapshot(includeFrame: Boolean = false, includeWram: Boolean = true): RuntimeSnapshot {
+        val wram = if (includeWram && gameLoaded) {
+            runCatching { readWram(0, 0x2000) }.getOrNull()
+        } else {
+            null
+        }
+        val frame = if (includeFrame && frameWidth > 0 && frameHeight > 0 && frameBuffer.isNotEmpty()) {
+            FrameSnapshot(
+                pixels = frameBuffer.copyOf(),
+                width = frameWidth,
+                height = frameHeight,
+            )
+        } else {
+            null
+        }
+        return RuntimeSnapshot(
+            wram = wram,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            frame = frame,
+        )
     }
 
     /** Set input for a port. buttons is a list of 12 values (0/1) in SNES order: B,Y,Sel,Start,U,D,L,R,A,X,L,R */
@@ -157,6 +200,8 @@ class LibretroCore(private val corePath: String) {
 
     /** Read bytes from WRAM at the given offset. */
     fun readWram(address: Int, size: Int): ByteArray {
+        require(address >= 0) { "Address must be non-negative" }
+        require(size >= 0) { "Size must be non-negative" }
         val ptr = lib.retro_get_memory_data(LibretroConstants.RETRO_MEMORY_SYSTEM_RAM)
             ?: throw IllegalStateException("WRAM not available")
         val memSize = lib.retro_get_memory_size(LibretroConstants.RETRO_MEMORY_SYSTEM_RAM)
@@ -166,6 +211,7 @@ class LibretroCore(private val corePath: String) {
 
     /** Write bytes to WRAM at the given offset. */
     fun writeWram(address: Int, data: ByteArray) {
+        require(address >= 0) { "Address must be non-negative" }
         val ptr = lib.retro_get_memory_data(LibretroConstants.RETRO_MEMORY_SYSTEM_RAM)
             ?: throw IllegalStateException("WRAM not available")
         val memSize = lib.retro_get_memory_size(LibretroConstants.RETRO_MEMORY_SYSTEM_RAM)
@@ -174,10 +220,7 @@ class LibretroCore(private val corePath: String) {
     }
 
     fun close() {
-        if (gameLoaded) {
-            lib.retro_unload_game()
-            gameLoaded = false
-        }
+        unloadGame()
         lib.retro_deinit()
     }
 
@@ -327,6 +370,16 @@ class LibretroCore(private val corePath: String) {
     }
 
     private fun audioAvailable(): Int = audioWritePos - audioReadPos
+
+    private fun clearRuntimeBuffers() {
+        frameWidth = 0
+        frameHeight = 0
+        audioWritePos = 0
+        audioReadPos = 0
+        for (port in inputState.indices) {
+            inputState[port].fill(0)
+        }
+    }
 
     // Prevent GC of directory strings passed to the core
     @Suppress("unused")
