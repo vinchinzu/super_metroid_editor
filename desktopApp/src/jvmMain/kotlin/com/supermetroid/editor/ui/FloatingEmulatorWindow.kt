@@ -118,10 +118,15 @@ fun FloatingEmulatorWindow(
         var tick = 0L
         var pendingFrames = 0.0
         var lastWallClockNanos = System.nanoTime()
+        // Warmup: first few steps may be slow due to JIT; reset timing after warmup
+        val warmupTicks = 5L
         while (workspaceState.isRunning && workspaceState.session.active) {
             val now = System.nanoTime()
-            pendingFrames += (now - lastWallClockNanos).toDouble() / FRAME_DURATION_NANOS.toDouble()
+            val elapsedNanos = now - lastWallClockNanos
             lastWallClockNanos = now
+            // During warmup, cap elapsed to one frame to avoid accumulating debt from slow JIT
+            val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
+            pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
             if (pendingFrames < 1.0) {
                 val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
                 delay(waitMs)

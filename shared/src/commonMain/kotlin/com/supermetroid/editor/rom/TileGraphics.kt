@@ -51,6 +51,7 @@ class TileGraphics(private val romParser: RomParser) {
     
     // Cached data per tileset
     private var cachedTilesetId: Int = -1
+    private var cachedNoCre: Boolean = false
     private var rawTileData: ByteArray? = null          // Combined 4bpp tile graphics (var + CRE)
     private var metatiles: Array<IntArray>? = null       // metatile[idx] = 4 sub-tile words
     private var cachedPalette: Array<IntArray>? = null   // 8 palettes × 16 ARGB colors
@@ -69,8 +70,8 @@ class TileGraphics(private val romParser: RomParser) {
      *   - Rooms with noCre=true: only variable tile table/graphics are used;
      *     metatile indices > CRE_TILE_START will appear blank.
      */
-    fun loadTileset(tilesetId: Int): Boolean {
-        if (tilesetId == cachedTilesetId && rawTileData != null) return true
+    fun loadTileset(tilesetId: Int, noCre: Boolean = false): Boolean {
+        if (tilesetId == cachedTilesetId && rawTileData != null && cachedNoCre == noCre) return true
 
         val romData = romParser.getRomData()
 
@@ -87,22 +88,31 @@ class TileGraphics(private val romParser: RomParser) {
         val paletteDecompressed = romParser.decompressLZ2(palettePtr)
         cachedPalette = parsePalette(paletteDecompressed)
 
-        val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
-        val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
+        if (noCre) {
+            // Rooms with creBitflag=0x05 (Ceres, Kraid): variable tiles only, no CRE
+            metatiles = parseTileTableRaw(varTileTable)
+            val combinedGfx = ByteArray(maxOf(varGfx.size, TOTAL_TILES * BYTES_PER_TILE))
+            System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, combinedGfx.size))
+            rawTileData = combinedGfx
+        } else {
+            val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
+            val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
 
-        // Tile tables: CRE first, then variable (per SMILE DecompressTtable)
-        metatiles = parseTileTable(varTileTable, creTileTable)
+            // Tile tables: CRE first, then variable (per SMILE DecompressTtable)
+            metatiles = parseTileTable(varTileTable, creTileTable)
 
-        // Tile graphics: variable at 0, CRE at offset.
-        // Kraid (set 27) uses 0x8000 offset; everything else uses 0x5000.
-        val creOffset = if (tilesetId == KRAID_TILESET) 0x8000 else 0x5000
-        val combinedGfxSize = creOffset + creGfx.size
-        val combinedGfx = ByteArray(maxOf(combinedGfxSize, TOTAL_TILES * BYTES_PER_TILE))
-        System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, creOffset))
-        System.arraycopy(creGfx, 0, combinedGfx, creOffset, minOf(creGfx.size, combinedGfx.size - creOffset))
-        rawTileData = combinedGfx
+            // Tile graphics: variable at 0, CRE at offset.
+            // Kraid (set 27) uses 0x8000 offset; everything else uses 0x5000.
+            val creOffset = if (tilesetId == KRAID_TILESET) 0x8000 else 0x5000
+            val combinedGfxSize = creOffset + creGfx.size
+            val combinedGfx = ByteArray(maxOf(combinedGfxSize, TOTAL_TILES * BYTES_PER_TILE))
+            System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, creOffset))
+            System.arraycopy(creGfx, 0, combinedGfx, creOffset, minOf(creGfx.size, combinedGfx.size - creOffset))
+            rawTileData = combinedGfx
+        }
 
         cachedTilesetId = tilesetId
+        cachedNoCre = noCre
         return true
     }
     

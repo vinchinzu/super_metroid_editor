@@ -73,12 +73,12 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
         val blocksTall = room.height * BLOCKS_PER_SCREEN
         val totalBlocks = blocksWide * blocksTall
         
-        // ALL Ceres area rooms (area=6, creBitflag != 0x06): level data indices are
-        // offset by 256 from the combined (CRE+URE) tile table.  SMILE compensates
-        // with a -128px graphics-sheet shift; we offset the index instead.
-        val metatileOffset = if (room.area == TileGraphics.CERES_AREA && room.creBitflag != 0x06) 256 else 0
+        // Rooms with creBitflag=0x05 disable CRE tiles (Ceres, Kraid).
+        // With noCre the variable tile table starts at index 0, so no offset needed.
+        val noCre = room.creBitflag == 0x05
+        val metatileOffset = 0
         val hasTileGraphics = try {
-            tileGraphics.loadTileset(room.tileset)
+            tileGraphics.loadTileset(room.tileset, noCre)
         } catch (e: Exception) {
             println("Failed to load tileset ${room.tileset}: ${e.message}")
             false

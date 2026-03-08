@@ -108,7 +108,7 @@ fun RoomListView(
 
         when (sortMode) {
             RoomSortMode.AREA -> filtered.sortedWith(compareBy(
-                { roomAreas[it.handle] ?: 99 },
+                { if (it.handle == "debugRoom") Int.MAX_VALUE else (roomAreas[it.handle] ?: 99) },
                 { it.getRoomIdAsInt() }
             ))
             RoomSortMode.LAST_EDITED, RoomSortMode.FIRST_EDITED -> {

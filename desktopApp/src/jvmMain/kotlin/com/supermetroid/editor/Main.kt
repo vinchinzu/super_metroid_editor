@@ -201,6 +201,7 @@ fun main() = application {
                     ) {
                         Button(
                             enabled = !romLoadInFlight,
+                            shape = RoundedCornerShape(6.dp),
                             onClick = {
                                 val fileDialog = FileDialog(null as Frame?, "Open Super Metroid ROM", FileDialog.LOAD)
                                 fileDialog.setFilenameFilter { _, name ->
@@ -240,6 +241,7 @@ fun main() = application {
                     ) {
                         OutlinedButton(
                             onClick = { emulatorEnabled = !emulatorEnabled },
+                            shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = if (emulatorEnabled) MaterialTheme.colorScheme.primaryContainer
                                     else MaterialTheme.colorScheme.surface,
@@ -255,19 +257,22 @@ fun main() = application {
                         }
                         Button(
                             onClick = { editorState.saveProject(romParser) },
-                            enabled = romParser != null
+                            enabled = romParser != null,
+                            shape = RoundedCornerShape(6.dp),
                         ) { Text(if (editorState.dirty) "Save*" else "Save") }
                         Button(
                             onClick = {
                                 romParser?.let { editorState.exportToRom(it) }
                             },
-                            enabled = romParser != null
+                            enabled = romParser != null,
+                            shape = RoundedCornerShape(6.dp),
                         ) { Text("Export ROM") }
                         Button(
                             onClick = {
                                 romParser?.let { editorState.exportToIps(it) }
                             },
-                            enabled = romParser != null
+                            enabled = romParser != null,
+                            shape = RoundedCornerShape(6.dp),
                         ) { Text("Export IPS") }
                     }
                 }

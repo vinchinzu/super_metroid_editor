@@ -484,6 +484,8 @@ enum class TileOverlay(val label: String, val shortLabel: String, val color: Lon
     SCROLL_PLMS("Scroll Triggers", "St", 0xCCFF8040),  // orange
     // Per-screen scroll colors (Red/Blue/Green)
     SCROLLS("Scroll Colors", "Sc", 0x60FFFFFF),
+    // Lighten: brighten dark rooms (Fireflea, etc.)
+    LIGHTEN("Lighten", "L", 0x00FFFFFF),
 }
 
 /** Shared tile-meta icon: black fill, colored 2px border, centered white letter (matches map). */
@@ -2580,6 +2582,17 @@ private fun drawSlopeOverlay(g2: java.awt.Graphics2D, px: Int, py: Int, bts: Int
 
 private const val SCREEN_PX = 16 * 16  // 256 — one screen in pixels
 
+/** Enemy IDs whose sprites should be horizontally flipped when initParam != 0. */
+private val ENEMY_IDS_FLIP_BY_INIT_PARAM = setOf(
+    0xE6FF, // Fune
+    0xE73F, // Namihe
+    0xD47F, // Ripper
+    0xD2FF, // Geruta
+    0xD33F, 0xE67F, // Holtz
+    0xD63F, 0xD89F, // Waver
+    0xDD3F, // Sova
+)
+
 private fun buildCompositeImage(
     data: RoomRenderData,
     activeOverlays: Set<TileOverlay>,
@@ -2589,8 +2602,21 @@ private fun buildCompositeImage(
     roomHeightScreens: Int = 0
 ): BufferedImage {
     val img = BufferedImage(data.width, data.height, BufferedImage.TYPE_INT_ARGB)
-    img.setRGB(0, 0, data.width, data.height, data.pixels, 0, data.width)
-    
+    val pixels = if (activeOverlays.contains(TileOverlay.LIGHTEN)) {
+        // Brighten dark rooms by scaling RGB values (3x, clamped to 255)
+        IntArray(data.pixels.size) { i ->
+            val argb = data.pixels[i]
+            val a = argb ushr 24
+            val r = minOf(((argb shr 16) and 0xFF) * 3, 255)
+            val g = minOf(((argb shr 8) and 0xFF) * 3, 255)
+            val b = minOf((argb and 0xFF) * 3, 255)
+            (a shl 24) or (r shl 16) or (g shl 8) or b
+        }
+    } else {
+        data.pixels
+    }
+    img.setRGB(0, 0, data.width, data.height, pixels, 0, data.width)
+
     val g = img.createGraphics()
     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
     
@@ -2827,7 +2853,14 @@ private fun buildCompositeImage(
             if (sprite != null) {
                 val sx = ex - sprite.width / 2
                 val sy = ey - sprite.height / 2
-                g2.drawImage(sprite, sx, sy, null)
+                // Flip sprite horizontally when initParam indicates right-facing
+                val flipH = enemy.initParam != 0 && enemy.id in ENEMY_IDS_FLIP_BY_INIT_PARAM
+                if (flipH) {
+                    g2.drawImage(sprite, sx + sprite.width, sy, sx, sy + sprite.height,
+                        0, 0, sprite.width, sprite.height, null)
+                } else {
+                    g2.drawImage(sprite, sx, sy, null)
+                }
             } else {
                 val diamondSize = 6
                 val dx = intArrayOf(ex, ex + diamondSize, ex, ex - diamondSize)
