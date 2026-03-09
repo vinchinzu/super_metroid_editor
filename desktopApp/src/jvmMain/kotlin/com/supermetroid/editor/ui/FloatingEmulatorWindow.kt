@@ -257,93 +257,132 @@ fun FloatingEmulatorWindow(
                 }
             }
 
-            // ── Video viewport (keyboard-focusable) ──
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color(0xFF0B0F12))
-                    .focusRequester(focusRequester)
-                    .focusable()
-                    .onPreviewKeyEvent { event ->
-                        when (event.type) {
-                            KeyEventType.KeyDown -> {
-                                if (event.key == Key.Spacebar) {
-                                    workspaceState.setLoopRunning(!workspaceState.isRunning)
-                                    true
-                                } else if (event.key == Key.F1) {
-                                    scope.launch {
-                                        if (event.isShiftPressed) {
-                                            workspaceState.clearCheckpointModifierKeys()
-                                            workspaceState.loadSlot(workspaceState.saveSlots[0])
-                                        } else workspaceState.saveSlot(0)
-                                    }
-                                    true
-                                } else if (event.key == Key.F2) {
-                                    scope.launch {
-                                        if (event.isShiftPressed) {
-                                            workspaceState.clearCheckpointModifierKeys()
-                                            workspaceState.loadSlot(workspaceState.saveSlots[1])
-                                        } else workspaceState.saveSlot(1)
-                                    }
-                                    true
-                                } else if (event.key == Key.F3) {
-                                    scope.launch {
-                                        if (event.isShiftPressed) {
-                                            workspaceState.clearCheckpointModifierKeys()
-                                            workspaceState.loadSlot(workspaceState.saveSlots[2])
-                                        } else workspaceState.saveSlot(2)
-                                    }
-                                    true
-                                } else if (event.key == Key.F4) {
-                                    scope.launch {
-                                        if (event.isShiftPressed) {
-                                            workspaceState.clearCheckpointModifierKeys()
-                                            workspaceState.loadSlot(workspaceState.saveSlots[3])
-                                        } else workspaceState.saveSlot(3)
-                                    }
-                                    true
-                                } else if (event.key == Key.F5) {
-                                    scope.launch { workspaceState.saveQuickState() }
-                                    true
-                                } else if (event.key == Key.Grave) {
-                                    scope.launch { workspaceState.reloadLastCheckpoint() }
-                                    true
-                                } else {
-                                    workspaceState.updateKey(event.key, down = true)
-                                    false
-                                }
-                            }
-                            KeyEventType.KeyUp -> {
-                                workspaceState.updateKey(event.key, down = false)
-                                false
-                            }
-                            else -> false
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                val bitmap = workspaceState.frameBitmap
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap,
-                        contentDescription = "Emulator frame",
+            // ── Video viewport / Item tracker ──
+            if (workspaceState.isExternalBackend) {
+                // External emulator: show item tracker + live status
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF0B0F12))
+                        .padding(8.dp),
+                ) {
+                    Column(
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.FillBounds,
-                    )
-                } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Status line
+                        val snap = workspaceState.snapshot
+                        val rid = snap?.roomId
                         Text(
                             workspaceState.statusMessage,
                             color = Color.White,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Arrows + Z/X/A/S/Q/W | F1-F4 save/load",
-                            color = Color(0xFFB6C3CC),
-                            fontSize = 10.sp,
+                        if (rid != null) {
+                            Text(
+                                "Room: 0x${rid.toString(16).uppercase()}  HP: ${snap.health ?: 0}/${snap.maxHealth ?: 0}  Pos: (${snap.samusX ?: 0}, ${snap.samusY ?: 0})",
+                                color = Color(0xFFB6C3CC),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        // Item tracker icons
+                        ItemTrackerPanel(
+                            snapshot = workspaceState.snapshot,
                         )
+                    }
+                }
+            } else {
+                // Embedded emulator: video viewport (keyboard-focusable)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF0B0F12))
+                        .focusRequester(focusRequester)
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            when (event.type) {
+                                KeyEventType.KeyDown -> {
+                                    if (event.key == Key.Spacebar) {
+                                        workspaceState.setLoopRunning(!workspaceState.isRunning)
+                                        true
+                                    } else if (event.key == Key.F1) {
+                                        scope.launch {
+                                            if (event.isShiftPressed) {
+                                                workspaceState.clearCheckpointModifierKeys()
+                                                workspaceState.loadSlot(workspaceState.saveSlots[0])
+                                            } else workspaceState.saveSlot(0)
+                                        }
+                                        true
+                                    } else if (event.key == Key.F2) {
+                                        scope.launch {
+                                            if (event.isShiftPressed) {
+                                                workspaceState.clearCheckpointModifierKeys()
+                                                workspaceState.loadSlot(workspaceState.saveSlots[1])
+                                            } else workspaceState.saveSlot(1)
+                                        }
+                                        true
+                                    } else if (event.key == Key.F3) {
+                                        scope.launch {
+                                            if (event.isShiftPressed) {
+                                                workspaceState.clearCheckpointModifierKeys()
+                                                workspaceState.loadSlot(workspaceState.saveSlots[2])
+                                            } else workspaceState.saveSlot(2)
+                                        }
+                                        true
+                                    } else if (event.key == Key.F4) {
+                                        scope.launch {
+                                            if (event.isShiftPressed) {
+                                                workspaceState.clearCheckpointModifierKeys()
+                                                workspaceState.loadSlot(workspaceState.saveSlots[3])
+                                            } else workspaceState.saveSlot(3)
+                                        }
+                                        true
+                                    } else if (event.key == Key.F5) {
+                                        scope.launch { workspaceState.saveQuickState() }
+                                        true
+                                    } else if (event.key == Key.Grave) {
+                                        scope.launch { workspaceState.reloadLastCheckpoint() }
+                                        true
+                                    } else {
+                                        workspaceState.updateKey(event.key, down = true)
+                                        false
+                                    }
+                                }
+                                KeyEventType.KeyUp -> {
+                                    workspaceState.updateKey(event.key, down = false)
+                                    false
+                                }
+                                else -> false
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val bitmap = workspaceState.frameBitmap
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "Emulator frame",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.FillBounds,
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                workspaceState.statusMessage,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Arrows + Z/X/A/S/Q/W | F1-F4 save/load",
+                                color = Color(0xFFB6C3CC),
+                                fontSize = 10.sp,
+                            )
+                        }
                     }
                 }
             }
@@ -358,6 +397,8 @@ fun FloatingEmulatorWindow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
+                val btnShape = RoundedCornerShape(6.dp)
+
                 // Play / Pause
                 IconButton(
                     onClick = {
@@ -380,32 +421,34 @@ fun FloatingEmulatorWindow(
                     },
                     enabled = !workspaceState.isBusy,
                     modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
+                        .size(32.dp)
+                        .clip(btnShape)
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                 ) {
                     Icon(
                         if (workspaceState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (workspaceState.isRunning) "Pause" else "Play",
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
 
-                Spacer(Modifier.width(4.dp))
+                if (!workspaceState.isExternalBackend) {
+                    Spacer(Modifier.width(4.dp))
 
-                // Fast forward (hold to speed up)
-                IconButton(
-                    onClick = { fastForwarding = !fastForwarding },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(
-                        Icons.Default.FastForward, "Fast forward",
-                        Modifier.size(18.dp),
-                        tint = if (fastForwarding) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // Fast forward
+                    IconButton(
+                        onClick = { fastForwarding = !fastForwarding },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                        modifier = Modifier.size(30.dp).clip(btnShape),
+                    ) {
+                        Icon(
+                            Icons.Default.FastForward, "Fast forward",
+                            Modifier.size(18.dp),
+                            tint = if (fastForwarding) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 Spacer(Modifier.width(4.dp))
@@ -430,115 +473,116 @@ fun FloatingEmulatorWindow(
                         }
                     },
                     enabled = workspaceState.session.active && !workspaceState.isBusy,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(30.dp).clip(btnShape),
                 ) {
                     Icon(Icons.Default.Refresh, "Restart with latest patches", Modifier.size(18.dp))
                 }
 
-                Spacer(Modifier.width(4.dp))
+                if (!workspaceState.isExternalBackend) {
+                    Spacer(Modifier.width(4.dp))
 
-                // Pipe separator
-                Text(
-                    "|",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                )
-
-                Spacer(Modifier.width(4.dp))
-
-                // SAVE text button
-                Surface(
-                    onClick = {
-                        scope.launch { workspaceState.saveQuickState("slot_${workspaceState.saveSlotIndex}") }
-                    },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(4.dp),
-                ) {
                     Text(
-                        "SAVE",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        "|",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     )
-                }
 
-                Spacer(Modifier.width(2.dp))
+                    Spacer(Modifier.width(4.dp))
 
-                // LOAD text button
-                Surface(
-                    onClick = {
-                        scope.launch { workspaceState.loadNamedState("slot_${workspaceState.saveSlotIndex}") }
-                    },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(4.dp),
-                ) {
-                    Text(
-                        "LOAD",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                    )
-                }
-
-                Spacer(Modifier.width(2.dp))
-
-                // Slot number + dropdown
-                Box {
+                    // SAVE text button
                     Surface(
-                        onClick = { showSaveMenu = !showSaveMenu },
+                        onClick = {
+                            scope.launch { workspaceState.saveQuickState("slot_${workspaceState.saveSlotIndex}") }
+                        },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
                         color = Color.Transparent,
-                        shape = RoundedCornerShape(4.dp),
+                        shape = btnShape,
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 2.dp),
+                        Text(
+                            "SAVE",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+
+                    Spacer(Modifier.width(2.dp))
+
+                    // LOAD text button
+                    Surface(
+                        onClick = {
+                            scope.launch { workspaceState.loadNamedState("slot_${workspaceState.saveSlotIndex}") }
+                        },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                        color = Color.Transparent,
+                        shape = btnShape,
+                    ) {
+                        Text(
+                            "LOAD",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+
+                    Spacer(Modifier.width(2.dp))
+
+                    // Slot number + dropdown
+                    Box {
+                        Surface(
+                            onClick = { showSaveMenu = !showSaveMenu },
+                            color = Color.Transparent,
+                            shape = btnShape,
                         ) {
-                            Text(
-                                "${workspaceState.saveSlotIndex}",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Icon(
-                                Icons.Default.ArrowDropDown, "Select slot",
-                                Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 2.dp),
+                            ) {
+                                Text(
+                                    "${workspaceState.saveSlotIndex}",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Icon(
+                                    Icons.Default.ArrowDropDown, "Select slot",
+                                    Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showSaveMenu,
+                            onDismissRequest = { showSaveMenu = false },
+                            modifier = Modifier.widthIn(max = 80.dp),
+                        ) {
+                            for (i in 0..128) {
+                                DropdownMenuItem(
+                                    text = { Text("$i", fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
+                                    onClick = { workspaceState.saveSlotIndex = i; showSaveMenu = false },
+                                    modifier = Modifier.height(24.dp),
+                                )
+                            }
                         }
                     }
-                    DropdownMenu(
-                        expanded = showSaveMenu,
-                        onDismissRequest = { showSaveMenu = false },
-                        modifier = Modifier.widthIn(max = 80.dp),
+
+                    Spacer(Modifier.width(4.dp))
+
+                    // Mute toggle
+                    IconButton(
+                        onClick = { workspaceState.toggleAudioMute() },
+                        enabled = workspaceState.isConnected,
+                        modifier = Modifier.size(30.dp).clip(btnShape),
                     ) {
-                        for (i in 0..128) {
-                            DropdownMenuItem(
-                                text = { Text("$i", fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
-                                onClick = { workspaceState.saveSlotIndex = i; showSaveMenu = false },
-                                modifier = Modifier.height(24.dp),
-                            )
-                        }
+                        Icon(
+                            if (workspaceState.audioMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                            contentDescription = "Toggle mute",
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
-                }
-
-                Spacer(Modifier.width(4.dp))
-
-                // Mute toggle
-                IconButton(
-                    onClick = { workspaceState.toggleAudioMute() },
-                    enabled = workspaceState.isConnected,
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(
-                        if (workspaceState.audioMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                        contentDescription = "Toggle mute",
-                        modifier = Modifier.size(16.dp),
-                    )
                 }
             }
         }
