@@ -1,0 +1,85 @@
+package com.supermetroid.editor.ui
+
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
+
+/** Available editor themes. */
+enum class EditorTheme(val displayName: String) {
+    DARK("Dark"),
+    LIGHT("Light");
+
+    val colorScheme: ColorScheme
+        get() = when (this) {
+            DARK -> darkColorScheme(
+                primary = Color(0xFF90CAF9),
+                onPrimary = Color(0xFF003258),
+                primaryContainer = Color(0xFF1E3A5F),
+                onPrimaryContainer = Color(0xFFBBDEFB),
+                secondary = Color(0xFF80CBC4),
+                onSecondary = Color(0xFF003731),
+                secondaryContainer = Color(0xFF1B3B38),
+                onSecondaryContainer = Color(0xFFB2DFDB),
+                background = Color(0xFF1A1A1A),
+                onBackground = Color(0xFFE0E0E0),
+                surface = Color(0xFF222222),
+                onSurface = Color(0xFFE0E0E0),
+                surfaceVariant = Color(0xFF2D2D2D),
+                onSurfaceVariant = Color(0xFFBDBDBD),
+                inverseSurface = Color(0xFFE0E0E0),
+                inverseOnSurface = Color(0xFF1A1A1A),
+                error = Color(0xFFEF9A9A),
+                onError = Color(0xFF601010),
+                outline = Color(0xFF444444),
+                outlineVariant = Color(0xFF333333),
+            )
+            LIGHT -> lightColorScheme(
+                primary = Color(0xFF1565C0),
+                onPrimary = Color(0xFFFFFFFF),
+                primaryContainer = Color(0xFFD6E4FF),
+                onPrimaryContainer = Color(0xFF0D47A1),
+                secondary = Color(0xFF00897B),
+                onSecondary = Color(0xFFFFFFFF),
+                secondaryContainer = Color(0xFFB2DFDB),
+                onSecondaryContainer = Color(0xFF004D40),
+                background = Color(0xFFF5F5F5),
+                onBackground = Color(0xFF212121),
+                surface = Color(0xFFFFFFFF),
+                onSurface = Color(0xFF212121),
+                surfaceVariant = Color(0xFFE8E8E8),
+                onSurfaceVariant = Color(0xFF616161),
+                error = Color(0xFFC62828),
+                onError = Color(0xFFFFFFFF),
+                outline = Color(0xFFBDBDBD),
+                outlineVariant = Color(0xFFDDDDDD),
+            )
+        }
+}
+
+/** Available font size presets. */
+enum class FontSize(
+    val displayName: String,
+    val tabLabel: TextUnit,
+    val body: TextUnit,
+    val detail: TextUnit,
+    val heading: TextUnit,
+    val statusBar: TextUnit,
+) {
+    SMALL("Small", tabLabel = 10.sp, body = 11.sp, detail = 9.sp, heading = 13.sp, statusBar = 8.sp),
+    MEDIUM("Medium", tabLabel = 11.sp, body = 12.sp, detail = 10.sp, heading = 14.sp, statusBar = 9.sp),
+    LARGE("Large", tabLabel = 13.sp, body = 14.sp, detail = 12.sp, heading = 16.sp, statusBar = 11.sp);
+}
+
+/** Holds the current theme + font size; observed by Compose. */
+class EditorThemeState {
+    var theme = mutableStateOf(EditorTheme.DARK)
+    var fontSize = mutableStateOf(FontSize.MEDIUM)
+}
+
+/** CompositionLocal so any composable can access the theme state. */
+val LocalEditorTheme = compositionLocalOf { EditorThemeState() }

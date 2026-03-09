@@ -14,8 +14,7 @@ import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -81,18 +80,19 @@ fun TilesetPreview(
         } catch (e: Exception) { errorMessage = e.message ?: "Error" } finally { isLoading = false }
     }
 
-    Card(modifier = modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
+    val fs = LocalEditorTheme.current.fontSize.value
+    Surface(modifier = modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
             Text(
                 text = if (tilesetId != null) "Tileset ($tilesetId)" else "Tileset",
-                style = MaterialTheme.typography.titleSmall, fontSize = 12.sp
+                fontSize = fs.body, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(6.dp))
             Box(modifier = Modifier.fillMaxWidth().weight(1f).background(Color(0xFF0C0C18))) {
                 when {
-                    isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Loading…", color = Color.White, fontSize = 12.sp) }
-                    errorMessage != null -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text(errorMessage!!, color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
-                    room == null || romParser == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Select a room", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
+                    isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Loading…", color = Color.White, fontSize = fs.body) }
+                    errorMessage != null -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text(errorMessage!!, color = MaterialTheme.colorScheme.error, fontSize = fs.detail) }
+                    room == null || romParser == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Select a room", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = fs.detail) }
                     gridData != null -> {
                         val data = gridData!!
                         val selStart = editorState?.tilesetSelStart

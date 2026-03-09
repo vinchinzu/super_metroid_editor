@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -61,6 +62,11 @@ import com.supermetroid.editor.data.RoomInfo
 import com.supermetroid.editor.data.RoomRepository
 import com.supermetroid.editor.data.WindowConfig
 import com.supermetroid.editor.rom.RomParser
+import com.supermetroid.editor.ui.EditorTheme
+import com.supermetroid.editor.ui.EditorThemeState
+import com.supermetroid.editor.ui.FontSize
+import com.supermetroid.editor.ui.LocalEditorTheme
+import com.supermetroid.editor.ui.SettingsPopup
 import com.supermetroid.editor.ui.DraggableDividerHorizontal
 import com.supermetroid.editor.ui.DraggableDividerVertical
 import com.supermetroid.editor.ui.EditorState
@@ -183,9 +189,25 @@ fun main() = application {
             } else false
         }
     ) {
-        CompositionLocalProvider(LocalSwingWindow provides window) {
-        MaterialTheme {
+        val editorThemeState = remember {
+            val settings = AppConfig.load()
+            val state = EditorThemeState()
+            state.theme.value = EditorTheme.entries.find { it.name == settings.theme } ?: EditorTheme.DARK
+            state.fontSize.value = FontSize.entries.find { it.name == settings.fontSize } ?: FontSize.MEDIUM
+            state
+        }
+        CompositionLocalProvider(
+            LocalSwingWindow provides window,
+            LocalEditorTheme provides editorThemeState
+        ) {
+        MaterialTheme(colorScheme = editorThemeState.theme.value.colorScheme) {
             var emulatorEnabled by remember { mutableStateOf(false) }
+            var settingsOpen by remember { mutableStateOf(false) }
+            val fs = editorThemeState.fontSize.value
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(8.dp)
             ) {
@@ -228,9 +250,9 @@ fun main() = application {
                                     }
                                 }
                             }
-                        ) { Text(if (romLoadInFlight) "Loading ROM..." else "Open ROM...") }
+                        ) { Text(if (romLoadInFlight) "Loading ROM..." else "Open ROM...", fontSize = fs.body) }
                         if (romFileName != null) {
-                            Text("Loaded: $romFileName", style = MaterialTheme.typography.bodySmall, fontSize = 12.sp)
+                            Text("Loaded: $romFileName", fontSize = fs.detail, color = MaterialTheme.colorScheme.onBackground)
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
@@ -253,27 +275,46 @@ fun main() = application {
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("EMU", fontSize = 11.sp)
+                            Text("EMU", fontSize = fs.detail)
                         }
                         Button(
                             onClick = { editorState.saveProject(romParser) },
                             enabled = romParser != null,
                             shape = RoundedCornerShape(6.dp),
-                        ) { Text(if (editorState.dirty) "Save*" else "Save") }
+                        ) { Text(if (editorState.dirty) "Save*" else "Save", fontSize = fs.body) }
                         Button(
                             onClick = {
                                 romParser?.let { editorState.exportToRom(it) }
                             },
                             enabled = romParser != null,
                             shape = RoundedCornerShape(6.dp),
-                        ) { Text("Export ROM") }
+                        ) { Text("Export ROM", fontSize = fs.body) }
                         Button(
                             onClick = {
                                 romParser?.let { editorState.exportToIps(it) }
                             },
                             enabled = romParser != null,
                             shape = RoundedCornerShape(6.dp),
-                        ) { Text("Export IPS") }
+                        ) { Text("Export IPS", fontSize = fs.body) }
+                        Box {
+                            OutlinedButton(
+                                onClick = { settingsOpen = !settingsOpen },
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (settingsOpen) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surface,
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                            if (settingsOpen) {
+                                SettingsPopup(onDismiss = { settingsOpen = false })
+                            }
+                        }
                     }
                 }
                 
@@ -306,25 +347,25 @@ fun main() = application {
                             ) {
                                 Tab(selected = leftTab == 0, onClick = { leftTab = 0 },
                                     modifier = Modifier.height(32.dp)) {
-                                    Text("Rooms", fontSize = 11.sp)
+                                    Text("Rooms", fontSize = fs.tabLabel)
                                 }
                                 Tab(selected = leftTab == 1, onClick = { leftTab = 1 },
                                     modifier = Modifier.height(32.dp)) {
-                                    Text("Tiles", fontSize = 11.sp)
+                                    Text("Tiles", fontSize = fs.tabLabel)
                                 }
                                 Tab(selected = leftTab == 2, onClick = {
                                     leftTab = 2
                                     editorState.seedDefaultPatches()
                                 }, modifier = Modifier.height(32.dp)) {
-                                    Text("Patches", fontSize = 11.sp)
+                                    Text("Patches", fontSize = fs.tabLabel)
                                 }
                                 Tab(selected = leftTab == 3, onClick = { leftTab = 3 },
                                     modifier = Modifier.height(32.dp)) {
-                                    Text("Sound", fontSize = 11.sp)
+                                    Text("Sound", fontSize = fs.tabLabel)
                                 }
                                 Tab(selected = leftTab == 4, onClick = { leftTab = 4 },
                                     modifier = Modifier.height(32.dp)) {
-                                    Text("Sprites", fontSize = 11.sp)
+                                    Text("Sprites", fontSize = fs.tabLabel)
                                 }
                             }
 
@@ -359,17 +400,17 @@ fun main() = application {
                                         ) {
                                             Tab(selected = bottomPaneTab == 0, onClick = { bottomPaneTab = 0 },
                                                 modifier = Modifier.height(26.dp)) {
-                                                Text("Tileset", fontSize = 10.sp)
+                                                Text("Tileset", fontSize = fs.tabLabel)
                                             }
                                             Tab(selected = bottomPaneTab == 1, onClick = {
                                                 bottomPaneTab = 1
                                                 editorState.seedBuiltInPatterns(romParser)
                                             }, modifier = Modifier.height(26.dp)) {
-                                                Text("Patterns", fontSize = 10.sp)
+                                                Text("Patterns", fontSize = fs.tabLabel)
                                             }
                                             Tab(selected = bottomPaneTab == 2, onClick = { bottomPaneTab = 2 },
                                                 modifier = Modifier.height(26.dp)) {
-                                                Text("Room Info", fontSize = 10.sp)
+                                                Text("Room Info", fontSize = fs.tabLabel)
                                             }
                                         }
                                         key(bottomPaneTab) {
@@ -398,12 +439,12 @@ fun main() = application {
                                                         )
                                                     } else {
                                                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                            Text("Could not parse room header", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                                            Text("Could not parse room header", fontSize = fs.detail, color = MaterialTheme.colorScheme.error)
                                                         }
                                                     }
                                                 } else {
                                                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                                        Text("Select a room", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text("Select a room", fontSize = fs.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                     }
                                                 }
                                             }
@@ -419,13 +460,13 @@ fun main() = application {
                                     ) {
                                         Tab(selected = tilesetSubTab == 0, onClick = { tilesetSubTab = 0 },
                                             modifier = Modifier.height(26.dp)) {
-                                            Text("Tilesets", fontSize = 10.sp)
+                                            Text("Tilesets", fontSize = fs.tabLabel)
                                         }
                                         Tab(selected = tilesetSubTab == 1, onClick = {
                                             tilesetSubTab = 1
                                             editorState.seedBuiltInPatterns(romParser)
                                         }, modifier = Modifier.height(26.dp)) {
-                                            Text("Patterns", fontSize = 10.sp)
+                                            Text("Patterns", fontSize = fs.tabLabel)
                                         }
                                     }
                                     key(tilesetSubTab) {
@@ -481,7 +522,7 @@ fun main() = application {
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         for ((category, items) in grouped) {
-                                            Text(category, fontSize = 12.sp,
+                                            Text(category, fontSize = fs.body,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurface)
                                             Spacer(Modifier.height(2.dp))
@@ -494,7 +535,7 @@ fun main() = application {
                                                             else MaterialTheme.colorScheme.surface,
                                                     shape = RoundedCornerShape(6.dp)
                                                 ) {
-                                                    Text(entry.name, fontSize = 11.sp,
+                                                    Text(entry.name, fontSize = fs.body,
                                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                                         color = if (selectedSpriteIdx == idx) MaterialTheme.colorScheme.onPrimaryContainer
                                                                 else MaterialTheme.colorScheme.onSurface)
@@ -620,7 +661,7 @@ fun main() = application {
                                         if (showTransient && es.statusMessage.isNotEmpty()) {
                                             Text(
                                                 es.statusMessage,
-                                                fontSize = 9.sp,
+                                                fontSize = fs.statusBar,
                                                 fontFamily = monoFont,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -628,7 +669,7 @@ fun main() = application {
                                         } else if (showEmuTransient && emuStatus.isNotEmpty()) {
                                             Text(
                                                 "[EMU] $emuStatus",
-                                                fontSize = 9.sp,
+                                                fontSize = fs.statusBar,
                                                 fontFamily = monoFont,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -643,7 +684,7 @@ fun main() = application {
                                             val chunkY = hy / 16
                                             Text(
                                                 "chunk($chunkX,$chunkY)  tile($hx,$hy)  #$hIdx 0x${hType.toString(16).uppercase()} ${blockTypeName(hType)}",
-                                                fontSize = 9.sp,
+                                                fontSize = fs.statusBar,
                                                 fontFamily = monoFont,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -659,7 +700,7 @@ fun main() = application {
                                                 "${brush.cols}×${brush.rows} #${brush.primaryIndex} 0x${bt.toString(16).uppercase()} ${blockTypeName(bt)}" +
                                                     (if (brush.hFlip) " H" else "") +
                                                     (if (brush.vFlip) " V" else ""),
-                                                fontSize = 9.sp,
+                                                fontSize = fs.statusBar,
                                                 fontFamily = monoFont,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -681,6 +722,7 @@ fun main() = application {
                         )
                     }
                 }
+            }
             }
         }
         }

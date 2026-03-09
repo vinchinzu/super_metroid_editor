@@ -2,6 +2,7 @@
 
 The MS Paint of Super Metroid ROM hacking. A native cross-platform desktop editor built with Kotlin/Compose.
 
+<img src="screenshots/smedit_spike_olympics_dark_theme_and_emulator.png" width="80%" alt="Main Window">
 <p>
   <img src="screenshots/smedit_spike_olympics_landing_site.png" width="49%" alt="Room Editor" />
   <img src="screenshots/smedit_spike_olympics_landing_site_with_meta.png" width="49%" alt="Room Editor" />

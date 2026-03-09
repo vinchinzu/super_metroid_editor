@@ -40,6 +40,8 @@ data class AppSettings(
     val emulatorFollowLiveRoom: Boolean = true,
     val libretroCorePath: String? = null,
     val libretroAudioEnabled: Boolean = true,
+    val theme: String = "DARK",
+    val fontSize: String = "MEDIUM",
 )
 
 object AppConfig {

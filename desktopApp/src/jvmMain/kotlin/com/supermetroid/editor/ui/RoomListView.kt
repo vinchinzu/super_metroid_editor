@@ -22,8 +22,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -128,9 +126,10 @@ fun RoomListView(
     val showAreaHeaders = sortMode == RoomSortMode.AREA && searchQuery.isBlank()
     val totalRoomCount = rooms.size
 
-    Card(
+    val fs = LocalEditorTheme.current.fontSize.value
+    Surface(
         modifier = modifier,
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        color = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // ── Header: title + sort ──
@@ -145,7 +144,8 @@ fun RoomListView(
                 else "$totalRoomCount"
                 Text(
                     text = "Rooms ($countText)",
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = fs.heading,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
                 // Sort dropdown with toggle: clicking the active sort's group swaps direction
@@ -168,7 +168,7 @@ fun RoomListView(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
-                        Text(sortMode.label, fontSize = 11.sp)
+                        Text(sortMode.label, fontSize = fs.tabLabel)
                     }
                     DropdownMenu(
                         expanded = sortMenuExpanded,
@@ -186,9 +186,9 @@ fun RoomListView(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         if (isActive) {
-                                            Text("✓ ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("✓ ", fontSize = fs.body, fontWeight = FontWeight.Bold)
                                         }
-                                        Text(mode.label, fontSize = 12.sp)
+                                        Text(mode.label, fontSize = fs.body)
                                     }
                                 },
                                 onClick = {
@@ -219,7 +219,7 @@ fun RoomListView(
                     onValueChange = { searchQuery = it },
                     singleLine = true,
                     textStyle = TextStyle(
-                        fontSize = 12.sp,
+                        fontSize = fs.body,
                         color = MaterialTheme.colorScheme.onSurface
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -246,7 +246,7 @@ fun RoomListView(
                     Text(
                         text = if (rooms.isEmpty()) "Open a ROM to see rooms"
                                else "No rooms match \"$searchQuery\"",
-                        fontSize = 12.sp,
+                        fontSize = fs.body,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -298,6 +298,7 @@ fun RoomListView(
 
 @Composable
 private fun AreaHeader(area: Int) {
+    val fs = LocalEditorTheme.current.fontSize.value
     val (areaName, areaColor) = areaInfo[area] ?: ("Unknown" to Color.Gray)
     Surface(
         color = areaColor.copy(alpha = 0.15f),
@@ -305,7 +306,7 @@ private fun AreaHeader(area: Int) {
     ) {
         Text(
             text = areaName,
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = fs.detail,
             fontWeight = FontWeight.Bold,
             color = areaColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
@@ -322,6 +323,7 @@ fun RoomListItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val fs = LocalEditorTheme.current.fontSize.value
     val (_, areaColor) = areaInfo[area] ?: ("" to Color.Gray)
 
     Surface(
@@ -349,13 +351,11 @@ fun RoomListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = room.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 13.sp
+                    fontSize = fs.body,
                 )
                 Text(
                     text = "0x${room.getRoomIdAsInt().toString(16).lowercase().padStart(4, '0')}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 10.sp,
+                    fontSize = fs.detail,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
