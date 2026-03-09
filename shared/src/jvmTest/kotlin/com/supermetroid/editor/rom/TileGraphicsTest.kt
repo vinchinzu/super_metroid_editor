@@ -332,9 +332,18 @@ class TileGraphicsTest {
         }
 
         @Test
-        fun `getCreOffset returns 1024 for Kraid tileset`() {
+        fun `getCreOffset returns 640 for Kraid tileset (normal CRE)`() {
             val g = gfx ?: return
             g.loadTileset(TileGraphics.KRAID_TILESET)
+            assertEquals(640, g.getCreOffset())
+            assertEquals(640, g.getVarTileCount())
+            assertEquals(384, g.getCreTileCount())
+        }
+
+        @Test
+        fun `getCreOffset returns 1024 for Ceres tileset (no CRE)`() {
+            val g = gfx ?: return
+            g.loadTileset(17) // Ceres tileset — full 1024 metatiles, 0x8000 GFX
             assertEquals(1024, g.getCreOffset())
             assertEquals(1024, g.getVarTileCount())
             assertEquals(0, g.getCreTileCount())

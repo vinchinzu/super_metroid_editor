@@ -130,10 +130,13 @@ fun EmulatorWorkspace(
         var tick = 0L
         var pendingFrames = 0.0
         var lastWallClockNanos = System.nanoTime()
+        val warmupTicks = 5L
         while (workspaceState.isRunning && workspaceState.session.active) {
             val now = System.nanoTime()
-            pendingFrames += (now - lastWallClockNanos).toDouble() / FRAME_DURATION_NANOS.toDouble()
+            val elapsedNanos = now - lastWallClockNanos
             lastWallClockNanos = now
+            val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
+            pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
             if (pendingFrames < 1.0) {
                 val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
                 delay(waitMs)

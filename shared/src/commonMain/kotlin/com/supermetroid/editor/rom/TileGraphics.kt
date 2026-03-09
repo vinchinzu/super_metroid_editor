@@ -43,33 +43,35 @@ class TileGraphics(private val romParser: RomParser) {
         // SNES 4bpp tile: 32 bytes per 8x8 tile
         const val BYTES_PER_TILE = 32
 
-        // Kraid's room uses tileset/graphics set 27 with extended variable area
+        // Kraid's room uses tileset/graphics set 27
         const val KRAID_TILESET = 27
 
         const val CERES_AREA = 6
+
+        // Standard CRE graphics placement offset (tiles 640-1023)
+        private const val CRE_GFX_OFFSET = 0x5000  // 640 tiles × 32 bytes
     }
-    
+
     // Cached data per tileset
     private var cachedTilesetId: Int = -1
+    private var cachedHasCre: Boolean = false            // Whether CRE graphics were included
     private var rawTileData: ByteArray? = null          // Combined 4bpp tile graphics (var + CRE)
     private var metatiles: Array<IntArray>? = null       // metatile[idx] = 4 sub-tile words
     private var cachedPalette: Array<IntArray>? = null   // 8 palettes × 16 ARGB colors
-    
+
     /**
      * Load a complete tileset (graphics + tile table + palette).
      * Returns true if successful.
      *
-     * @param noCre  When true, CRE tiles/table are not mixed in (room header
-     *               byte 8 value 0x05 — "wipe out CRE", used by Ceres shaft,
-     *               Ceres Ridley, and Kraid's room).
-     *
-     * Special cases derived from SMILE source (UGraphics.bas, SamusForm2.frm):
-     *   - Tileset 27 (Kraid): variable GFX region is 0x8000 bytes long, CRE
-     *     is placed at offset 0x8000 instead of the normal 0x5000.
-     *   - Rooms with noCre=true: only variable tile table/graphics are used;
-     *     metatile indices > CRE_TILE_START will appear blank.
+     * Data-driven CRE handling based on decompressed sizes:
+     *   - Tile table: if variable table has 1024+ metatiles (8192+ bytes),
+     *     it covers all slots — CRE table is NOT prepended.
+     *     Otherwise CRE (256 metatiles) is prepended: [CRE 0-255][VAR 256-1023].
+     *   - Graphics: if variable GFX is 0x8000+ bytes (1024 tiles),
+     *     it fills all tile slots — CRE graphics are NOT overlaid.
+     *     Otherwise CRE graphics are placed at offset 0x5000 (tile 640+).
      */
-    fun loadTileset(tilesetId: Int): Boolean {
+    fun loadTileset(tilesetId: Int, @Suppress("UNUSED_PARAMETER") noCre: Boolean = false): Boolean {
         if (tilesetId == cachedTilesetId && rawTileData != null) return true
 
         val romData = romParser.getRomData()
@@ -87,20 +89,36 @@ class TileGraphics(private val romParser: RomParser) {
         val paletteDecompressed = romParser.decompressLZ2(palettePtr)
         cachedPalette = parsePalette(paletteDecompressed)
 
-        val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
-        val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
+        // Tile table: if variable table already covers all 1024 metatiles, use it directly.
+        // Otherwise prepend CRE (256 metatiles) to form [CRE][VAR] = 1024 total.
+        val varTableCoversAll = varTileTable.size >= METATILE_COUNT * 8
+        if (varTableCoversAll) {
+            metatiles = parseTileTableRaw(varTileTable)
+        } else {
+            val creTileTable = romParser.decompressLZ2(CRE_TILE_TABLE_SNES)
+            metatiles = parseTileTable(varTileTable, creTileTable)
+        }
 
-        // Tile tables: CRE first, then variable (per SMILE DecompressTtable)
-        metatiles = parseTileTable(varTileTable, creTileTable)
-
-        // Tile graphics: variable at 0, CRE at offset.
-        // Kraid (set 27) uses 0x8000 offset; everything else uses 0x5000.
-        val creOffset = if (tilesetId == KRAID_TILESET) 0x8000 else 0x5000
-        val combinedGfxSize = creOffset + creGfx.size
-        val combinedGfx = ByteArray(maxOf(combinedGfxSize, TOTAL_TILES * BYTES_PER_TILE))
-        System.arraycopy(varGfx, 0, combinedGfx, 0, minOf(varGfx.size, creOffset))
-        System.arraycopy(creGfx, 0, combinedGfx, creOffset, minOf(creGfx.size, combinedGfx.size - creOffset))
-        rawTileData = combinedGfx
+        // Graphics: data-driven CRE handling based on decompressed GFX size.
+        // If variable GFX covers all 1024 tiles (0x8000 bytes), use it directly.
+        // Otherwise, variable tiles go at 0-639 and CRE overlays at 640-1023.
+        val varGfxCoversAll = varGfx.size >= TOTAL_TILES * BYTES_PER_TILE
+        if (varGfxCoversAll) {
+            // Full 1024 tiles from variable GFX — no CRE overlay (e.g. Ceres 17-20)
+            rawTileData = varGfx.copyOf(TOTAL_TILES * BYTES_PER_TILE)
+        } else {
+            // Standard: variable tiles first, CRE at offset 0x5000
+            val combinedGfx = ByteArray(TOTAL_TILES * BYTES_PER_TILE)
+            val varCopyLen = minOf(varGfx.size, combinedGfx.size)
+            System.arraycopy(varGfx, 0, combinedGfx, 0, varCopyLen)
+            val creGfx = romParser.decompressLZ2(CRE_GFX_SNES)
+            val copyLen = minOf(creGfx.size, combinedGfx.size - CRE_GFX_OFFSET)
+            if (copyLen > 0) {
+                System.arraycopy(creGfx, 0, combinedGfx, CRE_GFX_OFFSET, copyLen)
+            }
+            rawTileData = combinedGfx
+        }
+        cachedHasCre = !varGfxCoversAll
 
         cachedTilesetId = tilesetId
         return true
@@ -307,8 +325,8 @@ class TileGraphics(private val romParser: RomParser) {
         System.arraycopy(gfxData, 0, data, offset, maxLen)
     }
 
-    /** CRE tile start index (640 for normal, 1024 for Kraid). */
-    fun getCreOffset(): Int = if (cachedTilesetId == KRAID_TILESET) 1024 else CRE_TILE_START
+    /** CRE tile start index (640 if CRE was included, 1024 otherwise). */
+    fun getCreOffset(): Int = if (cachedHasCre) CRE_TILE_START else TOTAL_TILES
 
     /** Number of variable tiles. */
     fun getVarTileCount(): Int = getCreOffset()

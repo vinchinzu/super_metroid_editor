@@ -61,7 +61,9 @@ fun TilesetPreview(
     var zoomLevel by remember { mutableStateOf(1.8f) }
     var isDragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(room?.id, romParser) {
+    val gfxVersion = editorState?.editVersion ?: 0
+
+    LaunchedEffect(room?.id, romParser, gfxVersion) {
         gridData = null; tilesetId = null; errorMessage = null
         if (room == null || romParser == null) return@LaunchedEffect
         isLoading = true
@@ -74,6 +76,7 @@ fun TilesetPreview(
             if (!withContext(Dispatchers.Default) { tg.loadTileset(header.tileset) }) {
                 errorMessage = "Failed to load tileset"; return@LaunchedEffect
             }
+            editorState?.applyCustomGfxToTileGraphics(tg, header.tileset)
             gridData = withContext(Dispatchers.Default) { tg.renderTilesetGrid() }
         } catch (e: Exception) { errorMessage = e.message ?: "Error" } finally { isLoading = false }
     }

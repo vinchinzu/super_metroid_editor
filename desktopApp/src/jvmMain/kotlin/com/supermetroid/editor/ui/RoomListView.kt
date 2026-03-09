@@ -108,7 +108,7 @@ fun RoomListView(
 
         when (sortMode) {
             RoomSortMode.AREA -> filtered.sortedWith(compareBy(
-                { roomAreas[it.handle] ?: 99 },
+                { if (it.handle == "debugRoom") Int.MAX_VALUE else (roomAreas[it.handle] ?: 99) },
                 { it.getRoomIdAsInt() }
             ))
             RoomSortMode.LAST_EDITED, RoomSortMode.FIRST_EDITED -> {
@@ -252,8 +252,13 @@ fun RoomListView(
                 }
             } else if (showAreaHeaders) {
                 val groupedRooms = remember(filteredSortedRooms, roomAreas) {
-                    filteredSortedRooms.groupBy { roomAreas[it.handle] ?: -1 }
-                        .toSortedMap()
+                    // Use LinkedHashMap to preserve the sorted order from filteredSortedRooms
+                    val map = LinkedHashMap<Int, MutableList<RoomInfo>>()
+                    for (room in filteredSortedRooms) {
+                        val area = roomAreas[room.handle] ?: -1
+                        map.getOrPut(area) { mutableListOf() }.add(room)
+                    }
+                    map
                 }
 
                 LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {

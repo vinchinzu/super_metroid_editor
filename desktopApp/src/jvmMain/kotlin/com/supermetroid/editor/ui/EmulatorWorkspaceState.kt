@@ -146,7 +146,14 @@ class EmulatorWorkspaceState(
     var selectedBackendName by mutableStateOf("libretro")
 
     var statusMessage by mutableStateOf("Click Play to start the emulator.")
+        internal set
+    var statusMessageTimestamp by mutableStateOf(0L)
         private set
+
+    internal fun setStatus(msg: String) {
+        statusMessage = msg
+        statusMessageTimestamp = System.nanoTime()
+    }
     var capabilities by mutableStateOf<EmulatorCapabilities?>(null)
         private set
     var session by mutableStateOf(SessionState())
@@ -196,7 +203,7 @@ class EmulatorWorkspaceState(
         roomExportCache.clear()
         if (!navFile.isFile) {
             navGraph = null
-            statusMessage = "Nav graph not found at ${navFile.absolutePath}"
+            setStatus("Nav graph not found at ${navFile.absolutePath}")
             persistConfig()
             if (isConnected) configureBridge()
             return
@@ -204,7 +211,7 @@ class EmulatorWorkspaceState(
         navGraph = withContext(Dispatchers.IO) {
             json.decodeFromString(EditorNavGraph.serializer(), navFile.readText())
         }.let(::LoadedNavGraph)
-        statusMessage = "Loaded nav graph (${navGraph?.graph?.nodes?.size ?: 0} rooms)"
+        setStatus("Loaded nav graph (${navGraph?.graph?.nodes?.size ?: 0} rooms)")
         persistConfig()
         if (isConnected) configureBridge()
     }
@@ -223,12 +230,12 @@ class EmulatorWorkspaceState(
             configureBridge()
             isConnected = true
             gamepadManager.init()
-            statusMessage = "Connected to ${caps.backendName}"
+            setStatus("Connected to ${caps.backendName}")
             refreshInventory()
         } catch (e: Exception) {
             backend = null
             isConnected = false
-            statusMessage = "Connection failed: ${e.message}"
+            setStatus("Connection failed: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -251,19 +258,19 @@ class EmulatorWorkspaceState(
         lastStepRepeat = 0
         sessionBootStateName = null
         lastCheckpointSlotName = null
-        statusMessage = "Disconnected"
+        setStatus("Disconnected")
     }
 
-    suspend fun refreshInventory() {
+    suspend fun refreshInventory(silent: Boolean = false) {
         val b = backend ?: return
         isBusy = true
         try {
             val states = b.listStates()
             saveStates = states.sortedBy { it.name.lowercase() }
             if (selectedStateName == null) selectedStateName = saveStates.firstOrNull()?.name
-            statusMessage = "Inventory refreshed"
+            if (!silent) setStatus("Inventory refreshed")
         } catch (e: Exception) {
-            statusMessage = "Inventory refresh failed: ${e.message}"
+            setStatus("Inventory refresh failed: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -289,9 +296,9 @@ class EmulatorWorkspaceState(
             emulatedFps = 0f
             viewportFps = 0f
             lastStepRepeat = 0
-            statusMessage = result.message ?: "Session started: $stateName"
+            setStatus(result.message ?: "Session started: $stateName")
         } catch (e: Exception) {
-            statusMessage = "Failed to start session: ${e.message}"
+            setStatus("Failed to start session: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -312,9 +319,9 @@ class EmulatorWorkspaceState(
                 viewportFps = 0f
                 lastStepRepeat = 0
             }
-            statusMessage = result.message ?: "Session closed"
+            setStatus(result.message ?: "Session closed")
         } catch (e: Exception) {
-            statusMessage = "Failed to close session: ${e.message}"
+            setStatus("Failed to close session: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -329,7 +336,7 @@ class EmulatorWorkspaceState(
             val snap = b.snapshot()
             applySnapshot(snap)
         } catch (e: Exception) {
-            statusMessage = "Snapshot failed: ${e.message}"
+            setStatus("Snapshot failed: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -363,7 +370,7 @@ class EmulatorWorkspaceState(
                 frameIncluded = includeFrame,
             )
         } catch (e: Exception) {
-            statusMessage = "Step failed: ${e.message}"
+            setStatus("Step failed: ${e.message}")
             isRunning = false
         } finally {
             stepInFlight = false
@@ -377,10 +384,10 @@ class EmulatorWorkspaceState(
         isBusy = true
         try {
             b.saveState(name)
-            statusMessage = "Saved $name"
-            refreshInventory()
+            setStatus("Saved $name")
+            refreshInventory(silent = true)
         } catch (e: Exception) {
-            statusMessage = "Save failed: ${e.message}"
+            setStatus("Save failed: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -415,7 +422,7 @@ class EmulatorWorkspaceState(
     suspend fun loadSlot(slot: EmulatorSaveSlot) {
         val b = backend ?: return
         if (!hasSavedSlot(slot)) {
-            statusMessage = "${slot.label} is empty"
+            setStatus("${slot.label} is empty")
             return
         }
         selectedStateName = slot.stateName
@@ -432,7 +439,7 @@ class EmulatorWorkspaceState(
         val preferred = saveSlots.firstOrNull { it.stateName == lastCheckpointSlotName && hasSavedSlot(it) }
             ?: saveSlots.firstOrNull { hasSavedSlot(it) }
         if (preferred == null) {
-            statusMessage = "No checkpoint slot saved yet"
+            setStatus("No checkpoint slot saved yet")
             return
         }
         loadSlot(preferred)
@@ -491,9 +498,9 @@ class EmulatorWorkspaceState(
         try {
             val result = b.loadState(stateName)
             applyStepResult(result)
-            statusMessage = result.message ?: "Loaded $stateName"
+            setStatus(result.message ?: "Loaded $stateName")
         } catch (e: Exception) {
-            statusMessage = "Load failed: ${e.message}"
+            setStatus("Load failed: ${e.message}")
         } finally {
             isBusy = false
         }
@@ -568,13 +575,13 @@ class EmulatorWorkspaceState(
             if (comboActive != null && !comboConsumedUntilRelease) {
                 pendingComboAction = comboActive
                 comboConsumedUntilRelease = true
-                statusMessage = when (comboActive) {
+                setStatus(when (comboActive) {
                     "save" -> "Saving slot $saveSlotIndex..."
                     "load" -> "Loading slot $saveSlotIndex..."
                     "slot_up" -> "Slot ${(saveSlotIndex + 1) % 129}"
                     "slot_down" -> "Slot ${(saveSlotIndex - 1 + 129) % 129}"
                     else -> ""
-                }
+                })
             } else if (comboActive == null) {
                 comboConsumedUntilRelease = false
                 for (i in action.indices) {
@@ -585,7 +592,7 @@ class EmulatorWorkspaceState(
         }
         // Surface gamepad connect/disconnect events
         gamepadManager.statusEvent?.let {
-            statusMessage = it
+            setStatus(it)
             gamepadManager.statusEvent = null
         }
 
@@ -752,7 +759,7 @@ class EmulatorWorkspaceState(
         session = result.session
         if (result.states.isNotEmpty()) saveStates = result.states.sortedBy { it.name.lowercase() }
         if (result.recordingPath != null) recordingPath = result.recordingPath
-        result.message?.let { statusMessage = it }
+        result.message?.let { setStatus(it) }
         applySnapshot(result.snapshot)
     }
 
