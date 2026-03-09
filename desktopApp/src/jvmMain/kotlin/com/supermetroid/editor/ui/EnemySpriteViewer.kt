@@ -112,7 +112,14 @@ fun EnemySpriteViewer(
         val td = tileData ?: return@remember null
         val smap = EnemySpritemap(rp)
         val defaultSmap = smap.findDefaultSpritemap(entry.speciesId) ?: return@remember null
-        smap.renderSpritemap(defaultSmap, td, pal)
+        val result = smap.renderSpritemap(defaultSmap, td, pal) ?: return@remember null
+        // Quality check: skip if the sprite is mostly empty (< 5% non-transparent pixels).
+        // This catches garbage spritemaps from boss sub-entities whose init AI doesn't
+        // follow standard patterns and yields wrong tile references.
+        val totalPixels = result.width * result.height
+        val nonTransparent = result.pixels.count { (it ushr 24) > 0 }
+        if (totalPixels > 64 && nonTransparent < totalPixels * 5 / 100) return@remember null
+        result
     }
 
     val tileSheet = remember(entry.speciesId, refreshKey) {

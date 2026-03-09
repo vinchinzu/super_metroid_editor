@@ -47,31 +47,47 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.supermetroid.editor.rom.EnemySpriteGraphics
+import com.supermetroid.editor.rom.EnemySpritemap
 import com.supermetroid.editor.rom.KraidSpritemap
 import com.supermetroid.editor.rom.RomParser
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.image.BufferedImage
 
-private enum class KraidTab { COMPONENTS, TILE_SHEET }
+private enum class KraidTab { COMPONENTS, TILE_SHEET, OAM_TILES }
 
 private sealed class KraidComponent(val displayName: String) {
     object FullBody : KraidComponent("Full Body (nametable)")
     data class Body(val def: KraidSpritemap.BodyTilemapDef) : KraidComponent(def.name)
     data class BigSprmap(val def: KraidSpritemap.ComponentDef) : KraidComponent(def.name)
+    data class OamEntity(val speciesId: Int, val label: String) : KraidComponent(label)
 }
 
-private val ALL_COMPONENTS: List<KraidComponent> = buildList {
+/** OAM sub-entities that share the $AB:CC00 tile sheet (claws, spikes, etc.) */
+private val KRAID_OAM_ENTITIES = listOf(
+    KraidComponent.OamEntity(0xE33F, "Belly Spike 1"),
+    KraidComponent.OamEntity(0xE37F, "Belly Spike 2"),
+    KraidComponent.OamEntity(0xE3BF, "Belly Spike 3"),
+    KraidComponent.OamEntity(0xE3FF, "Flying Claw 1"),
+    KraidComponent.OamEntity(0xE43F, "Flying Claw 2"),
+    KraidComponent.OamEntity(0xE47F, "Flying Claw 3"),
+)
+
+private val BODY_COMPONENTS: List<KraidComponent> = buildList {
     add(KraidComponent.FullBody)
     KraidSpritemap.BODY_TILEMAPS.forEach { add(KraidComponent.Body(it)) }
     KraidSpritemap.BIGSPRMAP_COMPONENTS.forEach { add(KraidComponent.BigSprmap(it)) }
 }
+
+private val ALL_COMPONENTS: List<KraidComponent> = BODY_COMPONENTS + KRAID_OAM_ENTITIES
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KraidSpriteEditor(
     editorState: EditorState,
     romParser: RomParser?,
+    showOamComponents: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var activeTab by remember { mutableStateOf(KraidTab.COMPONENTS) }
@@ -146,7 +162,7 @@ fun KraidSpriteEditor(
                     },
                     modifier = Modifier.height(28.dp)
                 )
-                FilterChip(
+                if (!showOamComponents) FilterChip(
                     selected = activeTab == KraidTab.TILE_SHEET,
                     onClick = { activeTab = KraidTab.TILE_SHEET },
                     label = {
@@ -164,6 +180,23 @@ fun KraidSpriteEditor(
                     },
                     modifier = Modifier.height(28.dp)
                 )
+                if (showOamComponents) {
+                    FilterChip(
+                        selected = activeTab == KraidTab.OAM_TILES,
+                        onClick = { activeTab = KraidTab.OAM_TILES },
+                        label = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("OAM Tiles", fontSize = 10.sp)
+                                Surface(color = Color(0xFF336633), shape = RoundedCornerShape(3.dp)) {
+                                    Text("ROM", fontSize = 7.sp, color = Color(0xFF88FF88),
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                }
+                            }
+                        },
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
                 if (romParser == null) {
                     Text("(load a ROM to enable editing)",
                         fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -177,6 +210,7 @@ fun KraidSpriteEditor(
                 romParser = romParser,
                 selectedComponent = selectedComponent,
                 onSelectComponent = { selectedComponent = it },
+                showOamComponents = showOamComponents,
                 refreshKey = refreshKey,
                 onEditPixels = { comp ->
                     val rp = romParser ?: return@KraidComponentsTab
@@ -187,7 +221,7 @@ fun KraidSpriteEditor(
                     editingPalette = editorState.getKraidPalette(rp)
                     editingLabel = "Kraid ${comp.displayName}"
                     editingIsTileSheet = false
-                    editingAssembledSprite = sprite
+                    editingAssembledSprite = if (comp is KraidComponent.OamEntity) null else sprite
                 },
                 onRefresh = { refreshKey++ },
                 modifier = Modifier.weight(1f)
@@ -212,6 +246,13 @@ fun KraidSpriteEditor(
                 onRefresh = { refreshKey++ },
                 modifier = Modifier.weight(1f)
             )
+
+            KraidTab.OAM_TILES -> KraidOamTileSheetTab(
+                editorState = editorState,
+                romParser = romParser,
+                refreshKey = refreshKey,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -224,6 +265,28 @@ private fun renderKraidComponent(
     is KraidComponent.FullBody -> editorState.renderKraidFullBody(romParser)
     is KraidComponent.Body -> editorState.renderKraidBodyTilemap(romParser, comp.def)
     is KraidComponent.BigSprmap -> editorState.renderKraidBigSprmap(romParser, comp.def)
+    is KraidComponent.OamEntity -> renderKraidOamEntity(editorState, romParser, comp)
+}
+
+private fun renderKraidOamEntity(
+    editorState: EditorState,
+    romParser: RomParser,
+    comp: KraidComponent.OamEntity
+): KraidSpritemap.AssembledSprite? {
+    val palette = EnemySpriteGraphics.readEnemyPalette(romParser, comp.speciesId) ?: return null
+    val tileData = editorState.loadEnemyTileData(romParser, comp.speciesId) ?: return null
+    val smap = EnemySpritemap(romParser)
+    val defaultSmap = smap.findDefaultSpritemap(comp.speciesId) ?: return null
+    val oam = smap.renderSpritemap(defaultSmap, tileData, palette) ?: return null
+    return KraidSpritemap.AssembledSprite(
+        name = comp.label,
+        width = oam.width,
+        height = oam.height,
+        pixels = oam.pixels,
+        entries = emptyList(),
+        tilesCols = oam.width / 8,
+        tilesRows = oam.height / 8
+    )
 }
 
 @Composable
@@ -232,6 +295,7 @@ private fun KraidComponentsTab(
     romParser: RomParser?,
     selectedComponent: KraidComponent,
     onSelectComponent: (KraidComponent) -> Unit,
+    showOamComponents: Boolean = false,
     refreshKey: Int,
     onEditPixels: (KraidComponent) -> Unit,
     onRefresh: () -> Unit,
@@ -247,34 +311,75 @@ private fun KraidComponentsTab(
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("Room: \$A59F \u00b7 Tileset: 27 \u00b7 AI: \$A7", fontSize = 9.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp))
-            Text("128 tiles from \$B9:FA38. Body rendered via BG2 " +
-                "nametable + body tilemaps for rising states.",
-                fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
-            Divider()
-            Spacer(Modifier.height(4.dp))
+            if (showOamComponents) {
+                Text("Species: \$E2BF \u00b7 AI: \$A7", fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp))
+                Text("Body: 128 BG2 tiles from \$B9:FA38\nOAM: 240 tiles from \$AB:CC00",
+                    fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Divider()
+                Spacer(Modifier.height(4.dp))
 
-            Text("Body Views", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(2.dp))
+                Text("Body (BG2 Tilemaps)", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
 
-            KraidComponentItem(KraidComponent.FullBody, selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
-            KraidSpritemap.BODY_TILEMAPS.forEach { def ->
-                KraidComponentItem(KraidComponent.Body(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
-            }
+                KraidSpritemap.BODY_TILEMAPS.forEach { def ->
+                    KraidComponentItem(KraidComponent.Body(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                }
 
-            Spacer(Modifier.height(8.dp))
-            Divider()
-            Spacer(Modifier.height(4.dp))
-            Text("Detail Components", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(8.dp))
+                Divider()
+                Spacer(Modifier.height(4.dp))
+                Text("OAM Sprites", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
 
-            KraidSpritemap.BIGSPRMAP_COMPONENTS.forEach { def ->
-                KraidComponentItem(KraidComponent.BigSprmap(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                KRAID_OAM_ENTITIES.forEach { entity ->
+                    KraidComponentItem(entity, selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Divider()
+                Spacer(Modifier.height(4.dp))
+                Text("Belly Details (BG2)", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
+
+                KraidSpritemap.BIGSPRMAP_COMPONENTS.forEach { def ->
+                    KraidComponentItem(KraidComponent.BigSprmap(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                }
+            } else {
+                Text("Room: \$A59F \u00b7 Tileset: 27 \u00b7 AI: \$A7", fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp))
+                Text("128 tiles from \$B9:FA38. Body rendered via BG2 " +
+                    "nametable + body tilemaps for rising states.",
+                    fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 11.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Divider()
+                Spacer(Modifier.height(4.dp))
+
+                Text("Body Views", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
+
+                KraidComponentItem(KraidComponent.FullBody, selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                KraidSpritemap.BODY_TILEMAPS.forEach { def ->
+                    KraidComponentItem(KraidComponent.Body(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Divider()
+                Spacer(Modifier.height(4.dp))
+                Text("Detail Components", fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
+
+                KraidSpritemap.BIGSPRMAP_COMPONENTS.forEach { def ->
+                    KraidComponentItem(KraidComponent.BigSprmap(def), selectedComponent, editorState, romParser, refreshKey, onSelectComponent)
+                }
             }
         }
 
@@ -322,6 +427,7 @@ private fun KraidComponentItem(
                     is KraidComponent.FullBody -> "\$B9:FE3E"
                     is KraidComponent.Body -> "\$${comp.def.snesAddr.toString(16).uppercase()}"
                     is KraidComponent.BigSprmap -> "\$${comp.def.tilemapSnes.toString(16).uppercase()}"
+                    is KraidComponent.OamEntity -> "\$A0:${comp.speciesId.toString(16).uppercase()}"
                 }
                 Text(addrText, fontSize = 9.sp,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
@@ -390,9 +496,21 @@ private fun KraidComponentDetail(
                     is KraidComponent.FullBody -> "BG2 Nametable: \$B9:FE3E (32\u00d764)"
                     is KraidComponent.Body -> "Tilemap: \$${comp.def.snesAddr.toString(16).uppercase()} (${comp.def.cols}\u00d7${comp.def.rows})"
                     is KraidComponent.BigSprmap -> "Tilemap: \$${comp.def.tilemapSnes.toString(16).uppercase()}"
+                    is KraidComponent.OamEntity -> {
+                        val hexId = comp.speciesId.toString(16).uppercase().padStart(4, '0')
+                        "OAM Species: \$A0:$hexId"
+                    }
                 }
                 Text(addrText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Species: \$E2BF \u00b7 8 sub-entities", fontSize = 10.sp,
+                val speciesText = if (comp is KraidComponent.OamEntity) {
+                    val stats = romParser?.let { EnemySpriteGraphics.readSpeciesStats(it, comp.speciesId) }
+                    val hp = stats?.second ?: 0
+                    val dmg = stats?.third ?: 0
+                    "HP: $hp \u00b7 Damage: $dmg \u00b7 OAM tile sheet \$AB:CC00"
+                } else {
+                    "Species: \$E2BF \u00b7 8 sub-entities"
+                }
+                Text(speciesText, fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -402,10 +520,12 @@ private fun KraidComponentDetail(
             color = MaterialTheme.colorScheme.onSurface)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { onEditPixels(comp) },
-                enabled = romParser != null
-            ) { Text("Edit Pixels", fontSize = 11.sp) }
+            if (comp !is KraidComponent.OamEntity) {
+                Button(
+                    onClick = { onEditPixels(comp) },
+                    enabled = romParser != null
+                ) { Text("Edit Pixels", fontSize = 11.sp) }
+            }
 
             OutlinedButton(
                 onClick = {
@@ -456,16 +576,31 @@ private fun KraidComponentDetail(
             }
         }
 
-        Surface(
-            color = Color(0xFF1A2A1A),
-            shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Kraid body tiles from \$B9:FA38 (128 tiles, tile index base 0x100). " +
-                "Pixel edits write to the 4bpp tile data and affect all views.",
-                fontSize = 9.sp, color = Color(0xFF88CC88),
-                lineHeight = 12.sp,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+        if (comp is KraidComponent.OamEntity) {
+            Surface(
+                color = Color(0xFF1A1A2A),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("OAM sub-entity rendered via spritemap tracing. " +
+                    "Uses shared tile sheet at \$AB:CC00 (240 tiles). " +
+                    "Edit tiles via the OAM Tiles tab.",
+                    fontSize = 9.sp, color = Color(0xFF8888CC),
+                    lineHeight = 12.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+        } else {
+            Surface(
+                color = Color(0xFF1A2A1A),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Kraid body tiles from \$B9:FA38 (128 tiles, tile index base 0x100). " +
+                    "Pixel edits write to the 4bpp tile data and affect all views.",
+                    fontSize = 9.sp, color = Color(0xFF88CC88),
+                    lineHeight = 12.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
         }
 
         Divider()
@@ -473,13 +608,16 @@ private fun KraidComponentDetail(
         val rp = romParser
         if (rp != null) {
             var spriteBitmap by remember(comp.displayName, refreshKey) { mutableStateOf<ImageBitmap?>(null) }
+            var spriteLoaded by remember(comp.displayName, refreshKey) { mutableStateOf(false) }
             LaunchedEffect(comp.displayName, refreshKey) {
+                spriteLoaded = false
                 val sprite = renderKraidComponent(editorState, rp, comp)
                 spriteBitmap = sprite?.let {
                     val img = BufferedImage(it.width, it.height, BufferedImage.TYPE_INT_ARGB)
                     img.setRGB(0, 0, it.width, it.height, it.pixels, 0, it.width)
                     img.toComposeImageBitmap()
                 }
+                spriteLoaded = true
             }
             Box(
                 modifier = Modifier.weight(1f).fillMaxWidth()
@@ -490,7 +628,7 @@ private fun KraidComponentDetail(
             ) {
                 val bm = spriteBitmap
                 if (bm != null) {
-                    val scale = if (comp is KraidComponent.BigSprmap) 6 else 2
+                    val scale = if (comp is KraidComponent.BigSprmap || comp is KraidComponent.OamEntity) 6 else 2
                     Image(
                         bitmap = bm,
                         contentDescription = "Kraid ${comp.displayName}",
@@ -499,6 +637,21 @@ private fun KraidComponentDetail(
                             .clip(RoundedCornerShape(4.dp))
                             .size((bm.width * scale).dp, (bm.height * scale).dp)
                     )
+                } else if (spriteLoaded) {
+                    Box(modifier = Modifier.fillMaxSize().defaultMinSize(minHeight = 100.dp),
+                        contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("No assembly found", fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (comp is KraidComponent.OamEntity) {
+                                Text("This sub-entity's init AI doesn't follow the standard " +
+                                    "spritemap pattern. View tiles in the OAM Tiles tab.",
+                                    fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    lineHeight = 12.sp)
+                            }
+                        }
+                    }
                 } else {
                     Box(modifier = Modifier.fillMaxSize().defaultMinSize(minHeight = 100.dp),
                         contentAlignment = Alignment.Center) {
@@ -631,6 +784,107 @@ private fun KraidTileSheetTab(
             ) {
                 Text("Palette:", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 palette.forEachIndexed { _, argb ->
+                    val alpha = (argb ushr 24) and 0xFF
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(if (alpha == 0) Color(0xFF444444) else Color(argb))
+                            .border(0.5.dp, Color(0x40FFFFFF), RoundedCornerShape(2.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KraidOamTileSheetTab(
+    editorState: EditorState,
+    romParser: RomParser?,
+    refreshKey: Int,
+    modifier: Modifier = Modifier
+) {
+    // Use the first OAM sub-entity to get the shared tile sheet
+    val speciesId = KRAID_OAM_ENTITIES.first().speciesId
+
+    var sheetBitmap by remember(refreshKey) { mutableStateOf<ImageBitmap?>(null) }
+    var oamPalette by remember(refreshKey) { mutableStateOf<IntArray?>(null) }
+    var tileInfo by remember(refreshKey) { mutableStateOf("") }
+
+    LaunchedEffect(refreshKey, romParser) {
+        val rp = romParser ?: return@LaunchedEffect
+        val palette = EnemySpriteGraphics.readEnemyPalette(rp, speciesId)
+        oamPalette = palette
+        val tileData = editorState.loadEnemyTileData(rp, speciesId)
+        if (palette != null && tileData != null) {
+            val tileCount = tileData.size / 32
+            tileInfo = "${tileData.size} bytes \u00b7 $tileCount tiles"
+            val gfx = EnemySpriteGraphics(rp)
+            gfx.loadFromRaw(listOf(tileData))
+            val result = gfx.renderSheet(palette, 16)
+            if (result != null) {
+                val (pixels, w, h) = result
+                val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+                img.setRGB(0, 0, w, h, pixels, 0, w)
+                sheetBitmap = img.toComposeImageBitmap()
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Kraid OAM Sprite Tiles", fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface)
+            Text("GFX Address: \$AB:CC00 \u00b7 $tileInfo",
+                fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Shared by all Kraid OAM sub-entities (belly spikes, flying claws).",
+                fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Divider()
+
+        Box(
+            modifier = Modifier.weight(1f).fillMaxWidth()
+                .background(Color(0xFF111122), RoundedCornerShape(8.dp))
+                .verticalScroll(rememberScrollState()),
+            contentAlignment = Alignment.TopStart
+        ) {
+            val bm = sheetBitmap
+            if (bm != null) {
+                Image(
+                    bitmap = bm,
+                    contentDescription = "Kraid OAM tile sheet",
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .size((bm.width * 4).dp, (bm.height * 4).dp)
+                )
+            } else if (romParser == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Load a ROM to view tiles", fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Box(modifier = Modifier.fillMaxSize().defaultMinSize(minHeight = 100.dp),
+                    contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
+            }
+        }
+
+        val pal = oamPalette
+        if (pal != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Palette:", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                pal.forEachIndexed { _, argb ->
                     val alpha = (argb ushr 24) and 0xFF
                     Box(
                         modifier = Modifier
