@@ -481,10 +481,11 @@ class EmulatorWorkspaceState(
 
     fun displayPath(path: String?): String? {
         val raw = path?.takeIf { it.isNotBlank() } ?: return null
-        val marker = "${File.separator}custom_integrations${File.separator}"
-        val markerIndex = raw.indexOf(marker)
+        val normalized = raw.replace('\\', '/')
+        val marker = "/custom_integrations/"
+        val markerIndex = normalized.indexOf(marker)
         if (markerIndex >= 0) {
-            return raw.substring(markerIndex + 1)
+            return normalized.substring(markerIndex + 1)
         }
         return raw
     }
