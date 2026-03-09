@@ -596,11 +596,10 @@ fun main() = application {
 
                                 // Track emulator status changes for transient display
                                 val emuStatus = emulatorWorkspaceState.statusMessage
+                                val emuStatusTs = emulatorWorkspaceState.statusMessageTimestamp
                                 var showEmuTransient by remember { mutableStateOf(false) }
-                                var lastEmuStatus by remember { mutableStateOf("") }
-                                LaunchedEffect(emuStatus) {
-                                    if (emuStatus != lastEmuStatus && emuStatus.isNotEmpty()) {
-                                        lastEmuStatus = emuStatus
+                                LaunchedEffect(emuStatusTs) {
+                                    if (emuStatusTs > 0L && emuStatus.isNotEmpty()) {
                                         showEmuTransient = true
                                         delay(4000)
                                         showEmuTransient = false

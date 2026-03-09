@@ -1594,9 +1594,8 @@ class EditorState {
     fun loadRoom(roomId: Int, romParser: RomParser, room: com.supermetroid.editor.data.Room) {
         currentRoomId = roomId
         currentTilesetId = room.tileset
-        val noCre = room.creBitflag == 0x05
         val tg = TileGraphics(romParser)
-        if (tg.loadTileset(room.tileset, noCre)) {
+        if (tg.loadTileset(room.tileset)) {
             applyCustomGfxToTileGraphics(tg, room.tileset)
             tileGraphics = tg
         }

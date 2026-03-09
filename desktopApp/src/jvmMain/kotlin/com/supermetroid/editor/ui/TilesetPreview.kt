@@ -72,9 +72,8 @@ fun TilesetPreview(
             val header = withContext(Dispatchers.Default) { romParser.readRoomHeader(roomId) }
             if (header == null) { errorMessage = "Room header not found"; return@LaunchedEffect }
             tilesetId = header.tileset
-            val noCre = header.creBitflag == 0x05
             val tg = TileGraphics(romParser)
-            if (!withContext(Dispatchers.Default) { tg.loadTileset(header.tileset, noCre) }) {
+            if (!withContext(Dispatchers.Default) { tg.loadTileset(header.tileset) }) {
                 errorMessage = "Failed to load tileset"; return@LaunchedEffect
             }
             editorState?.applyCustomGfxToTileGraphics(tg, header.tileset)
