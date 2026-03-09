@@ -24,7 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +77,7 @@ private const val MAX_STEP_REPEAT = 4
 private const val FRAME_REFRESH_INTERVAL = 2
 private const val TRACE_REFRESH_INTERVAL = 10
 private const val FRAME_DURATION_NANOS = (1_000_000_000.0 / TARGET_EMU_FPS).toLong()
+private const val EXTERNAL_POLL_INTERVAL_MS = 100L
 
 private data class PlannerRoomLayout(
     val roomId: Int,
@@ -126,32 +126,41 @@ fun EmulatorWorkspace(
         workspaceState.roomToFollow(rooms)?.let(onRoomSelected)
     }
 
-    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active) {
-        var tick = 0L
-        var pendingFrames = 0.0
-        var lastWallClockNanos = System.nanoTime()
-        val warmupTicks = 5L
-        while (workspaceState.isRunning && workspaceState.session.active) {
-            val now = System.nanoTime()
-            val elapsedNanos = now - lastWallClockNanos
-            lastWallClockNanos = now
-            val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
-            pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
-            if (pendingFrames < 1.0) {
-                val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
-                delay(waitMs)
-                continue
+    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active, workspaceState.isExternalBackend) {
+        if (workspaceState.isExternalBackend) {
+            // External backend (RetroArch): poll snapshot every ~100ms
+            while (workspaceState.isRunning && workspaceState.session.active) {
+                workspaceState.pollExternalSnapshot()
+                delay(EXTERNAL_POLL_INTERVAL_MS)
             }
-            val repeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
-            pendingFrames = (pendingFrames - repeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
-            workspaceState.stepFrame(
-                repeat = repeat,
-                includeFrame = tick % FRAME_REFRESH_INTERVAL == 0L,
-                includeTrace = tick % TRACE_REFRESH_INTERVAL == 0L,
-            )
-            tick += 1
-            if (pendingFrames > MAX_STEP_REPEAT * 2) {
-                pendingFrames = MAX_STEP_REPEAT.toDouble()
+        } else {
+            // Embedded backend (libretro): run at 60fps frame loop
+            var tick = 0L
+            var pendingFrames = 0.0
+            var lastWallClockNanos = System.nanoTime()
+            val warmupTicks = 5L
+            while (workspaceState.isRunning && workspaceState.session.active) {
+                val now = System.nanoTime()
+                val elapsedNanos = now - lastWallClockNanos
+                lastWallClockNanos = now
+                val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
+                pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
+                if (pendingFrames < 1.0) {
+                    val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
+                    delay(waitMs)
+                    continue
+                }
+                val repeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
+                pendingFrames = (pendingFrames - repeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
+                workspaceState.stepFrame(
+                    repeat = repeat,
+                    includeFrame = tick % FRAME_REFRESH_INTERVAL == 0L,
+                    includeTrace = tick % TRACE_REFRESH_INTERVAL == 0L,
+                )
+                tick += 1
+                if (pendingFrames > MAX_STEP_REPEAT * 2) {
+                    pendingFrames = MAX_STEP_REPEAT.toDouble()
+                }
             }
         }
     }
@@ -177,11 +186,22 @@ fun EmulatorWorkspace(
                         Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                     }
                     Spacer(Modifier.height(6.dp))
+                    val snap = workspaceState.snapshot
+                    val sx = snap?.samusX
+                    val sy = snap?.samusY
+                    val samusPos = if (sx != null && sy != null
+                        && snap.roomId != null && room != null && snap.roomId == room.getRoomIdAsInt()
+                        && !snap.doorTransition
+                    ) {
+                        Pair(sx.toFloat(), sy.toFloat())
+                    } else null
+
                     MapCanvas(
                         room = room,
                         romParser = romParser,
                         editorState = editorState,
                         rooms = rooms,
+                        samusPosition = samusPos,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -214,6 +234,14 @@ fun EmulatorWorkspace(
                                 "play" -> {
                                     if (!workspaceState.isConnected) workspaceState.connectBridge()
                                     if (workspaceState.isConnected && !workspaceState.session.active) {
+                                        // Build patched ROM so the emulator runs the edited version
+                                        val rp = romParser
+                                        if (rp != null) {
+                                            val patchedPath = editorState.exportToRom(rp)
+                                            if (patchedPath != null) {
+                                                workspaceState.updateRomPath(patchedPath)
+                                            }
+                                        }
                                         workspaceState.startSession()
                                         workspaceState.setLoopRunning(true)
                                     }
@@ -235,13 +263,16 @@ fun EmulatorWorkspace(
                             }
                         }
                     })
-                    InventoryCard(
-                        title = "States",
-                        subtitle = "${workspaceState.saveStates.size} available",
-                        selected = workspaceState.selectedStateName,
-                        items = workspaceState.saveStates.map { it.name },
-                        onSelect = { workspaceState.selectedStateName = it },
-                    )
+                    ItemTrackerPanel(snapshot = workspaceState.snapshot)
+                    if (!workspaceState.isExternalBackend) {
+                        InventoryCard(
+                            title = "States",
+                            subtitle = "${workspaceState.saveStates.size} available",
+                            selected = workspaceState.selectedStateName,
+                            items = workspaceState.saveStates.map { it.name },
+                            onSelect = { workspaceState.selectedStateName = it },
+                        )
+                    }
                     PlannerSummaryCard(
                         workspaceState = workspaceState,
                         rooms = rooms,
@@ -295,100 +326,100 @@ private fun EmulatorControlCard(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Embedded Emulator", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(
+                if (workspaceState.isExternalBackend) "External Emulator" else "Embedded Emulator",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+            )
+            Text(
+                "Backend: ${workspaceState.selectedBackendName}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(
                 workspaceState.statusMessage,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Backend:", fontSize = 12.sp)
-                com.supermetroid.editor.emulator.EmulatorRegistry.availableBackends().forEach { backend ->
-                    OutlinedButton(
-                        onClick = { workspaceState.selectedBackendName = backend },
-                        enabled = !workspaceState.isConnected,
-                    ) {
-                        Text(
-                            backend,
-                            fontSize = 11.sp,
-                            fontWeight = if (backend == workspaceState.selectedBackendName) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                }
-            }
-            AppTextInput(
-                value = workspaceState.navExportDir,
-                onValueChange = { workspaceState.updateNavExportDir(it) },
-                placeholder = "super_metroid_editor/export/sm_nav",
-                modifier = Modifier.fillMaxWidth(),
-                monospace = true,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onAction("load_nav") }, enabled = !workspaceState.isBusy) {
-                    Text("Load Graph", fontSize = 12.sp)
-                }
-                if (!workspaceState.isConnected) {
-                    Button(onClick = { onAction("connect") }, enabled = !workspaceState.isBusy) {
-                        Text("Connect", fontSize = 12.sp)
-                    }
-                } else {
-                    OutlinedButton(onClick = { onAction("disconnect") }, enabled = !workspaceState.isBusy) {
-                        Text("Disconnect", fontSize = 12.sp)
-                    }
-                }
-                OutlinedButton(onClick = { onAction("refresh") }, enabled = workspaceState.isConnected && !workspaceState.isBusy) {
-                    Text("Refresh", fontSize = 12.sp)
-                }
-                OutlinedButton(onClick = { onAction("sync_config") }, enabled = workspaceState.isConnected && !workspaceState.isBusy) {
-                    Text("Sync", fontSize = 12.sp)
-                }
-            }
-
-            Divider()
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = workspaceState.followLiveRoom,
-                    onCheckedChange = { workspaceState.updateFollowLiveRoom(it) },
+            if (!workspaceState.isExternalBackend) {
+                AppTextInput(
+                    value = workspaceState.navExportDir,
+                    onValueChange = { workspaceState.updateNavExportDir(it) },
+                    placeholder = "super_metroid_editor/export/sm_nav",
+                    modifier = Modifier.fillMaxWidth(),
+                    monospace = true,
                 )
-                Text("Follow live room in editor", fontSize = 12.sp)
-            }
-
-            Text(
-                "Control mode: ${workspaceState.requestedControlMode}",
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("manual", "watch", "agent").forEach { mode ->
-                    val selected = workspaceState.requestedControlMode == mode
-                    OutlinedButton(
-                        onClick = { workspaceState.updateRequestedControlMode(mode) },
-                        enabled = !workspaceState.isBusy,
-                    ) {
-                        Text(
-                            if (selected) "[${mode.uppercase()}]" else mode.replaceFirstChar { it.uppercase() },
-                            fontSize = 11.sp,
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onAction("load_nav") }, enabled = !workspaceState.isBusy) {
+                        Text("Load Graph", fontSize = 12.sp)
+                    }
+                    if (!workspaceState.isConnected) {
+                        Button(onClick = { onAction("connect") }, enabled = !workspaceState.isBusy) {
+                            Text("Connect", fontSize = 12.sp)
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onAction("disconnect") }, enabled = !workspaceState.isBusy) {
+                            Text("Disconnect", fontSize = 12.sp)
+                        }
+                    }
+                    OutlinedButton(onClick = { onAction("refresh") }, enabled = workspaceState.isConnected && !workspaceState.isBusy) {
+                        Text("Refresh", fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = { onAction("sync_config") }, enabled = workspaceState.isConnected && !workspaceState.isBusy) {
+                        Text("Sync", fontSize = 12.sp)
                     }
                 }
+                Divider()
             }
 
-            Text(
-                "Selected state: ${workspaceState.selectedStateName ?: "none"}",
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                "Session: ${if (workspaceState.session.active) "active" else "idle"}  frame=${workspaceState.session.frameCounter}",
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            workspaceState.recordingPath?.let {
-                Text("Recording: $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+            if (!workspaceState.isExternalBackend) {
+                Text(
+                    "Control mode: ${workspaceState.requestedControlMode}",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("manual", "watch", "agent").forEach { mode ->
+                        val selected = workspaceState.requestedControlMode == mode
+                        OutlinedButton(
+                            onClick = { workspaceState.updateRequestedControlMode(mode) },
+                            enabled = !workspaceState.isBusy,
+                        ) {
+                            Text(
+                                if (selected) "[${mode.uppercase()}]" else mode.replaceFirstChar { it.uppercase() },
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "Selected state: ${workspaceState.selectedStateName ?: "none"}",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (workspaceState.isExternalBackend && workspaceState.session.active) {
+                val snap = workspaceState.snapshot
+                val rid = snap?.roomId
+                if (rid != null) {
+                    Text(
+                        "Room: 0x${rid.toString(16).uppercase()}  HP: ${snap.health ?: 0}  Pos: (${snap.samusX ?: 0}, ${snap.samusY ?: 0})",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+            if (!workspaceState.isExternalBackend) {
+                Text(
+                    "Session: ${if (workspaceState.session.active) "active" else "idle"}  frame=${workspaceState.session.frameCounter}",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (!workspaceState.isExternalBackend) {
+                workspaceState.recordingPath?.let {
+                    Text("Recording: $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -398,50 +429,52 @@ private fun EmulatorControlCard(
                     Text("Play", fontSize = 12.sp)
                 }
                 OutlinedButton(
-                    onClick = { workspaceState.setLoopRunning(!workspaceState.isRunning) },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                ) {
-                    Text(if (workspaceState.isRunning) "Pause" else "Resume", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { onAction("step") },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                ) {
-                    Text("Step", fontSize = 12.sp)
-                }
-                OutlinedButton(
                     onClick = { onAction("close") },
                     enabled = workspaceState.session.active && !workspaceState.isBusy,
                 ) {
                     Text("Close", fontSize = 12.sp)
                 }
+                if (!workspaceState.isExternalBackend) {
+                    OutlinedButton(
+                        onClick = { workspaceState.setLoopRunning(!workspaceState.isRunning) },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    ) {
+                        Text(if (workspaceState.isRunning) "Pause" else "Resume", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { onAction("step") },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    ) {
+                        Text("Step", fontSize = 12.sp)
+                    }
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { onAction("snapshot") },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                ) {
-                    Text("Refresh HUD", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { onAction("save") },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                ) {
-                    Text("Save Named", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { onAction("load_state") },
-                    enabled = workspaceState.session.active && workspaceState.selectedStateName != null && !workspaceState.isBusy,
-                ) {
-                    Text("Reload Named", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { onAction(if (workspaceState.session.recording) "record_off" else "record_on") },
-                    enabled = workspaceState.session.active && !workspaceState.isBusy,
-                ) {
-                    Text(if (workspaceState.session.recording) "Stop Rec" else "Record", fontSize = 12.sp)
-                }
-                if (workspaceState.selectedBackendName == "libretro") {
+            if (!workspaceState.isExternalBackend) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { onAction("snapshot") },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    ) {
+                        Text("Refresh HUD", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { onAction("save") },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    ) {
+                        Text("Save Named", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { onAction("load_state") },
+                        enabled = workspaceState.session.active && workspaceState.selectedStateName != null && !workspaceState.isBusy,
+                    ) {
+                        Text("Reload Named", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { onAction(if (workspaceState.session.recording) "record_off" else "record_on") },
+                        enabled = workspaceState.session.active && !workspaceState.isBusy,
+                    ) {
+                        Text(if (workspaceState.session.recording) "Stop Rec" else "Record", fontSize = 12.sp)
+                    }
                     OutlinedButton(
                         onClick = { onAction("toggle_mute") },
                         enabled = workspaceState.isConnected,
@@ -451,7 +484,10 @@ private fun EmulatorControlCard(
                 }
             }
             Text(
-                "In-process SNES emulator via libretro. Click Play to start, then focus the viewport for keyboard input.",
+                if (workspaceState.isExternalBackend)
+                    "External RetroArch via NWA. Enable Network Commands in RetroArch (Settings > Network). Editor syncs room & position."
+                else
+                    "In-process SNES emulator via libretro. Click Play to start, then focus the viewport for keyboard input.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

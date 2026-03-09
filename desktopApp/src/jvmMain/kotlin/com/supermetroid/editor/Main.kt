@@ -202,6 +202,7 @@ fun main() = application {
         ) {
         MaterialTheme(colorScheme = editorThemeState.theme.value.colorScheme) {
             var emulatorEnabled by remember { mutableStateOf(false) }
+            val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
             var settingsOpen by remember { mutableStateOf(false) }
             val fs = editorThemeState.fontSize.value
             Surface(
@@ -312,7 +313,10 @@ fun main() = application {
                                 )
                             }
                             if (settingsOpen) {
-                                SettingsPopup(onDismiss = { settingsOpen = false })
+                                SettingsPopup(
+                                    onDismiss = { settingsOpen = false },
+                                    emulatorWorkspaceState = emulatorWorkspaceState,
+                                )
                             }
                         }
                     }
@@ -325,7 +329,6 @@ fun main() = application {
                 var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
-                val emulatorWorkspaceState = remember { EmulatorWorkspaceState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
                 var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {

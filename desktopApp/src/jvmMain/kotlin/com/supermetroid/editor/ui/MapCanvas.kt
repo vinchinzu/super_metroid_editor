@@ -520,6 +520,7 @@ fun MapCanvas(
     romParser: RomParser?,
     editorState: EditorState? = null,
     rooms: List<RoomInfo> = emptyList(),
+    samusPosition: Pair<Float, Float>? = null,
     modifier: Modifier = Modifier
 ) {
     val zoomState = remember { mutableStateOf(1f) }
@@ -1255,9 +1256,39 @@ fun MapCanvas(
                                             )
                                         }
                                     }
+                                    // Samus position marker (emulator overlay)
+                                    if (samusPosition != null) {
+                                        Canvas(
+                                            modifier = Modifier
+                                                .requiredWidth((data.width * zoomLevel).dp)
+                                                .requiredHeight((data.height * zoomLevel).dp)
+                                        ) {
+                                            val scaleX = size.width / data.width
+                                            val scaleY = size.height / data.height
+                                            val cx = samusPosition.first * scaleX
+                                            val cy = samusPosition.second * scaleY
+                                            val markerSize = 12f
+                                            // Filled rectangle
+                                            drawRect(
+                                                color = Color.Green.copy(alpha = 0.35f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(cx - markerSize, cy - markerSize),
+                                                size = androidx.compose.ui.geometry.Size(markerSize * 2, markerSize * 2),
+                                            )
+                                            // Border
+                                            drawRect(
+                                                color = Color.Green.copy(alpha = 0.9f),
+                                                topLeft = androidx.compose.ui.geometry.Offset(cx - markerSize, cy - markerSize),
+                                                size = androidx.compose.ui.geometry.Size(markerSize * 2, markerSize * 2),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f),
+                                            )
+                                            // Crosshair lines
+                                            drawLine(Color.Green.copy(alpha = 0.7f), androidx.compose.ui.geometry.Offset(cx - markerSize * 1.5f, cy), androidx.compose.ui.geometry.Offset(cx + markerSize * 1.5f, cy), strokeWidth = 1.5f)
+                                            drawLine(Color.Green.copy(alpha = 0.7f), androidx.compose.ui.geometry.Offset(cx, cy - markerSize * 1.5f), androidx.compose.ui.geometry.Offset(cx, cy + markerSize * 1.5f), strokeWidth = 1.5f)
+                                        }
+                                    }
                                 }
                             }
-                            
+
                             // ─── Right-click context menu (multi-tile selection only) ──────
                             DropdownMenu(
                                 expanded = contextMenuExpanded,

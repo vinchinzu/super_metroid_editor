@@ -72,7 +72,8 @@ enum class FontSize(
 ) {
     SMALL("Small", tabLabel = 10.sp, body = 11.sp, detail = 9.sp, heading = 13.sp, statusBar = 8.sp),
     MEDIUM("Medium", tabLabel = 11.sp, body = 12.sp, detail = 10.sp, heading = 14.sp, statusBar = 9.sp),
-    LARGE("Large", tabLabel = 13.sp, body = 14.sp, detail = 12.sp, heading = 16.sp, statusBar = 11.sp);
+    LARGE("Large", tabLabel = 13.sp, body = 14.sp, detail = 12.sp, heading = 16.sp, statusBar = 11.sp),
+    LARGER("Larger", tabLabel = 15.sp, body = 16.sp, detail = 14.sp, heading = 19.sp, statusBar = 13.sp);
 }
 
 /** Holds the current theme + font size; observed by Compose. */

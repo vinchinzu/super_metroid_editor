@@ -114,46 +114,51 @@ fun FloatingEmulatorWindow(
     }
 
     // Emulator frame stepping loop
-    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active) {
-        var tick = 0L
-        var pendingFrames = 0.0
-        var lastWallClockNanos = System.nanoTime()
-        // Warmup: first few steps may be slow due to JIT; reset timing after warmup
-        val warmupTicks = 5L
-        while (workspaceState.isRunning && workspaceState.session.active) {
-            val now = System.nanoTime()
-            val elapsedNanos = now - lastWallClockNanos
-            lastWallClockNanos = now
-            // During warmup, cap elapsed to one frame to avoid accumulating debt from slow JIT
-            val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
-            pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
-            if (pendingFrames < 1.0) {
-                val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
-                delay(waitMs)
-                continue
+    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active, workspaceState.isExternalBackend) {
+        if (workspaceState.isExternalBackend) {
+            // External backend: poll snapshot every ~100ms
+            while (workspaceState.isRunning && workspaceState.session.active) {
+                workspaceState.pollExternalSnapshot()
+                delay(100L)
             }
-            val baseRepeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
-            val repeat = if (fastForwarding) (baseRepeat * 4).coerceAtMost(16) else baseRepeat
-            pendingFrames = (pendingFrames - baseRepeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
-            workspaceState.stepFrame(
-                repeat = repeat,
-                includeFrame = tick % FRAME_REFRESH_INTERVAL == 0L,
-                includeTrace = tick % TRACE_REFRESH_INTERVAL == 0L,
-            )
-            // Process gamepad combo actions (save/load/slot cycle)
-            workspaceState.pendingComboAction?.let { combo ->
-                workspaceState.pendingComboAction = null
-                val ws = workspaceState
-                when (combo) {
-                    "save" -> ws.saveQuickState("slot_${ws.saveSlotIndex}")
-                    "load" -> ws.loadNamedState("slot_${ws.saveSlotIndex}")
-                    "slot_up" -> ws.saveSlotIndex = (ws.saveSlotIndex + 1) % 129
-                    "slot_down" -> ws.saveSlotIndex = (ws.saveSlotIndex - 1 + 129) % 129
+        } else {
+            var tick = 0L
+            var pendingFrames = 0.0
+            var lastWallClockNanos = System.nanoTime()
+            val warmupTicks = 5L
+            while (workspaceState.isRunning && workspaceState.session.active) {
+                val now = System.nanoTime()
+                val elapsedNanos = now - lastWallClockNanos
+                lastWallClockNanos = now
+                val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
+                pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
+                if (pendingFrames < 1.0) {
+                    val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
+                    delay(waitMs)
+                    continue
                 }
-            }
-            tick += 1
-            if (pendingFrames > MAX_STEP_REPEAT * 2) {
-                pendingFrames = MAX_STEP_REPEAT.toDouble()
+                val baseRepeat = pendingFrames.toInt().coerceIn(1, MAX_STEP_REPEAT)
+                val repeat = if (fastForwarding) (baseRepeat * 4).coerceAtMost(16) else baseRepeat
+                pendingFrames = (pendingFrames - baseRepeat).coerceAtMost(MAX_STEP_REPEAT.toDouble())
+                workspaceState.stepFrame(
+                    repeat = repeat,
+                    includeFrame = tick % FRAME_REFRESH_INTERVAL == 0L,
+                    includeTrace = tick % TRACE_REFRESH_INTERVAL == 0L,
+                )
+                workspaceState.pendingComboAction?.let { combo ->
+                    workspaceState.pendingComboAction = null
+                    val ws = workspaceState
+                    when (combo) {
+                        "save" -> ws.saveQuickState("slot_${ws.saveSlotIndex}")
+                        "load" -> ws.loadNamedState("slot_${ws.saveSlotIndex}")
+                        "slot_up" -> ws.saveSlotIndex = (ws.saveSlotIndex + 1) % 129
+                        "slot_down" -> ws.saveSlotIndex = (ws.saveSlotIndex - 1 + 129) % 129
+                    }
+                }
+                tick += 1
+                if (pendingFrames > MAX_STEP_REPEAT * 2) {
+                    pendingFrames = MAX_STEP_REPEAT.toDouble()
+                }
             }
         }
     }
