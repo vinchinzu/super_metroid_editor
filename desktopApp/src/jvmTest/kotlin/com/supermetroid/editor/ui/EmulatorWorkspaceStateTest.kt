@@ -103,6 +103,19 @@ class EmulatorWorkspaceStateTest {
     }
 
     @Test
+    fun `displayPath handles both unix and windows separators`() {
+        val state = EmulatorWorkspaceState()
+        assertEquals(
+            "custom_integrations/SuperMetroid-Snes/ZebesStart.state",
+            state.displayPath("/repo/custom_integrations/SuperMetroid-Snes/ZebesStart.state"),
+        )
+        assertEquals(
+            "custom_integrations/SuperMetroid-Snes/ZebesStart.state",
+            state.displayPath("D:\\repo\\custom_integrations\\SuperMetroid-Snes\\ZebesStart.state"),
+        )
+    }
+
+    @Test
     fun `startSession forwards rom path to backend`() = runBlocking {
         val backend = FakeBackend()
         backend.connectResult = EmulatorCapabilities(backendName = "fake")
