@@ -526,6 +526,9 @@ fun MapCanvas(
     val zoomState = remember { mutableStateOf(1f) }
     val zoomLevel = zoomState.value
     var showGrid by remember { mutableStateOf(true) }
+    var showShortChargeRuler by remember { mutableStateOf(false) }
+    var shortChargeStutters by remember { mutableStateOf(0) }
+    var shortChargeTaps by remember { mutableStateOf(0) }
     var tileMetaExpanded by remember { mutableStateOf(false) }
     val overlayToggles = remember { mutableStateMapOf<TileOverlay, Boolean>(
         TileOverlay.ITEMS to true,
@@ -646,7 +649,24 @@ fun MapCanvas(
                         label = { Text("Grid", fontSize = 9.sp) },
                         modifier = Modifier.height(28.dp)
                     )
-                    
+                    // Short Charge Ruler toggle
+                    FilterChip(
+                        selected = showShortChargeRuler,
+                        onClick = { showShortChargeRuler = !showShortChargeRuler; mapFocusReq.requestFocus() },
+                        label = { Text("Ruler", fontSize = 9.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                    if (showShortChargeRuler) {
+                        StutterSelector(
+                            selectedStutters = shortChargeStutters,
+                            onStuttersChanged = { shortChargeStutters = it; mapFocusReq.requestFocus() }
+                        )
+                        TapSelector(
+                            selectedTaps = shortChargeTaps,
+                            onTapsChanged = { shortChargeTaps = it; mapFocusReq.requestFocus() }
+                        )
+                    }
+
                     Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
                     
                     // Tile Meta multi-select dropdown (trigger: icon like map + label, same color as map square)
@@ -1253,6 +1273,18 @@ fun MapCanvas(
                                                     width = 2f,
                                                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 4f))
                                                 )
+                                            )
+                                        }
+                                    }
+                                    // Short Charge Ruler overlay
+                                    if (showShortChargeRuler) {
+                                        Box(
+                                            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                                        ) {
+                                            ShortChargeRuler(
+                                                stutters = shortChargeStutters,
+                                                selectedTaps = shortChargeTaps,
+                                                zoomLevel = zoomLevel
                                             )
                                         }
                                     }
