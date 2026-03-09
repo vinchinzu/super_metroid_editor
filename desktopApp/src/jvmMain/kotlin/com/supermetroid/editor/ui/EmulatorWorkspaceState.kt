@@ -16,6 +16,7 @@ import com.supermetroid.editor.emulator.EmulatorRegistry
 import com.supermetroid.editor.emulator.FrameHolder
 import com.supermetroid.editor.emulator.GameSnapshot
 import com.supermetroid.editor.emulator.LibretroBackend
+import com.supermetroid.editor.emulator.RetroArchBackend
 import com.supermetroid.editor.emulator.SessionConfig
 import com.supermetroid.editor.emulator.SessionState
 import com.supermetroid.editor.emulator.StateInfo
@@ -143,7 +144,19 @@ class EmulatorWorkspaceState(
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
     var requestedControlMode by mutableStateOf("manual")
-    var selectedBackendName by mutableStateOf("libretro")
+    var selectedBackendName by mutableStateOf(AppConfig.load().emulatorBackend)
+
+    // RetroArch-specific config
+    var retroArchPath by mutableStateOf(
+        AppConfig.load().retroArchPath ?: RetroArchBackend.defaultRetroArchPath() ?: ""
+    )
+    var retroArchCorePath by mutableStateOf(
+        AppConfig.load().retroArchCorePath ?: RetroArchBackend.discoverSnesCore() ?: ""
+    )
+    var retroArchNwaPort by mutableStateOf(AppConfig.load().retroArchNwaPort)
+
+    /** True when using an external emulator backend (no in-editor video). */
+    val isExternalBackend: Boolean get() = selectedBackendName == "retroarch"
 
     var statusMessage by mutableStateOf("Click Play to start the emulator.")
         internal set
@@ -374,6 +387,27 @@ class EmulatorWorkspaceState(
             isRunning = false
         } finally {
             stepInFlight = false
+        }
+    }
+
+    /**
+     * Poll the external emulator for a snapshot (used by retroarch polling loop).
+     * Unlike stepFrame, this doesn't send input — just reads game state.
+     */
+    suspend fun pollExternalSnapshot() {
+        val b = backend ?: return
+        if (!session.active || isBusy) return
+        try {
+            val snap = b.snapshot()
+            snapshot = snap
+            if (snap.terminated) {
+                // RetroArch disconnected (too many timeouts)
+                isRunning = false
+                session = SessionState(active = false, paused = true)
+                setStatus("RetroArch disconnected (NWA timeout)")
+            }
+        } catch (e: Exception) {
+            setStatus("Poll failed: ${e.message}")
         }
     }
 
@@ -866,12 +900,30 @@ class EmulatorWorkspaceState(
         return if (current <= 0f) sample else (current * 0.75f) + (sample * 0.25f)
     }
 
+    fun updateRetroArchPath(value: String) {
+        retroArchPath = value
+        persistConfig()
+    }
+
+    fun updateRetroArchNwaPort(value: Int) {
+        retroArchNwaPort = value
+        persistConfig()
+    }
+
+    fun updateRetroArchCorePath(value: String) {
+        retroArchCorePath = value
+        persistConfig()
+    }
+
     private fun persistConfig() {
         AppConfig.update {
             copy(
                 emulatorNavExportDir = navExportDir,
                 emulatorFollowLiveRoom = followLiveRoom,
                 emulatorBackend = selectedBackendName,
+                retroArchPath = this@EmulatorWorkspaceState.retroArchPath.takeIf { it.isNotBlank() },
+                retroArchCorePath = this@EmulatorWorkspaceState.retroArchCorePath.takeIf { it.isNotBlank() },
+                retroArchNwaPort = this@EmulatorWorkspaceState.retroArchNwaPort,
             )
         }
     }

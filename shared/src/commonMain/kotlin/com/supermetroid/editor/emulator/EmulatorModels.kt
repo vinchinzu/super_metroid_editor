@@ -64,6 +64,17 @@ data class GameSnapshot(
     val health: Int? = null,
     val samusX: Int? = null,
     val samusY: Int? = null,
+    val collectedItems: Int = 0,       // 0x7E09A4 bit flags
+    val collectedBeams: Int = 0,       // 0x7E09A8 bit flags
+    val maxHealth: Int? = null,
+    val missiles: Int? = null,
+    val maxMissiles: Int? = null,
+    val superMissiles: Int? = null,
+    val maxSuperMissiles: Int? = null,
+    val powerBombs: Int? = null,
+    val maxPowerBombs: Int? = null,
+    val reserveEnergy: Int? = null,
+    val maxReserveEnergy: Int? = null,
     val doorTransition: Boolean = false,
     val terminated: Boolean = false,
     val truncated: Boolean = false,

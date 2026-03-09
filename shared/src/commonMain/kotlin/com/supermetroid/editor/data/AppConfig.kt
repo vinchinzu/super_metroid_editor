@@ -40,6 +40,9 @@ data class AppSettings(
     val emulatorFollowLiveRoom: Boolean = true,
     val libretroCorePath: String? = null,
     val libretroAudioEnabled: Boolean = true,
+    val retroArchPath: String? = null,
+    val retroArchCorePath: String? = null,
+    val retroArchNwaPort: Int = 55355,
     val theme: String = "DARK",
     val fontSize: String = "MEDIUM",
 )
