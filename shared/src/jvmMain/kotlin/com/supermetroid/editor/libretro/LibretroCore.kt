@@ -32,8 +32,9 @@ class LibretroCore(private val corePath: String) {
     private lateinit var lib: LibretroLib
     private var gameLoaded = false
 
-    // Frame buffer (ARGB8888)
+    // Frame buffer (ARGB8888) — double-buffered to avoid per-frame allocation
     private var frameBuffer: IntArray = IntArray(0)
+    private var frameCopyBuffer: IntArray = IntArray(0)
     private var frameWidth = 0
     private var frameHeight = 0
 
@@ -41,6 +42,8 @@ class LibretroCore(private val corePath: String) {
     private val audioBuffer = ShortArray(AUDIO_BUFFER_SIZE)
     private var audioWritePos = 0
     private var audioReadPos = 0
+    // Reusable drain buffer to avoid per-frame allocation
+    private var audioDrainBuffer = ShortArray(4096)
 
     // Input state: [port][buttonId] = pressed
     private val inputState = Array(2) { IntArray(16) }
@@ -140,13 +143,18 @@ class LibretroCore(private val corePath: String) {
     /** Drain all pending audio samples (interleaved stereo int16). */
     fun drainAudio(): ShortArray {
         val available = audioAvailable()
-        if (available == 0) return ShortArray(0)
-        val result = ShortArray(available)
+        if (available == 0) return EMPTY_SHORT_ARRAY
+        // Reuse drain buffer when possible
+        if (audioDrainBuffer.size < available) {
+            audioDrainBuffer = ShortArray(available)
+        }
         for (i in 0 until available) {
-            result[i] = audioBuffer[audioReadPos % AUDIO_BUFFER_SIZE]
+            audioDrainBuffer[i] = audioBuffer[audioReadPos % AUDIO_BUFFER_SIZE]
             audioReadPos++
         }
-        return result
+        // Return a view of the reusable buffer — caller must consume before next drain
+        return if (available == audioDrainBuffer.size) audioDrainBuffer
+        else audioDrainBuffer.copyOf(available)
     }
 
     fun captureRuntimeSnapshot(includeFrame: Boolean = false, includeWram: Boolean = true): RuntimeSnapshot {
@@ -156,8 +164,14 @@ class LibretroCore(private val corePath: String) {
             null
         }
         val frame = if (includeFrame && frameWidth > 0 && frameHeight > 0 && frameBuffer.isNotEmpty()) {
+            // Reuse copy buffer to avoid per-frame allocation
+            val size = frameBuffer.size
+            if (frameCopyBuffer.size != size) {
+                frameCopyBuffer = IntArray(size)
+            }
+            System.arraycopy(frameBuffer, 0, frameCopyBuffer, 0, size)
             FrameSnapshot(
-                pixels = frameBuffer.copyOf(),
+                pixels = frameCopyBuffer,
                 width = frameWidth,
                 height = frameHeight,
             )
@@ -390,5 +404,6 @@ class LibretroCore(private val corePath: String) {
     companion object {
         // ~1 second of stereo audio at 32040 Hz
         private const val AUDIO_BUFFER_SIZE = 32040 * 2 * 2
+        private val EMPTY_SHORT_ARRAY = ShortArray(0)
     }
 }

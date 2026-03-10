@@ -107,10 +107,29 @@ fun FloatingEmulatorWindow(
     val videoHeight = windowWidth / SNES_ASPECT
     val totalHeight = TITLE_BAR_HEIGHT + videoHeight + CONTROL_BAR_HEIGHT
 
-    // Auto-set ROM path from editor
+    // Auto-set ROM path from editor — restart emulator if a session is active
     LaunchedEffect(editorState.project.romPath) {
         val romPath = editorState.project.romPath.takeIf { it.isNotBlank() }
         workspaceState.updateRomPath(romPath)
+
+        // If emulator is running and we got a new ROM, restart the session
+        if (workspaceState.session.active && romPath != null) {
+            workspaceState.disconnectBridge()
+            // Clear stale state so we don't auto-load an old ROM's save state
+            workspaceState.clearSavedStateSelection()
+            workspaceState.connectBridge()
+            if (workspaceState.isConnected) {
+                val rp = romParser
+                if (rp != null) {
+                    val patchedPath = editorState.exportToRom(rp)
+                    if (patchedPath != null) {
+                        workspaceState.updateRomPath(patchedPath)
+                    }
+                }
+                workspaceState.startSession()
+                workspaceState.setLoopRunning(true)
+            }
+        }
     }
 
     // Emulator frame stepping loop
@@ -132,6 +151,14 @@ fun FloatingEmulatorWindow(
                 lastWallClockNanos = now
                 val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
                 pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
+
+                // Audio-aware pacing: if audio buffer is nearly full, the emulator
+                // is running ahead of real-time. Yield to let audio drain.
+                if (!fastForwarding && !workspaceState.audioHasHeadroom && pendingFrames < 2.0) {
+                    delay(2L)
+                    continue
+                }
+
                 if (pendingFrames < 1.0) {
                     val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
                     delay(waitMs)

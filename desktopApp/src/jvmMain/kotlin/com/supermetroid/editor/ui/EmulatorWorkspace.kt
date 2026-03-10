@@ -120,6 +120,24 @@ fun EmulatorWorkspace(
     LaunchedEffect(editorState.project.romPath) {
         val romPath = editorState.project.romPath.takeIf { it.isNotBlank() }
         workspaceState.updateRomPath(romPath)
+
+        // If emulator is running and we got a new ROM, restart the session
+        if (workspaceState.session.active && romPath != null) {
+            workspaceState.disconnectBridge()
+            workspaceState.clearSavedStateSelection()
+            workspaceState.connectBridge()
+            if (workspaceState.isConnected) {
+                val rp = romParser
+                if (rp != null) {
+                    val patchedPath = editorState.exportToRom(rp)
+                    if (patchedPath != null) {
+                        workspaceState.updateRomPath(patchedPath)
+                    }
+                }
+                workspaceState.startSession()
+                workspaceState.setLoopRunning(true)
+            }
+        }
     }
 
     LaunchedEffect(workspaceState.snapshot?.roomId, workspaceState.followLiveRoom) {
@@ -145,6 +163,13 @@ fun EmulatorWorkspace(
                 lastWallClockNanos = now
                 val effectiveNanos = if (tick < warmupTicks) minOf(elapsedNanos, FRAME_DURATION_NANOS) else elapsedNanos
                 pendingFrames += effectiveNanos.toDouble() / FRAME_DURATION_NANOS.toDouble()
+
+                // Audio-aware pacing: yield when audio buffer is nearly full
+                if (!workspaceState.audioHasHeadroom && pendingFrames < 2.0) {
+                    delay(2L)
+                    continue
+                }
+
                 if (pendingFrames < 1.0) {
                     val waitMs = ceil(((1.0 - pendingFrames) * FRAME_DURATION_NANOS) / 1_000_000.0).toLong().coerceAtLeast(1L)
                     delay(waitMs)

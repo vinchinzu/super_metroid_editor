@@ -30,6 +30,10 @@ class LibretroBackend(
         get() = audio?.muted ?: false
         set(value) { audio?.muted = value }
 
+    /** True when audio buffer has room — emulator is running ahead of real-time */
+    val audioHasHeadroom: Boolean
+        get() = audio?.hasHeadroom() ?: true
+
     private var core: LibretroCore? = null
     private var audio: LibretroAudioOutput? = null
     private val emuThread = Executors.newSingleThreadExecutor { r ->

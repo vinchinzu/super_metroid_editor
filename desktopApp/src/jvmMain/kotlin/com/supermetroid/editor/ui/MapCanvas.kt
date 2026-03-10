@@ -1276,18 +1276,6 @@ fun MapCanvas(
                                             )
                                         }
                                     }
-                                    // Short Charge Ruler overlay
-                                    if (showShortChargeRuler) {
-                                        Box(
-                                            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                                        ) {
-                                            ShortChargeRuler(
-                                                stutters = shortChargeStutters,
-                                                selectedTaps = shortChargeTaps,
-                                                zoomLevel = zoomLevel
-                                            )
-                                        }
-                                    }
                                     // Samus position marker (emulator overlay)
                                     if (samusPosition != null) {
                                         Canvas(
@@ -2506,6 +2494,17 @@ fun MapCanvas(
                                             }
                                         }
                                     }
+                                }
+                            }
+
+                            // Short Charge Ruler — floating centered overlay
+                            if (showShortChargeRuler) {
+                                Box(modifier = Modifier.align(Alignment.Center)) {
+                                    ShortChargeRuler(
+                                        stutters = shortChargeStutters,
+                                        selectedTaps = shortChargeTaps,
+                                        zoomLevel = zoomLevel
+                                    )
                                 }
                             }
                         }

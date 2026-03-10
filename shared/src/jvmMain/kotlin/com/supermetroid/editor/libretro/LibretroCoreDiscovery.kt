@@ -8,7 +8,7 @@ import java.io.File
  */
 object LibretroCoreDiscovery {
 
-    private val PREFERRED_CORES = listOf("snes9x", "bsnes", "mesen-s")
+    private val PREFERRED_CORES = listOf("bsnes", "snes9x", "mesen-s")
 
     private val SEARCH_DIRS = buildList {
         val home = System.getProperty("user.home")

@@ -133,6 +133,9 @@ class EmulatorWorkspaceState(
     private var backend: EmulatorBackend? = null
     var frameHolder: FrameHolder? = null
         private set
+    /** True when the audio buffer has headroom (emulator is ahead of real-time playback) */
+    val audioHasHeadroom: Boolean
+        get() = (backend as? LibretroBackend)?.audioHasHeadroom ?: true
     private var stepInFlight = false
     private val pressedKeys = mutableSetOf<Key>()
     val gamepadManager = com.supermetroid.editor.controller.GamepadManager()
@@ -280,7 +283,6 @@ class EmulatorWorkspaceState(
         try {
             val states = b.listStates()
             saveStates = states.sortedBy { it.name.lowercase() }
-            if (selectedStateName == null) selectedStateName = saveStates.firstOrNull()?.name
             if (!silent) setStatus("Inventory refreshed")
         } catch (e: Exception) {
             setStatus("Inventory refresh failed: ${e.message}")
@@ -291,7 +293,7 @@ class EmulatorWorkspaceState(
 
     suspend fun startSession() {
         val b = backend ?: return
-        val stateName = selectedStateName ?: saveStates.firstOrNull()?.name
+        val stateName = selectedStateName
         isBusy = true
         try {
             val result = b.startSession(
@@ -315,6 +317,12 @@ class EmulatorWorkspaceState(
         } finally {
             isBusy = false
         }
+    }
+
+    /** Clear saved state selection so the next startSession boots fresh (no auto-load). */
+    fun clearSavedStateSelection() {
+        selectedStateName = null
+        sessionBootStateName = null
     }
 
     suspend fun closeSession() {
