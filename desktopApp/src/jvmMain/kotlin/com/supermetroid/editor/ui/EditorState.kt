@@ -2491,11 +2491,12 @@ class EditorState {
             patchesApplied++
         }
 
-        // Combined per-frame hook: boss-defeated + hyper beam
+        // Combined per-frame hook: boss-defeated + hyper beam + infinite blue suit
         // Writes a single routine at $DF:F040 (PC $2FF040) and hooks $82:896E.
         run {
             val enabledBosses = mutableSetOf<String>()
             var hyperBeam = false
+            var infiniteBlueSuit = false
             for (patch in project.patches) {
                 if (!patch.enabled) continue
                 if (patch.configType == "boss_defeated") {
@@ -2503,9 +2504,10 @@ class EditorState {
                     enabledBosses.addAll(data.filter { it.value != 0 }.keys)
                 }
                 if (patch.configType == "hyper_beam") hyperBeam = true
+                if (patch.id == "bundled_infinite_blue_suit") infiniteBlueSuit = true
             }
-            if (enabledBosses.isNotEmpty() || hyperBeam) {
-                println("[EXPORT] Per-frame hook active: bosses=${enabledBosses.ifEmpty { "none" }}, hyperBeam=$hyperBeam")
+            if (enabledBosses.isNotEmpty() || hyperBeam || infiniteBlueSuit) {
+                println("[EXPORT] Per-frame hook active: bosses=${enabledBosses.ifEmpty { "none" }}, hyperBeam=$hyperBeam, infiniteBlueSuit=$infiniteBlueSuit")
                 val code = mutableListOf<Int>()
                 // Chain to original: JSL $8289EF
                 code.addAll(listOf(0x22, 0xEF, 0x89, 0x82))
@@ -2562,6 +2564,12 @@ class EditorState {
                     code.addAll(listOf(0x8F, 0x76, 0x0A, 0x7E))      // STA $7E0A76
                 }
 
+                // Infinite blue suit: force dash counter to $0400 every frame
+                if (infiniteBlueSuit) {
+                    code.addAll(listOf(0xA9, 0x00, 0x04))             // LDA #$0400
+                    code.addAll(listOf(0x8F, 0x3E, 0x0B, 0x7E))      // STA $7E0B3E
+                }
+
                 code.add(0x28) // PLP
                 code.add(0x6B) // RTL
 
@@ -2585,7 +2593,7 @@ class EditorState {
                 }
                 println("[EXPORT]   Per-frame hook: ${code.size} bytes at \$DF:F040, hook at \$82:896E")
             } else {
-                println("[EXPORT] Per-frame hook: not needed (no boss flags or hyper beam)")
+                println("[EXPORT] Per-frame hook: not needed (no boss flags, hyper beam, or blue suit)")
             }
         }
 

@@ -10,6 +10,7 @@
 ## Quick Reference
 
 ### LoROM Address Conversion
+
 ```
 PC = ((bank & 0x7F) * 0x8000) + (snes_offset - 0x8000)
 
@@ -18,24 +19,25 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 ```
 
 ### Key Banks
-| Bank | Contents |
-|------|----------|
-| `$8F` | Room headers, state data, PLM sets, scroll data, door-out tables |
-| `$83` | FX entries, door data blocks (DDBs) |
-| `$84` | PLM headers and routines |
-| `$89` | Item graphics source data |
-| `$90` | Beam/weapon damage tables |
-| `$91` | Samus physics/movement |
-| `$94` | Block collision handlers |
-| `$A0` | Enemy species headers (64 bytes each) |
-| `$A1` | Enemy population sets (per room) |
-| `$A2` | Mini-boss AI (Spore Spawn, Botwoon, Crocomire, Golden Torizo) |
-| `$A3` | Utility entity AI (elevator, save station, ship) |
-| `$A7` | Boss AI (Kraid, Phantoon, Draygon) |
-| `$A8` | Boss AI (Ridley, Mother Brain) |
-| `$B4` | Enemy GFX sets, drop tables, resistances |
-| `$B9` | CRE (Common Room Elements) — tiles + tile table |
-| `$C0-$CE` | Compressed level data (tiles) |
+
+| Bank      | Contents                                                         |
+|-----------|------------------------------------------------------------------|
+| `$8F`     | Room headers, state data, PLM sets, scroll data, door-out tables |
+| `$83`     | FX entries, door data blocks (DDBs)                              |
+| `$84`     | PLM headers and routines                                         |
+| `$89`     | Item graphics source data                                        |
+| `$90`     | Beam/weapon damage tables                                        |
+| `$91`     | Samus physics/movement                                           |
+| `$94`     | Block collision handlers                                         |
+| `$A0`     | Enemy species headers (64 bytes each)                            |
+| `$A1`     | Enemy population sets (per room)                                 |
+| `$A2`     | Mini-boss AI (Spore Spawn, Botwoon, Crocomire, Golden Torizo)    |
+| `$A3`     | Utility entity AI (elevator, save station, ship)                 |
+| `$A7`     | Boss AI (Kraid, Phantoon, Draygon)                               |
+| `$A8`     | Boss AI (Ridley, Mother Brain)                                   |
+| `$B4`     | Enemy GFX sets, drop tables, resistances                         |
+| `$B9`     | CRE (Common Room Elements) — tiles + tile table                  |
+| `$C0-$CE` | Compressed level data (tiles)                                    |
 
 ---
 
@@ -43,52 +45,52 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 ### ROM Format & Engine (`docs/rom/`)
 
-| File | Contents | When to read |
-|------|----------|--------------|
+| File                                       | Contents                                                                                                                                                                                                                                                                                                               | When to read                                    |
+|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
 | [`rom/data_format.md`](rom/data_format.md) | **Authoritative byte-level reference.** Room headers (11 bytes), state selectors, state data (26 bytes), PLM sets (6-byte entries), door data blocks (12 bytes), level data compression, tile word format, BTS values, enemy population format, item PLM graphics system, station PLM placement rules, export process. | Before modifying ANY ROM parsing or export code |
-| [`rom/limits.md`](rom/limits.md) | Per-room limits (PLMs, enemies, FX, scrolls, dimensions), bank free space sizes, scroll values, layer 2/BG scrolling, FX type codes. | When adding validation or hitting export errors |
-| [`rom/internals.md`](rom/internals.md) | Deep engine reference. Door system end-to-end (15-step transition state machine), PLM execution lifecycle, block collision dispatch, free space management patterns, reference codebase paths. | When implementing new engine features |
-| [`rom/hex_edits.txt`](rom/hex_edits.txt) | Extensive recipe list for raw hex edits: physics, beams, missiles, morph ball, suits, doors, HUD, FX, sounds. | When creating new patches |
+| [`rom/limits.md`](rom/limits.md)           | Per-room limits (PLMs, enemies, FX, scrolls, dimensions), bank free space sizes, scroll values, layer 2/BG scrolling, FX type codes.                                                                                                                                                                                   | When adding validation or hitting export errors |
+| [`rom/internals.md`](rom/internals.md)     | Deep engine reference. Door system end-to-end (15-step transition state machine), PLM execution lifecycle, block collision dispatch, free space management patterns, reference codebase paths.                                                                                                                         | When implementing new engine features           |
+| [`rom/hex_edits.txt`](rom/hex_edits.txt)   | Extensive recipe list for raw hex edits: physics, beams, missiles, morph ball, suits, doors, HUD, FX, sounds.                                                                                                                                                                                                          | When creating new patches                       |
 
 ### Boss Data (`docs/bosses/`)
 
-| File | Contents | Key Data |
-|------|----------|----------|
+| File                                       | Contents                                                                                                                                                                 | Key Data                                                                    |
+|--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
 | [`bosses/phantoon.md`](bosses/phantoon.md) | Phantoon species IDs, all behavior data table addresses (eye timers, flame patterns, figure-8 speeds, wave constants), AI routines, safe vs. ASM-required modifications. | Species: $E4BF body, $E4FF/$E53F/$E57F flames. Room $CD13, AI $A7. HP=2500. |
-| [`bosses/kraid.md`](bosses/kraid.md) | Kraid species IDs (8 entities), HP/damage for all parts, AI routines, room enemy set layout. **Note: $D2BF is Squeept, NOT Kraid.** | Species: $E2BF body. Room $A59F, AI $A7. HP=1000. |
+| [`bosses/kraid.md`](bosses/kraid.md)       | Kraid species IDs (8 entities), HP/damage for all parts, AI routines, room enemy set layout. **Note: $D2BF is Squeept, NOT Kraid.**                                      | Species: $E2BF body. Room $A59F, AI $A7. HP=1000.                           |
 
 ### Graphics & Sprites (`docs/graphics/`)
 
-| File | Contents | When to read |
-|------|----------|--------------|
-| [`graphics/tile_pipeline.md`](graphics/tile_pipeline.md) | **Complete tile rendering pipeline.** Tileset pointer table ($8F:E6A2), 2bpp/4bpp tile decompression, metatile definitions, CRE tiles, palette loading, VRAM layout. | Before modifying TileGraphics or TileDecoder |
-| [`graphics/sprites.md`](graphics/sprites.md) | **Enemy sprite system deep dive.** 64-byte species header format, OAM spritemap format (5-byte entries), instruction list tracing, BG2 tilemap rendering (Phantoon/Kraid), enemy GFX set 4-entry hardware limit, all boss data tables (ROM-scanned), rendering pipeline summary. | Before modifying EnemySpriteGraphics or adding new enemies |
+| File                                                     | Contents                                                                                                                                                                                                                                                                         | When to read                                               |
+|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| [`graphics/tile_pipeline.md`](graphics/tile_pipeline.md) | **Complete tile rendering pipeline.** Tileset pointer table ($8F:E6A2), 2bpp/4bpp tile decompression, metatile definitions, CRE tiles, palette loading, VRAM layout.                                                                                                             | Before modifying TileGraphics or TileDecoder               |
+| [`graphics/sprites.md`](graphics/sprites.md)             | **Enemy sprite system deep dive.** 64-byte species header format, OAM spritemap format (5-byte entries), instruction list tracing, BG2 tilemap rendering (Phantoon/Kraid), enemy GFX set 4-entry hardware limit, all boss data tables (ROM-scanned), rendering pipeline summary. | Before modifying EnemySpriteGraphics or adding new enemies |
 
 ### Reference Data (`docs/reference/`)
 
-| File | Contents |
-|------|----------|
-| [`reference/rogue_doors.md`](reference/rogue_doors.md) | Phantom blue door root cause analysis and fix (door_orientation bit 2). |
-| [`reference/plm_editor.txt`](reference/plm_editor.txt) | PLM editing reference from SMILE documentation. |
-| [`reference/enemy_editor.txt`](reference/enemy_editor.txt) | Enemy editing reference from SMILE documentation. |
-| [`reference/fix_editor.txt`](reference/fix_editor.txt) | FX editing reference from SMILE documentation. |
-| [`reference/sounds.txt`](reference/sounds.txt) | Sound/music track data reference. |
+| File                                                       | Contents                                                                |
+|------------------------------------------------------------|-------------------------------------------------------------------------|
+| [`reference/rogue_doors.md`](reference/rogue_doors.md)     | Phantom blue door root cause analysis and fix (door_orientation bit 2). |
+| [`reference/plm_editor.txt`](reference/plm_editor.txt)     | PLM editing reference from SMILE documentation.                         |
+| [`reference/enemy_editor.txt`](reference/enemy_editor.txt) | Enemy editing reference from SMILE documentation.                       |
+| [`reference/fix_editor.txt`](reference/fix_editor.txt)     | FX editing reference from SMILE documentation.                          |
+| [`reference/sounds.txt`](reference/sounds.txt)             | Sound/music track data reference.                                       |
 
 ### Project Planning (`docs/project/`)
 
-| File | Contents |
-|------|----------|
-| [`project/plan.md`](project/plan.md) | SMILE feature parity gap analysis and implementation phases. |
+| File                                       | Contents                                                                                          |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------|
+| [`project/plan.md`](project/plan.md)       | SMILE feature parity gap analysis and implementation phases.                                      |
 | [`project/roadmap.md`](project/roadmap.md) | Feature roadmap: boss/enemy stats editors, patches, sprite export, scroll editor, FX editor, etc. |
 
 ### Analysis Scripts (`docs/code/`)
 
-| Script | Usage |
-|--------|-------|
-| [`code/scan_enemies.py`](code/scan_enemies.py) | Scan all enemy species headers from ROM. Outputs text, markdown tables, or JSON. `python3 scan_enemies.py <rom> --markdown` |
-| [`code/dump_room_data.py`](code/dump_room_data.py) | Dump detailed room data: headers, states, doors, PLMs, door blocks. `python3 dump_room_data.py <rom> 0x91F8` |
-| [`code/compare_doors.py`](code/compare_doors.py) | Compare door data between vanilla and edited ROMs. |
-| [`code/scan_state_selectors.py`](code/scan_state_selectors.py) | Scan all room state selectors across the ROM. |
+| Script                                                         | Usage                                                                                                                       |
+|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| [`code/scan_enemies.py`](code/scan_enemies.py)                 | Scan all enemy species headers from ROM. Outputs text, markdown tables, or JSON. `python3 scan_enemies.py <rom> --markdown` |
+| [`code/dump_room_data.py`](code/dump_room_data.py)             | Dump detailed room data: headers, states, doors, PLMs, door blocks. `python3 dump_room_data.py <rom> 0x91F8`                |
+| [`code/compare_doors.py`](code/compare_doors.py)               | Compare door data between vanilla and edited ROMs.                                                                          |
+| [`code/scan_state_selectors.py`](code/scan_state_selectors.py) | Scan all room state selectors across the ROM.                                                                               |
 
 ### Images (`docs/images/`)
 
@@ -100,31 +102,33 @@ Screenshots and reference images for SMILE editors (BTS, enemy, FX, PLM).
 
 ### Enemy Species Headers (64 bytes at bank $A0)
 
-| Offset | Size | Field | Notes |
-|--------|------|-------|-------|
-| +$00 | 2 | tileDataSize | Bit 15 is VRAM flag, not size. `actual = val & 0x7FFF` |
-| +$02 | 2 | palPtr | Palette pointer (16-bit, used with aiBank) |
-| +$04 | 2 | HP | |
-| +$06 | 2 | Damage | Contact damage |
-| +$08 | 2 | Width | Hitbox half-width (pixels) |
-| +$0A | 2 | Height | Hitbox half-height (pixels) |
-| +$0C | 1 | aiBank | Bank for AI, palette, AND spritemap data |
-| +$12 | 2 | initAI | Init function pointer (in aiBank) |
-| +$14 | 2 | parts | Sub-pieces (0 = 1 part) |
-| +$36 | 2 | GRAPHADR offset | Raw 4bpp tile data offset |
-| +$38 | 1 | GRAPHADR bank | Raw 4bpp tile data bank |
-| +$39 | 1 | Layer control | 02=front, 05=behind Samus, 0B=behind BG |
-| +$3A | 2 | Drop chances ptr | Bank $B4 |
-| +$3C | 2 | Resistances ptr | Bank $B4 |
-| +$3E | 2 | Name ptr | Bank $B4 |
+| Offset | Size | Field            | Notes                                                  |
+|--------|------|------------------|--------------------------------------------------------|
+| +$00   | 2    | tileDataSize     | Bit 15 is VRAM flag, not size. `actual = val & 0x7FFF` |
+| +$02   | 2    | palPtr           | Palette pointer (16-bit, used with aiBank)             |
+| +$04   | 2    | HP               |                                                        |
+| +$06   | 2    | Damage           | Contact damage                                         |
+| +$08   | 2    | Width            | Hitbox half-width (pixels)                             |
+| +$0A   | 2    | Height           | Hitbox half-height (pixels)                            |
+| +$0C   | 1    | aiBank           | Bank for AI, palette, AND spritemap data               |
+| +$12   | 2    | initAI           | Init function pointer (in aiBank)                      |
+| +$14   | 2    | parts            | Sub-pieces (0 = 1 part)                                |
+| +$36   | 2    | GRAPHADR offset  | Raw 4bpp tile data offset                              |
+| +$38   | 1    | GRAPHADR bank    | Raw 4bpp tile data bank                                |
+| +$39   | 1    | Layer control    | 02=front, 05=behind Samus, 0B=behind BG                |
+| +$3A   | 2    | Drop chances ptr | Bank $B4                                               |
+| +$3C   | 2    | Resistances ptr  | Bank $B4                                               |
+| +$3E   | 2    | Name ptr         | Bank $B4                                               |
 
 ### Boss AI Banks
+
 - **$A7**: Kraid, Phantoon, Draygon, Etecoon, Dachora
 - **$A8**: Ridley, Mother Brain
 - **$A2**: Spore Spawn, Botwoon, Crocomire, Golden Torizo
 - **$A6**: Mini-Kraid
 
 ### Pre-rendered Enemy Sprite PNGs
+
 `desktopApp/src/jvmMain/resources/enemies/<speciesId>.png`
 
 ---
@@ -148,6 +152,7 @@ Three layers that interact at runtime:
 16 bytes per entry in bank $A1, terminated by `$FFFF` + 1-byte kill count.
 
 **Properties word (offset 8-9)**:
+
 - Bit 13 (0x2000): **CRITICAL** — assigns initial spritemap pointer. Without it → crash.
 - Bit 11 (0x0800): Process off-screen.
 - Default for new enemies: `0x2800`.
@@ -158,7 +163,8 @@ Three layers that interact at runtime:
 
 ## Item Collection Bits
 
-Each item PLM's `param` maps to a bit in `$7E:D870` (512 bits). Every item across the entire ROM must have a unique `param`. Vanilla uses 0x00–0x50; editor assigns from 0x51–0x1FF (431 slots).
+Each item PLM's `param` maps to a bit in `$7E:D870` (512 bits). Every item across the entire ROM must have a unique `param`. Vanilla uses 0x00–0x50;
+editor assigns from 0x51–0x1FF (431 slots).
 
 ---
 
@@ -177,12 +183,13 @@ Format: 5-byte "PATCH" header, records of `[3-byte offset, 2-byte size, data]`, 
 
 ## External References
 
-| Source | URL / Path |
-|--------|------------|
-| Kejardon's docs | https://patrickjohnston.org/ASM/ROM%20data/Super%20Metroid/Kejardon's%20docs/ |
-| Patrick Johnston bank logs | https://patrickjohnston.org/bank/8F (also /B4, /A0, /A7, /A8, etc.) |
-| Metroid Construction wiki | https://wiki.metroidconstruction.com/ |
-| SM decompilation (snesrev/sm) | `~/code/sm/` — C structs, bank-by-bank reimplementation |
-| MapRandomizer | `~/code/MapRandomizer/` — Door handling, room geometry |
-| SM Mod 3.0.80 | `docs/Super Metroid Mod 3.0.80/SMMM_black.html` — Community reference (ground truth for species IDs) |
-| SMILE source | `~/code/super_metroid/smile/` — Original SM editor |
+| Source                        | URL / Path                                                                                                |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Kejardon's docs               | https://patrickjohnston.org/ASM/ROM%20data/Super%20Metroid/Kejardon's%20docs/                             |
+| Patrick Johnston bank logs    | https://patrickjohnston.org/bank/8F (also /B4, /A0, /A7, /A8, etc.)                                       |
+| Metroid Construction wiki     | https://wiki.metroidconstruction.com/                                                                     |
+| SM decompilation (snesrev/sm) | `~/code/sm/` — C structs, bank-by-bank reimplementation                                                   |
+| SM-SPC                        | `~/code/SM-SPC/` — A fully symbolic, asar-assemblable source code for Super Metroid's SPC (audio) engine. |
+| MapRandomizer                 | `~/code/MapRandomizer/` — Door handling, room geometry                                                    |
+| SM Mod 3.0.80                 | `docs/Super Metroid Mod 3.0.80/SMMM_black.html` — Community reference (ground truth for species IDs)      |
+| SMILE source                  | `~/code/super_metroid/smile/` — Original SM editor                                                        |
