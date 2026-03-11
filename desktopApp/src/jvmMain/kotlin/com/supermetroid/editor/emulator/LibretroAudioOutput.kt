@@ -18,6 +18,8 @@ class LibretroAudioOutput {
     private var writeBuffer = ByteArray(0)
     @Volatile
     var muted: Boolean = false
+    @Volatile
+    var volume: Float = 1.0f
 
     fun start() {
         val format = AudioFormat(
@@ -51,8 +53,14 @@ class LibretroAudioOutput {
         if (available < bytesNeeded) return
 
         val bytes = ensureWriteBuffer(bytesNeeded)
+        val vol = volume.coerceIn(0f, 1f)
+        // Use fixed-point integer math to avoid float rounding artifacts.
+        // Scale 0.0-1.0 to 0-256 so we can shift right by 8 instead of float multiply.
+        val volInt = (vol * 256).toInt()
+        val fullVolume = volInt >= 256
         for (i in samples.indices) {
-            val s = samples[i].toInt()
+            val s = if (fullVolume) samples[i].toInt()
+                    else (samples[i].toInt() * volInt) shr 8
             bytes[i * 2] = (s and 0xFF).toByte()
             bytes[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
         }

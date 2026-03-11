@@ -30,6 +30,10 @@ class LibretroBackend(
         get() = audio?.muted ?: false
         set(value) { audio?.muted = value }
 
+    var audioVolume: Float
+        get() = audio?.volume ?: 1.0f
+        set(value) { audio?.volume = value }
+
     /** True when audio buffer has room — emulator is running ahead of real-time */
     val audioHasHeadroom: Boolean
         get() = audio?.hasHeadroom() ?: true
@@ -262,6 +266,17 @@ class LibretroBackend(
             roomId = wram?.readWord(0x079B),
             gameState = wram?.readWord(0x0998),
             health = wram?.readWord(0x09C2),
+            maxHealth = wram?.readWord(0x09C4),
+            missiles = wram?.readWord(0x09C6),
+            maxMissiles = wram?.readWord(0x09C8),
+            superMissiles = wram?.readWord(0x09CA),
+            maxSuperMissiles = wram?.readWord(0x09CC),
+            powerBombs = wram?.readWord(0x09CE),
+            maxPowerBombs = wram?.readWord(0x09D0),
+            reserveEnergy = wram?.readWord(0x09D4),
+            maxReserveEnergy = wram?.readWord(0x09D6),
+            collectedItems = wram?.readWord(0x09A4) ?: 0,
+            collectedBeams = wram?.readWord(0x09A8) ?: 0,
             samusX = wram?.readWord(0x0AF6),
             samusY = wram?.readWord(0x0AFA),
             doorTransition = wram?.readWord(0x0998)?.let { it in 0x06..0x0B } ?: false,

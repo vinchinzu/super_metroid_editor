@@ -28,11 +28,14 @@ import com.supermetroid.editor.integration.EditorNavNode
 import com.supermetroid.editor.integration.EditorRoomExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import java.io.ByteArrayInputStream
 import kotlinx.serialization.json.Json
 import java.awt.image.BufferedImage
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.Base64
+import java.util.Date
 import javax.imageio.ImageIO
 import kotlin.math.max
 
@@ -70,6 +73,19 @@ data class LocalRoomPoint(
 data class EmulatorSaveSlot(
     val label: String,
     val stateName: String,
+)
+
+@Serializable
+data class SaveSlotMeta(
+    val roomName: String? = null,
+    val etanks: Int = 0,
+    val reserveTanks: Int = 0,
+    val missiles: Int = 0,
+    val supers: Int = 0,
+    val powerBombs: Int = 0,
+    val collectedItems: Int = 0,
+    val collectedBeams: Int = 0,
+    val timestamp: String = "",
 )
 
 data class RoomMapOverlay(
@@ -128,6 +144,7 @@ data class LoadedNavGraph(
 
 class EmulatorWorkspaceState(
     private val backendFactory: (() -> EmulatorBackend)? = null,
+    private val roomRepository: com.supermetroid.editor.data.RoomRepository = com.supermetroid.editor.data.RoomRepository(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private var backend: EmulatorBackend? = null
@@ -200,12 +217,15 @@ class EmulatorWorkspaceState(
         private set
     var audioMuted by mutableStateOf(false)
         private set
+    var audioVolume by mutableStateOf(1.0f)
     var saveSlotIndex by mutableStateOf(0)
 
     /** Combo action queued by gamepad detection, consumed by the frame loop. */
     var pendingComboAction by mutableStateOf<String?>(null)
 
     var saveStates by mutableStateOf<List<StateInfo>>(emptyList())
+        private set
+    var slotMetadata by mutableStateOf<Map<String, SaveSlotMeta>>(emptyMap())
         private set
     var selectedStateName by mutableStateOf<String?>(null)
     var navGraph by mutableStateOf<LoadedNavGraph?>(null)
@@ -283,6 +303,20 @@ class EmulatorWorkspaceState(
         try {
             val states = b.listStates()
             saveStates = states.sortedBy { it.name.lowercase() }
+            // Load metadata for all states
+            val metaMap = mutableMapOf<String, SaveSlotMeta>()
+            val metaDir = File(System.getProperty("user.home"), ".smedit/states/libretro")
+            withContext(Dispatchers.IO) {
+                for (state in states) {
+                    val metaFile = File(metaDir, "${state.name}.meta.json")
+                    if (metaFile.isFile) {
+                        runCatching {
+                            metaMap[state.name] = json.decodeFromString(SaveSlotMeta.serializer(), metaFile.readText())
+                        }
+                    }
+                }
+            }
+            slotMetadata = metaMap
             if (!silent) setStatus("Inventory refreshed")
         } catch (e: Exception) {
             setStatus("Inventory refresh failed: ${e.message}")
@@ -426,7 +460,32 @@ class EmulatorWorkspaceState(
         isBusy = true
         try {
             b.saveState(name)
-            setStatus("Saved $name")
+            // Save metadata alongside state
+            val snap = snapshot
+            val roomName = snap?.roomName
+                ?: snap?.roomId?.let { rid -> runCatching { roomRepository.getRoomById(rid)?.name }.getOrNull() }
+                ?: snap?.roomId?.let { rid -> navGraph?.nodesByRoomId?.get(rid)?.name }
+                ?: snap?.roomId?.let { "0x${it.toString(16).uppercase()}" }
+            val meta = SaveSlotMeta(
+                roomName = roomName,
+                etanks = (snap?.maxHealth ?: 99).let { (it - 99) / 100 },
+                reserveTanks = (snap?.maxReserveEnergy ?: 0) / 100,
+                missiles = snap?.maxMissiles ?: 0,
+                supers = snap?.maxSuperMissiles ?: 0,
+                powerBombs = snap?.maxPowerBombs ?: 0,
+                collectedItems = snap?.collectedItems ?: 0,
+                collectedBeams = snap?.collectedBeams ?: 0,
+                timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(Date()),
+            )
+            withContext(Dispatchers.IO) {
+                val metaDir = File(System.getProperty("user.home"), ".smedit/states/libretro")
+                metaDir.mkdirs()
+                File(metaDir, "$name.meta.json").writeText(json.encodeToString(SaveSlotMeta.serializer(), meta))
+            }
+            slotMetadata = slotMetadata + (name to meta)
+            val slotNum = name.removePrefix("slot_")
+            val room = roomName ?: "?"
+            setStatus("Saved $slotNum: $room E${meta.etanks} M${meta.missiles} SM${meta.supers} PB${meta.powerBombs}")
             refreshInventory(silent = true)
         } catch (e: Exception) {
             setStatus("Save failed: ${e.message}")
@@ -561,6 +620,29 @@ class EmulatorWorkspaceState(
         val b = backend as? LibretroBackend ?: return
         audioMuted = !audioMuted
         b.audioMuted = audioMuted
+    }
+
+    fun updateAudioVolume(vol: Float) {
+        audioVolume = vol.coerceIn(0f, 1f)
+        (backend as? LibretroBackend)?.audioVolume = audioVolume
+    }
+
+    fun slotDisplayText(slotIndex: Int): String {
+        val name = "slot_$slotIndex"
+        val meta = slotMetadata[name] ?: return "[EMPTY]"
+        val room = meta.roomName ?: "???"
+        return "$room E${meta.etanks} M${meta.missiles} SM${meta.supers} PB${meta.powerBombs} ${meta.timestamp}"
+    }
+
+    fun getSlotMeta(slotIndex: Int): SaveSlotMeta? {
+        return slotMetadata["slot_$slotIndex"]
+    }
+
+    /** Propagate current audio settings to the backend (call after reconnect). */
+    fun propagateAudioState() {
+        val b = backend as? LibretroBackend ?: return
+        b.audioMuted = audioMuted
+        b.audioVolume = audioVolume
     }
 
     fun updateKey(key: Key, down: Boolean) {
