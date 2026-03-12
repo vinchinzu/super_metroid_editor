@@ -2363,6 +2363,16 @@ class EditorState {
 
     // ─── Export: patch ROM ──────────────────────────────────────
 
+    /**
+     * Build the export filename suffix from version and build name.
+     * Examples: "v1.0", "MyHack-v2.1", "Kaizo-v1.0"
+     */
+    private fun exportSuffix(): String {
+        val version = "v${project.versionMajor}.${project.versionMinor}"
+        val build = project.buildName.trim()
+        return if (build.isNotEmpty()) "$build-$version" else version
+    }
+
     fun exportToRom(romParser: RomParser): String? {
         val romPath = project.romPath
         if (romPath.isEmpty()) return null
@@ -3238,7 +3248,7 @@ class EditorState {
 
         if (roomsPatched.isEmpty() && patchesApplied == 0 && gfxPatched == 0) {
             val orig = File(romPath)
-            val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
+            val out = File(orig.parent, "${orig.nameWithoutExtension}-${exportSuffix()}.${orig.extension}")
             out.writeBytes(romData)
             println("Exported (vanilla copy, no edits): ${out.absolutePath}")
             return out.absolutePath
@@ -3324,7 +3334,7 @@ class EditorState {
         println("=== End Verification ===\n")
 
         val orig = File(romPath)
-        val out = File(orig.parent, "${orig.nameWithoutExtension}_edited.${orig.extension}")
+        val out = File(orig.parent, "${orig.nameWithoutExtension}-${exportSuffix()}.${orig.extension}")
         out.writeBytes(romData)
         val msg = "Exported ROM: ${out.absolutePath} (${roomsPatched.size} rooms, $patchesApplied patches, $gfxPatched gfx)"
         println(msg)
@@ -3352,7 +3362,7 @@ class EditorState {
 
         val ipsData = buildIpsPatch(original, patched)
         val orig = File(romPath)
-        val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}_edited.ips")
+        val ipsFile = File(orig.parent, "${orig.nameWithoutExtension}-${exportSuffix()}.ips")
         ipsFile.writeBytes(ipsData)
         val msg = "Exported IPS: ${ipsFile.absolutePath} (${ipsData.size} bytes)"
         println(msg)

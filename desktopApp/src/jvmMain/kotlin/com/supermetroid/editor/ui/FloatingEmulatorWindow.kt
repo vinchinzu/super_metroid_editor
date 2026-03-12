@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import com.supermetroid.editor.data.AppConfig
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -120,12 +121,13 @@ fun FloatingEmulatorWindow(
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
 
-    // Draggable position
-    var offsetX by remember { mutableStateOf(40f) }
-    var offsetY by remember { mutableStateOf(40f) }
+    // Draggable position (persisted)
+    val savedConfig = remember { AppConfig.load() }
+    var offsetX by remember { mutableStateOf(savedConfig.emulatorWindowX) }
+    var offsetY by remember { mutableStateOf(savedConfig.emulatorWindowY) }
 
-    // Resizable width (height derived from aspect ratio)
-    var windowWidth by remember { mutableStateOf(512f) }
+    // Resizable width (height derived from aspect ratio, persisted)
+    var windowWidth by remember { mutableStateOf(savedConfig.emulatorWindowWidth) }
 
     // Fast forward state
     var fastForwarding by remember { mutableStateOf(false) }
@@ -247,11 +249,16 @@ fun FloatingEmulatorWindow(
                         .height(TITLE_BAR_HEIGHT.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                offsetX += dragAmount.x
-                                offsetY += dragAmount.y
-                            }
+                            detectDragGestures(
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    offsetX += dragAmount.x
+                                    offsetY += dragAmount.y
+                                },
+                                onDragEnd = {
+                                    workspaceState.persistEmulatorWindowGeometry(offsetX, offsetY, windowWidth)
+                                },
+                            )
                         }
                         .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -699,10 +706,15 @@ fun FloatingEmulatorWindow(
                     .padding(2.dp)
                     .size(22.dp)
                     .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            windowWidth = (windowWidth + dragAmount.x).coerceIn(MIN_WIDTH, MAX_WIDTH)
-                        }
+                        detectDragGestures(
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                windowWidth = (windowWidth + dragAmount.x).coerceIn(MIN_WIDTH, MAX_WIDTH)
+                            },
+                            onDragEnd = {
+                                workspaceState.persistEmulatorWindowGeometry(offsetX, offsetY, windowWidth)
+                            },
+                        )
                     },
             )
         }

@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,6 +41,7 @@ import com.supermetroid.editor.emulator.EmulatorRegistry
 fun SettingsPopup(
     onDismiss: () -> Unit,
     emulatorWorkspaceState: EmulatorWorkspaceState,
+    editorState: EditorState? = null,
 ) {
     Popup(
         alignment = Alignment.TopEnd,
@@ -100,6 +104,7 @@ fun SettingsPopup(
                             currentFontSize = size
                             AppConfig.update { copy(fontSize = size.name) }
                         },
+                        editorState = editorState,
                     )
                     1 -> EmulatorSettingsTab(emulatorWorkspaceState, currentFontSize)
                 }
@@ -114,6 +119,7 @@ private fun GeneralSettingsTab(
     currentFontSize: FontSize,
     onThemeChange: (EditorTheme) -> Unit,
     onFontSizeChange: (FontSize) -> Unit,
+    editorState: EditorState? = null,
 ) {
     // ── Theme Section ──
     Text(
@@ -209,6 +215,113 @@ private fun GeneralSettingsTab(
             Text("Body text — room names, lists", fontSize = currentFontSize.body, color = MaterialTheme.colorScheme.onSurface)
             Text("Detail — hex values, coords", fontSize = currentFontSize.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Status bar", fontSize = currentFontSize.statusBar, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+
+    // ── Export Section ──
+    if (editorState != null) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Export",
+            fontSize = currentFontSize.body,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Version", fontSize = currentFontSize.body, color = MaterialTheme.colorScheme.onSurface)
+            VersionDropdown(
+                value = editorState.project.versionMajor,
+                onValueChange = { editorState.project.versionMajor = it },
+                fontSize = currentFontSize,
+            )
+            Text(".", fontSize = currentFontSize.body, color = MaterialTheme.colorScheme.onSurface)
+            VersionDropdown(
+                value = editorState.project.versionMinor,
+                onValueChange = { editorState.project.versionMinor = it },
+                fontSize = currentFontSize,
+            )
+        }
+        Text(
+            "Build Name",
+            fontSize = currentFontSize.body,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        AppTextInput(
+            value = editorState.project.buildName,
+            onValueChange = { editorState.project.buildName = it },
+            placeholder = "Optional (e.g. kaizo, practice)",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // ── Export filename preview ──
+        val build = editorState.project.buildName.trim()
+        val version = "v${editorState.project.versionMajor}.${editorState.project.versionMinor}"
+        val suffix = if (build.isNotEmpty()) "$build-$version" else version
+        Text(
+            "Export: romname-$suffix.smc",
+            fontSize = currentFontSize.detail,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun VersionDropdown(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    fontSize: FontSize,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            modifier = Modifier.clickable { expanded = !expanded },
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Text(
+                value.toString(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).widthIn(min = 32.dp),
+                fontSize = fontSize.body,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Popup(
+                alignment = Alignment.TopStart,
+                onDismissRequest = { expanded = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 4.dp,
+                    tonalElevation = 2.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.height(200.dp).width(60.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        for (i in 0..255) {
+                            Text(
+                                i.toString(),
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable {
+                                        onValueChange(i)
+                                        expanded = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                fontSize = fontSize.body,
+                                fontWeight = if (i == value) FontWeight.Bold else FontWeight.Normal,
+                                color = if (i == value) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

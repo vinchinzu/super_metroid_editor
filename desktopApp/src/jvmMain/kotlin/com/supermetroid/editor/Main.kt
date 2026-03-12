@@ -316,6 +316,7 @@ fun main() = application {
                                 SettingsPopup(
                                     onDismiss = { settingsOpen = false },
                                     emulatorWorkspaceState = emulatorWorkspaceState,
+                                    editorState = editorState,
                                 )
                             }
                         }

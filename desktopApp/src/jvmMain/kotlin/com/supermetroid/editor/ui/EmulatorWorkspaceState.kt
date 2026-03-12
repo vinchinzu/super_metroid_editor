@@ -215,9 +215,9 @@ class EmulatorWorkspaceState(
         private set
     var isBusy by mutableStateOf(false)
         private set
-    var audioMuted by mutableStateOf(false)
+    var audioMuted by mutableStateOf(AppConfig.load().emulatorAudioMuted)
         private set
-    var audioVolume by mutableStateOf(1.0f)
+    var audioVolume by mutableStateOf(AppConfig.load().emulatorAudioVolume)
     var saveSlotIndex by mutableStateOf(0)
 
     /** Combo action queued by gamepad detection, consumed by the frame loop. */
@@ -620,11 +620,13 @@ class EmulatorWorkspaceState(
         val b = backend as? LibretroBackend ?: return
         audioMuted = !audioMuted
         b.audioMuted = audioMuted
+        persistConfig()
     }
 
     fun updateAudioVolume(vol: Float) {
         audioVolume = vol.coerceIn(0f, 1f)
         (backend as? LibretroBackend)?.audioVolume = audioVolume
+        persistConfig()
     }
 
     fun slotDisplayText(slotIndex: Int): String {
@@ -990,6 +992,16 @@ class EmulatorWorkspaceState(
         return if (current <= 0f) sample else (current * 0.75f) + (sample * 0.25f)
     }
 
+    fun persistEmulatorWindowGeometry(x: Float, y: Float, width: Float) {
+        AppConfig.update {
+            copy(
+                emulatorWindowX = x,
+                emulatorWindowY = y,
+                emulatorWindowWidth = width,
+            )
+        }
+    }
+
     fun updateRetroArchPath(value: String) {
         retroArchPath = value
         persistConfig()
@@ -1014,6 +1026,8 @@ class EmulatorWorkspaceState(
                 retroArchPath = this@EmulatorWorkspaceState.retroArchPath.takeIf { it.isNotBlank() },
                 retroArchCorePath = this@EmulatorWorkspaceState.retroArchCorePath.takeIf { it.isNotBlank() },
                 retroArchNwaPort = this@EmulatorWorkspaceState.retroArchNwaPort,
+                emulatorAudioVolume = this@EmulatorWorkspaceState.audioVolume,
+                emulatorAudioMuted = this@EmulatorWorkspaceState.audioMuted,
             )
         }
     }

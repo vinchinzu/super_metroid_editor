@@ -253,7 +253,10 @@ data class SmEditProject(
     val tileDefaults: MutableMap<String, TileDefaultOverride> = mutableMapOf(), // key = "tilesetId:metatileIndex"
     val patches: MutableList<SmPatch> = mutableListOf(),
     val customGfx: TilesetGfxData = TilesetGfxData(),
-    val patterns: MutableList<TilePattern> = mutableListOf()
+    val patterns: MutableList<TilePattern> = mutableListOf(),
+    var versionMajor: Int = 1,
+    var versionMinor: Int = 0,
+    var buildName: String = "",
 ) {
     fun roomKey(roomId: Int): String = roomId.toString(16).uppercase().padStart(4, '0')
 
