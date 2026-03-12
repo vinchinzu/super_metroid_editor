@@ -80,8 +80,9 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 
 | File                                       | Contents                                                                                          |
 |--------------------------------------------|---------------------------------------------------------------------------------------------------|
-| [`project/plan.md`](project/plan.md)       | SMILE feature parity gap analysis and implementation phases.                                      |
-| [`project/roadmap.md`](project/roadmap.md) | Feature roadmap: boss/enemy stats editors, patches, sprite export, scroll editor, FX editor, etc. |
+| [`project/plan.md`](project/plan.md)                 | SMILE feature parity gap analysis and implementation phases.                                      |
+| [`project/roadmap.md`](project/roadmap.md)           | Feature roadmap: boss/enemy stats editors, patches, sprite export, scroll editor, FX editor, etc. |
+| [`project/smile_parity.md`](project/smile_parity.md) | Complete SMILE vs SMEDIT feature comparison matrix with priority tiers and implementation notes.   |
 
 ### Analysis Scripts (`docs/code/`)
 
