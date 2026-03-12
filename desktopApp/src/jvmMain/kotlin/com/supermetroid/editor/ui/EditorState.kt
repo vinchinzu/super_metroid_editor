@@ -20,6 +20,7 @@ import com.supermetroid.editor.data.PatternCell
 import com.supermetroid.editor.data.PatternLibrary
 import com.supermetroid.editor.data.EnemyUpdate
 import com.supermetroid.editor.rom.LZ5Compressor
+import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
 import kotlinx.serialization.json.Json
@@ -2444,7 +2445,7 @@ class EditorState {
                 for (e in ENEMY_DEFS) {
                     val hp = data["${e.key}_hp"]
                     val dmg = data["${e.key}_dmg"]
-                    val snesAddr = 0xA00000 or e.speciesId
+                    val snesAddr = RomConstants.BANK_ENEMY_AI or e.speciesId
                     if (hp != null) {
                         val pc = romParser.snesToPc(snesAddr) + 4
                         if (pc + 1 < romData.size) {
@@ -2794,7 +2795,7 @@ class EditorState {
                 // Write all PLM sets to ROM
                 for (psd in plmSets) {
                     val newSize = psd.plms.size * 6 + 2
-                    val plmPc = romParser.snesToPc(0x8F0000 or psd.plmSetPtr)
+                    val plmPc = romParser.snesToPc(RomConstants.BANK_ROOM_DATA or psd.plmSetPtr)
 
                     val writePc: Int
                     if (newSize <= psd.originalSize) {
@@ -3067,7 +3068,7 @@ class EditorState {
                     val idx = sc.screenY * room.width + sc.screenX
                     if (idx in modifiedScrolls.indices) modifiedScrolls[idx] = sc.newValue
                 }
-                val scrollPc = romParser.snesToPc(0x8F0000 or room.roomScrollsPtr)
+                val scrollPc = romParser.snesToPc(RomConstants.BANK_ROOM_DATA or room.roomScrollsPtr)
                 for (i in modifiedScrolls.indices) {
                     if (scrollPc + i < romData.size) romData[scrollPc + i] = modifiedScrolls[i].toByte()
                 }
@@ -3079,7 +3080,7 @@ class EditorState {
                 val fx = roomEdits.fxChange!!
                 val fxEntries = romParser.parseFxEntries(room.fxPtr)
                 if (fxEntries.isNotEmpty()) {
-                    val fxSnesAddr = 0x830000 or room.fxPtr
+                    val fxSnesAddr = RomConstants.BANK_FX or room.fxPtr
                     var fxPc = romParser.snesToPc(fxSnesAddr)
                     // Find the default FX entry (doorSelect == 0) — it's always the last one
                     for (entry in fxEntries) {

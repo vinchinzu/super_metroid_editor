@@ -46,7 +46,7 @@ class MapRenderer(private val romParser: RomParser, customTileGraphics: TileGrap
         6 to intArrayOf(0xFF686868.toInt(), 0xFF5A5A5A.toInt()), // Ceres — neutral gray
     )
     
-    private val bgColor = 0xFF0C0C18.toInt()       // Deep dark background
+    private val bgColor = RomConstants.ROM_BG_COLOR  // Deep dark background
     private val spikeColor = 0xFFD04040.toInt()     // Red spikes
     private val doorColor = 0xFF4090F0.toInt()      // Fallback blue doors (no tile graphics)
     private val edgeColor = 0xFF1A1A28.toInt()      // Dark edge highlight

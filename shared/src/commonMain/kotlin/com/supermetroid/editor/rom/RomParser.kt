@@ -1,6 +1,15 @@
 package com.supermetroid.editor.rom
 
 import com.supermetroid.editor.data.Room
+import com.supermetroid.editor.rom.RomConstants.BANK_ENEMY_AI
+import com.supermetroid.editor.rom.RomConstants.BANK_ENEMY_GFX
+import com.supermetroid.editor.rom.RomConstants.BANK_ENEMY_SET
+import com.supermetroid.editor.rom.RomConstants.BANK_FX
+import com.supermetroid.editor.rom.RomConstants.BANK_ROOM_DATA
+import com.supermetroid.editor.rom.RomConstants.ROM_SIZE
+import com.supermetroid.editor.rom.RomConstants.ROM_SIZE_WITH_HEADER
+import com.supermetroid.editor.rom.RomConstants.SMC_HEADER_SIZE
+import com.supermetroid.editor.rom.RomConstants.STATE_DATA_SIZE
 
 /**
  * Parser for Super Metroid ROM files (.smc format)
@@ -15,10 +24,10 @@ import com.supermetroid.editor.data.Room
  */
 class RomParser(internal val romData: ByteArray) {
     private val hasHeader: Boolean
-        get() = romData.size == 0x300200
-    
+        get() = romData.size == ROM_SIZE_WITH_HEADER
+
     private val romStartOffset: Int
-        get() = if (hasHeader) 0x200 else 0x0
+        get() = if (hasHeader) SMC_HEADER_SIZE else 0x0
     
     /**
      * Convert SNES address to PC offset using LoROM mapping.
@@ -36,7 +45,7 @@ class RomParser(internal val romData: ByteArray) {
      * Room IDs are pointers within SNES bank $8F.
      */
     fun roomIdToPc(roomId: Int): Int {
-        return snesToPc(0x8F0000 or (roomId and 0xFFFF))
+        return snesToPc(BANK_ROOM_DATA or (roomId and 0xFFFF))
     }
     
     /**
@@ -81,7 +90,7 @@ class RomParser(internal val romData: ByteArray) {
             var bgDataPtr = 0
             var setupAsmPtr = 0
             
-            if (stateDataOffset != null && stateDataOffset + 26 <= romData.size) {
+            if (stateDataOffset != null && stateDataOffset + STATE_DATA_SIZE <= romData.size) {
                 levelDataPtr = readUInt24At(stateDataOffset)
                 tileset = romData[stateDataOffset + 3].toInt() and 0xFF
                 musicData = romData[stateDataOffset + 4].toInt() and 0xFF
@@ -149,8 +158,8 @@ class RomParser(internal val romData: ByteArray) {
             if (firstCondition == 0xE629) {
                 // E629: condition(2) + arg(1) + ptr(2) = 5 bytes
                 val statePtr = readUInt16At(stateListOffset + 3)
-                val statePc = snesToPc(0x8F0000 or statePtr)
-                if (statePc + 26 <= romData.size) {
+                val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
+                if (statePc + STATE_DATA_SIZE <= romData.size) {
                     return statePc
                 }
             }
@@ -435,7 +444,7 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun parseFxEntries(fxPtr: Int): List<FxEntry> {
         if (fxPtr == 0 || fxPtr == 0xFFFF) return emptyList()
-        val snesAddr = 0x830000 or fxPtr
+        val snesAddr = BANK_FX or fxPtr
         var pc = snesToPc(snesAddr)
         val entries = mutableListOf<FxEntry>()
         var safety = 0
@@ -478,7 +487,7 @@ class RomParser(internal val romData: ByteArray) {
             0x0001 -> return IntArray(totalScreens) { 0x02 }
         }
 
-        val snesAddr = 0x8F0000 or scrollsPtr
+        val snesAddr = BANK_ROOM_DATA or scrollsPtr
         val pc = snesToPc(snesAddr)
         if (pc + totalScreens > romData.size) return IntArray(totalScreens) { 0x01 }
 
@@ -547,7 +556,7 @@ class RomParser(internal val romData: ByteArray) {
             when (code) {
                 0xE5E6 -> {
                     val statePc = pos + 2
-                    if (statePc + 26 <= romData.size) {
+                    if (statePc + STATE_DATA_SIZE <= romData.size) {
                         results.add(RoomStateInfo(code, 0, statePc,
                             RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Default"))
                     }
@@ -557,9 +566,9 @@ class RomParser(internal val romData: ByteArray) {
                     if (pos + 5 < romData.size) {
                         val arg = readUInt16At(pos + 2)
                         val statePtr = readUInt16At(pos + 4)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
                         val argName = RoomStateInfo.EVENT_NAMES[arg] ?: "Event 0x${arg.toString(16).uppercase()}"
-                        if (statePc + 26 <= romData.size) {
+                        if (statePc + STATE_DATA_SIZE <= romData.size) {
                             results.add(RoomStateInfo(code, arg, statePc,
                                 "${RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Event"}: $argName"))
                         }
@@ -570,9 +579,9 @@ class RomParser(internal val romData: ByteArray) {
                     if (pos + 4 < romData.size) {
                         val arg = romData[pos + 2].toInt() and 0xFF
                         val statePtr = readUInt16At(pos + 3)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
                         val argName = RoomStateInfo.EVENT_NAMES[arg] ?: "Flag 0x${arg.toString(16).uppercase()}"
-                        if (statePc + 26 <= romData.size) {
+                        if (statePc + STATE_DATA_SIZE <= romData.size) {
                             results.add(RoomStateInfo(code, arg, statePc,
                                 "${RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Check"}: $argName"))
                         }
@@ -582,8 +591,8 @@ class RomParser(internal val romData: ByteArray) {
                 0xE5FF, 0xE640, 0xE652, 0xE669, 0xE678 -> {
                     if (pos + 3 < romData.size) {
                         val statePtr = readUInt16At(pos + 2)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
-                        if (statePc + 26 <= romData.size) {
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
+                        if (statePc + STATE_DATA_SIZE <= romData.size) {
                             results.add(RoomStateInfo(code, 0, statePc,
                                 RoomStateInfo.STATE_CONDITION_NAMES[code] ?: "Check"))
                         }
@@ -620,19 +629,10 @@ class RomParser(internal val romData: ByteArray) {
     }
 
     // ─── Utility ──────────────────────────────────────────────────────
-    
-    private fun readUInt16At(offset: Int): Int {
-        val lo = romData[offset].toInt() and 0xFF
-        val hi = romData[offset + 1].toInt() and 0xFF
-        return (hi shl 8) or lo
-    }
-    
-    private fun readUInt24At(offset: Int): Int {
-        val lo = romData[offset].toInt() and 0xFF
-        val mid = romData[offset + 1].toInt() and 0xFF
-        val hi = romData[offset + 2].toInt() and 0xFF
-        return (hi shl 16) or (mid shl 8) or lo
-    }
+
+    private fun readUInt16At(offset: Int): Int = readU16(romData, offset)
+
+    private fun readUInt24At(offset: Int): Int = readU24(romData, offset)
     
     fun getRomData(): ByteArray = romData
 
@@ -679,15 +679,15 @@ class RomParser(internal val romData: ByteArray) {
             when (code) {
                 0xE5E6 -> {
                     val statePc = pos + 2
-                    if (statePc + 26 <= romData.size) results.add(statePc)
+                    if (statePc + STATE_DATA_SIZE <= romData.size) results.add(statePc)
                     return results
                 }
                 0xE5EB -> {
                     // door_ptr(2) + state_ptr(2) = 6 bytes total
                     if (pos + 5 < romData.size) {
                         val statePtr = readUInt16At(pos + 4)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
-                        if (statePc + 26 <= romData.size) results.add(statePc)
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
+                        if (statePc + STATE_DATA_SIZE <= romData.size) results.add(statePc)
                     }
                     pos += 6
                 }
@@ -695,8 +695,8 @@ class RomParser(internal val romData: ByteArray) {
                     // 1-byte flag + 2-byte state pointer = 5 bytes total
                     if (pos + 4 < romData.size) {
                         val statePtr = readUInt16At(pos + 3)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
-                        if (statePc + 26 <= romData.size) results.add(statePc)
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
+                        if (statePc + STATE_DATA_SIZE <= romData.size) results.add(statePc)
                     }
                     pos += 5
                 }
@@ -704,8 +704,8 @@ class RomParser(internal val romData: ByteArray) {
                     // 2-byte state pointer only = 4 bytes total
                     if (pos + 3 < romData.size) {
                         val statePtr = readUInt16At(pos + 2)
-                        val statePc = snesToPc(0x8F0000 or statePtr)
-                        if (statePc + 26 <= romData.size) results.add(statePc)
+                        val statePc = snesToPc(BANK_ROOM_DATA or statePtr)
+                        if (statePc + STATE_DATA_SIZE <= romData.size) results.add(statePc)
                     }
                     pos += 4
                 }
@@ -746,7 +746,7 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun parsePlmSet(plmSetPtr: Int): List<PlmEntry> {
         if (plmSetPtr == 0 || plmSetPtr == 0xFFFF) return emptyList()
-        val snesAddr = 0x8F0000 or plmSetPtr
+        val snesAddr = BANK_ROOM_DATA or plmSetPtr
         var pc = snesToPc(snesAddr)
         val entries = mutableListOf<PlmEntry>()
         var safety = 0
@@ -812,7 +812,7 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun parseEnemyPopulation(enemySetPtr: Int): List<EnemyEntry> {
         if (enemySetPtr == 0 || enemySetPtr == 0xFFFF) return emptyList()
-        val snesAddr = 0xA10000 or enemySetPtr
+        val snesAddr = BANK_ENEMY_SET or enemySetPtr
         var pc = snesToPc(snesAddr)
         val entries = mutableListOf<EnemyEntry>()
         var safety = 0
@@ -847,7 +847,7 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun parseEnemyGfxSet(enemyGfxPtr: Int): List<EnemyGfxEntry> {
         if (enemyGfxPtr == 0 || enemyGfxPtr == 0xFFFF) return emptyList()
-        val snesAddr = 0xB40000 or enemyGfxPtr
+        val snesAddr = BANK_ENEMY_GFX or enemyGfxPtr
         var pc = snesToPc(snesAddr)
         val entries = mutableListOf<EnemyGfxEntry>()
         var safety = 0
@@ -899,12 +899,12 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun parseDoorEntry(doorOutPtr: Int, doorIndex: Int): DoorEntry? {
         if (doorOutPtr == 0 || doorOutPtr == 0xFFFF) return null
-        val listPc = snesToPc(0x8F0000 or doorOutPtr)
+        val listPc = snesToPc(BANK_ROOM_DATA or doorOutPtr)
         val ptrOff = listPc + doorIndex * 2
         if (ptrOff + 1 >= romData.size) return null
         val entryPtr = readUInt16At(ptrOff)
         if (entryPtr < 0x8000) return null
-        val entryPc = snesToPc(0x830000 or entryPtr)
+        val entryPc = snesToPc(BANK_FX or entryPtr)
         if (entryPc + 11 >= romData.size) return null
         val destRoom = readUInt16At(entryPc)
         if (destRoom < 0x8000 || destRoom == 0xFFFF) return null
@@ -1039,12 +1039,12 @@ class RomParser(internal val romData: ByteArray) {
      */
     fun doorEntryPcOffset(doorOutPtr: Int, doorIndex: Int): Int? {
         if (doorOutPtr == 0 || doorOutPtr == 0xFFFF) return null
-        val listPc = snesToPc(0x8F0000 or doorOutPtr)
+        val listPc = snesToPc(BANK_ROOM_DATA or doorOutPtr)
         val ptrOff = listPc + doorIndex * 2
         if (ptrOff + 1 >= romData.size) return null
         val entryPtr = readUInt16At(ptrOff)
         if (entryPtr < 0x8000) return null
-        val entryPc = snesToPc(0x830000 or entryPtr)
+        val entryPc = snesToPc(BANK_FX or entryPtr)
         if (entryPc + 11 >= romData.size) return null
         return entryPc
     }
@@ -1247,7 +1247,7 @@ class RomParser(internal val romData: ByteArray) {
         }
 
         fun decodeScrollCommands(parser: RomParser, paramPtr: Int, roomWidth: Int): List<Triple<Int, Int, Int>> {
-            val snesAddr = 0x8F0000 or paramPtr
+            val snesAddr = BANK_ROOM_DATA or paramPtr
             val pc = parser.snesToPc(snesAddr)
             val commands = mutableListOf<Triple<Int, Int, Int>>()
             var offset = 0
@@ -1533,7 +1533,7 @@ class RomParser(internal val romData: ByteArray) {
                 throw IllegalArgumentException("ROM file not found: $filePath")
             }
             val romData = file.readBytes()
-            if (romData.size != 0x300000 && romData.size != 0x300200) {
+            if (romData.size != ROM_SIZE && romData.size != ROM_SIZE_WITH_HEADER) {
                 throw IllegalArgumentException("Invalid ROM size: ${romData.size} bytes")
             }
             return RomParser(romData)

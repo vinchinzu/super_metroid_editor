@@ -88,7 +88,7 @@ fun TilesetPreview(
                 fontSize = fs.body, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(6.dp))
-            Box(modifier = Modifier.fillMaxWidth().weight(1f).background(Color(0xFF0C0C18))) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f).background(EditorColors.romBackground)) {
                 when {
                     isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Loading…", color = Color.White, fontSize = fs.body) }
                     errorMessage != null -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text(errorMessage!!, color = MaterialTheme.colorScheme.error, fontSize = fs.detail) }
@@ -128,7 +128,7 @@ fun TilesetPreview(
                                     val sd = event.changes.first().scrollDelta
                                     val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
                                     if (zoom) {
-                                        zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.5f, 4f)
+                                        zoomLevel = (zoomLevel * if (sd.y < 0) EditorColors.ZOOM_FACTOR else 1f / EditorColors.ZOOM_FACTOR).coerceIn(0.5f, 4f)
                                     } else if (ne?.isShiftDown == true) {
                                         val delta = if (sd.x != 0f) sd.x else sd.y
                                         coroutineScope.launch {

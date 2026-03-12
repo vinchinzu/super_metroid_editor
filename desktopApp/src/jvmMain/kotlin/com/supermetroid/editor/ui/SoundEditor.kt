@@ -498,7 +498,7 @@ private fun SoundEditorActiveContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(Color(0xFF0C0C18), RoundedCornerShape(6.dp))
+                .background(EditorColors.romBackground, RoundedCornerShape(6.dp))
                 .border(1.dp, Color(0xFF2A2A3A), RoundedCornerShape(6.dp))
         ) {
             if (waveform != null && waveform.isNotEmpty()) {

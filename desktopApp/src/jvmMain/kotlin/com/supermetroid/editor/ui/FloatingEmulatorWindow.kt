@@ -309,7 +309,7 @@ fun FloatingEmulatorWindow(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .background(Color(0xFF0B0F12))
+                            .background(EditorColors.emulatorPanelBg)
                             .padding(8.dp),
                     ) {
                         Column(
@@ -328,7 +328,7 @@ fun FloatingEmulatorWindow(
                             if (rid != null) {
                                 Text(
                                     "Room: 0x${rid.toString(16).uppercase()}  HP: ${snap.health ?: 0}/${snap.maxHealth ?: 0}  Pos: (${snap.samusX ?: 0}, ${snap.samusY ?: 0})",
-                                    color = Color(0xFFB6C3CC),
+                                    color = EditorColors.emulatorText,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
                                 )
@@ -345,7 +345,7 @@ fun FloatingEmulatorWindow(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .background(Color(0xFF0B0F12))
+                            .background(EditorColors.emulatorPanelBg)
                             .focusRequester(focusRequester)
                             .focusable()
                             .onPreviewKeyEvent { event ->
@@ -429,13 +429,13 @@ fun FloatingEmulatorWindow(
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     "Arrows + Z/X/A/S/Q/W | F1-F4 save/load",
-                                    color = Color(0xFFB6C3CC),
+                                    color = EditorColors.emulatorText,
                                     fontSize = 11.sp,
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     "Controller: R+Y+Sel save | L+Y+Sel load | L+R+Y+\u2191\u2193 slot",
-                                    color = Color(0xFFB6C3CC),
+                                    color = EditorColors.emulatorText,
                                     fontSize = 11.sp,
                                 )
                             }

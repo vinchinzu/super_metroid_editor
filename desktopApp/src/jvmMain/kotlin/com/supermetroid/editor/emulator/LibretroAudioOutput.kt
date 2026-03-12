@@ -29,8 +29,8 @@ class LibretroAudioOutput {
             true,     // signed
             false,    // little-endian (native SNES)
         )
-        // ~100ms buffer — enough to absorb timing jitter without noticeable latency
-        val bufferBytes = (SAMPLE_RATE * 2 * 2 * BUFFER_SECONDS).toInt()
+        // 200ms buffer — absorbs GC pauses and timing jitter without noticeable latency
+        val bufferBytes = (SAMPLE_RATE * FRAME_SIZE * BUFFER_SECONDS).toInt()
         val sdl = AudioSystem.getSourceDataLine(format)
         sdl.open(format, bufferBytes)
         sdl.start()
@@ -39,26 +39,30 @@ class LibretroAudioOutput {
 
     /**
      * Write interleaved stereo int16 samples to the audio output.
-     * Drops samples if the buffer is nearly full to avoid blocking the emulation loop.
+     * Performs partial writes when the buffer can't fit all samples,
+     * keeping stereo pairs aligned. Only drops samples when there is
+     * truly no room at all, avoiding the crackling caused by discarding
+     * entire batches.
      */
     fun writeSamples(samples: ShortArray) {
         if (muted || samples.isEmpty()) return
         val sdl = line ?: return
 
-        val bytesNeeded = samples.size * 2
         val available = sdl.available()
+        if (available < FRAME_SIZE) return // truly no room
 
-        // If less than half the buffer is available, drop these samples
-        // to avoid blocking the emulation thread
-        if (available < bytesNeeded) return
+        // Write as many complete stereo frames as will fit
+        val maxSamples = minOf(samples.size, (available / 2) and STEREO_ALIGN_MASK)
+        if (maxSamples <= 0) return
 
+        val bytesNeeded = maxSamples * 2
         val bytes = ensureWriteBuffer(bytesNeeded)
         val vol = volume.coerceIn(0f, 1f)
         // Use fixed-point integer math to avoid float rounding artifacts.
         // Scale 0.0-1.0 to 0-256 so we can shift right by 8 instead of float multiply.
         val volInt = (vol * 256).toInt()
         val fullVolume = volInt >= 256
-        for (i in samples.indices) {
+        for (i in 0 until maxSamples) {
             val s = if (fullVolume) samples[i].toInt()
                     else (samples[i].toInt() * volInt) shr 8
             bytes[i * 2] = (s and 0xFF).toByte()
@@ -96,7 +100,11 @@ class LibretroAudioOutput {
 
     companion object {
         const val SAMPLE_RATE = 32040f
-        // Buffer length in seconds. 100ms balances latency vs. jitter absorption.
-        private const val BUFFER_SECONDS = 0.10f
+        // Buffer length in seconds. 200ms gives enough headroom for JVM GC pauses.
+        private const val BUFFER_SECONDS = 0.20f
+        // Bytes per stereo sample pair (2 channels × 2 bytes per 16-bit sample)
+        private const val FRAME_SIZE = 4
+        // Mask to keep sample counts aligned to stereo pairs (even count)
+        private const val STEREO_ALIGN_MASK = -2 // 0xFFFFFFFE
     }
 }

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.SmPatch
+import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
 
 // ─── Enemy stats structure: bank $A0, 64 bytes per species ───
@@ -54,7 +55,7 @@ data class BossStatField(
     val offset: Int,
     val defaultValue: Int
 ) {
-    val snesAddress: Int get() = 0xA00000 or speciesId
+    val snesAddress: Int get() = RomConstants.BANK_ENEMY_AI or speciesId
 }
 
 data class BossDef(

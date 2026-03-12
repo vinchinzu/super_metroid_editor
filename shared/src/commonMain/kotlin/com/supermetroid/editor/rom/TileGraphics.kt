@@ -40,8 +40,8 @@ class TileGraphics(private val romParser: RomParser) {
         const val TOTAL_TILES = 1024          // 0-1023
         const val METATILE_COUNT = 1024       // Number of metatile definitions
         
-        // SNES 4bpp tile: 32 bytes per 8x8 tile
-        const val BYTES_PER_TILE = 32
+        /** @see RomConstants.BYTES_PER_4BPP_TILE */
+        const val BYTES_PER_TILE = RomConstants.BYTES_PER_4BPP_TILE
 
         // Kraid's room uses tileset/graphics set 27
         const val KRAID_TILESET = 27
@@ -193,7 +193,7 @@ class TileGraphics(private val romParser: RomParser) {
         val width = gridCols * tilePx
         val height = gridRows * tilePx
         val pixels = IntArray(width * height)
-        val bg = 0xFF0C0C18.toInt()
+        val bg = RomConstants.ROM_BG_COLOR
         pixels.fill(bg)
         for (i in 0 until METATILE_COUNT) {
             val metaPixels = renderMetatile(i) ?: continue
@@ -259,7 +259,7 @@ class TileGraphics(private val romParser: RomParser) {
         val w = cols * 8
         val h = rows * 8
         val pixels = IntArray(w * h)
-        pixels.fill(0xFF0C0C18.toInt())
+        pixels.fill(RomConstants.ROM_BG_COLOR)
         for (i in 0 until numTiles) {
             val tileNum = startTile + i
             if (tileNum >= TOTAL_TILES) break
@@ -689,11 +689,7 @@ class TileGraphics(private val romParser: RomParser) {
         return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
     }
     
-    private fun readUInt24(data: ByteArray, offset: Int): Int {
-        return (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8) or
-            ((data[offset + 2].toInt() and 0xFF) shl 16)
-    }
+    private fun readUInt24(data: ByteArray, offset: Int): Int = readU24(data, offset)
 }
 
 /**

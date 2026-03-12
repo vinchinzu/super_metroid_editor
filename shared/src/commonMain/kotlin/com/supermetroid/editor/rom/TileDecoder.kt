@@ -14,7 +14,7 @@ class TileDecoder {
      */
     fun decodeTile(tileData: ByteArray, offset: Int = 0): Array<IntArray> {
         val tile = Array(8) { IntArray(8) }
-        val buffer = ByteBuffer.wrap(tileData, offset, 32)
+        val buffer = ByteBuffer.wrap(tileData, offset, RomConstants.BYTES_PER_4BPP_TILE)
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         
         // SNES 4bpp format: 4 bitplanes interleaved
@@ -48,8 +48,8 @@ class TileDecoder {
     fun decodeTileset(tilesetData: ByteArray, numTiles: Int): List<Array<IntArray>> {
         val tiles = mutableListOf<Array<IntArray>>()
         for (i in 0 until numTiles) {
-            val offset = i * 32
-            if (offset + 32 <= tilesetData.size) {
+            val offset = i * RomConstants.BYTES_PER_4BPP_TILE
+            if (offset + RomConstants.BYTES_PER_4BPP_TILE <= tilesetData.size) {
                 tiles.add(decodeTile(tilesetData, offset))
             }
         }

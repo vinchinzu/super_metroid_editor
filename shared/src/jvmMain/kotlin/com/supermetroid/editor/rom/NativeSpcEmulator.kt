@@ -23,7 +23,7 @@ class NativeSpcEmulator : AutoCloseable {
     companion object {
         const val SAMPLE_RATE = 32000
         private const val SPC_FILE_SIZE = 0x10200
-        private const val RAM_SIZE = 0x10000
+        private const val RAM_SIZE = RomConstants.SPC_RAM_SIZE
         private const val ROM_SIZE = 0x40
 
         private val IPL_ROM = byteArrayOf(

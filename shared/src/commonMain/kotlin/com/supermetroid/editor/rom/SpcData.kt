@@ -101,7 +101,7 @@ object SpcData {
     fun applyTransferBlocks(spcRam: ByteArray, blocks: List<TransferBlock>) {
         for (block in blocks) {
             val dest = block.destAddr and 0xFFFF
-            val len = minOf(block.data.size, 0x10000 - dest)
+            val len = minOf(block.data.size, RomConstants.SPC_RAM_SIZE - dest)
             System.arraycopy(block.data, 0, spcRam, dest, len)
         }
     }
@@ -111,7 +111,7 @@ object SpcData {
      * This loads the SPC engine code and common sample data.
      */
     fun buildInitialSpcRam(romParser: RomParser): ByteArray {
-        val spcRam = ByteArray(0x10000)
+        val spcRam = ByteArray(RomConstants.SPC_RAM_SIZE)
         val startPc = romParser.snesToPc(0xCF8000)
         val blocks = parseTransferBlocks(romParser.romData, startPc)
         applyTransferBlocks(spcRam, blocks)
@@ -196,7 +196,7 @@ object SpcData {
      * BRR format: 9-byte blocks (1 header + 8 data bytes = 16 PCM samples/block)
      * Header: SSSSFFLE  (S=shift, F=filter, L=loop, E=end)
      */
-    fun decodeBrr(spcRam: ByteArray, startAddr: Int, maxSamples: Int = 0x10000): ShortArray {
+    fun decodeBrr(spcRam: ByteArray, startAddr: Int, maxSamples: Int = RomConstants.SPC_RAM_SIZE): ShortArray {
         val samples = mutableListOf<Short>()
         var prev1 = 0
         var prev2 = 0
@@ -405,7 +405,7 @@ object SpcData {
         if (pc < 0 || pc + 4 >= rom.size) return false
         val blkSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
         val blkDest = (rom[pc + 2].toInt() and 0xFF) or ((rom[pc + 3].toInt() and 0xFF) shl 8)
-        return blkSize in 1..0xF000 && blkDest < 0x10000 && pc + 4 + blkSize <= rom.size
+        return blkSize in 1..0xF000 && blkDest < RomConstants.SPC_RAM_SIZE && pc + 4 + blkSize <= rom.size
     }
 
     /**

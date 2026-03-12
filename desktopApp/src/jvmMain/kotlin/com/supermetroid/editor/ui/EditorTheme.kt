@@ -9,6 +9,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 
+/**
+ * Semantic color tokens shared across the editor UI.
+ * These are colors that don't change with the theme, typically
+ * matching ROM rendering colors or domain-specific visuals.
+ */
+object EditorColors {
+    /** Dark background matching ROM tile/map rendering (ARGB 0xFF0C0C18). */
+    val romBackground = Color(0xFF0C0C18)
+
+    /** Emulator panel background. */
+    val emulatorPanelBg = Color(0xFF0B0F12)
+
+    /** Emulator panel border. */
+    val emulatorBorder = Color(0xFF2D3942)
+
+    /** Emulator secondary text. */
+    val emulatorText = Color(0xFFB6C3CC)
+
+    /** Zoom scroll factor per notch. */
+    const val ZOOM_FACTOR = 1.15f
+}
+
 /** Available editor themes. */
 enum class EditorTheme(val displayName: String) {
     DARK("Dark"),

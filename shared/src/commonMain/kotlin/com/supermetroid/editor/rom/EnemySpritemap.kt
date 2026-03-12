@@ -104,7 +104,7 @@ class EnemySpritemap(private val romParser: RomParser) {
      */
     fun findDefaultSpritemap(speciesId: Int): Spritemap? {
         val rom = romParser.getRomData()
-        val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+        val headerPc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
         if (headerPc < 0 || headerPc + 0x3A > rom.size) return null
 
         val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
@@ -114,7 +114,7 @@ class EnemySpritemap(private val romParser: RomParser) {
 
         // Read tile data size to validate spritemap results
         val rawTileSize = readU16(rom, headerPc)
-        val tileCount = (rawTileSize and 0x7FFF) / BYTES_PER_TILE
+        val tileCount = (rawTileSize and 0x7FFF) / RomConstants.BYTES_PER_4BPP_TILE
 
         // Check if there's a direction table — if so, try all directions and pick best
         val dirTableAddr = findDirectionTableAddress(rom, initPc, aiBank)
@@ -139,7 +139,7 @@ class EnemySpritemap(private val romParser: RomParser) {
      */
     fun findAnimationFrames(speciesId: Int, maxFrames: Int = 32): List<AnimationFrame> {
         val rom = romParser.getRomData()
-        val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+        val headerPc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
         if (headerPc < 0 || headerPc + 0x3A > rom.size) return emptyList()
 
         val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
@@ -262,8 +262,8 @@ class EnemySpritemap(private val romParser: RomParser) {
         entry: OamEntry, localTile: Int,
         tileData: ByteArray, palette: IntArray
     ) {
-        val tileOffset = localTile * BYTES_PER_TILE
-        if (tileOffset + BYTES_PER_TILE > tileData.size) return
+        val tileOffset = localTile * RomConstants.BYTES_PER_4BPP_TILE
+        if (tileOffset + RomConstants.BYTES_PER_4BPP_TILE > tileData.size) return
 
         for (py in 0 until 8) {
             for (px in 0 until 8) {
@@ -301,8 +301,8 @@ class EnemySpritemap(private val romParser: RomParser) {
 
         for (si in 0 until 4) {
             val subTile = subTiles[si]
-            val tileOffset = subTile * BYTES_PER_TILE
-            if (tileOffset + BYTES_PER_TILE > tileData.size) continue
+            val tileOffset = subTile * RomConstants.BYTES_PER_4BPP_TILE
+            if (tileOffset + RomConstants.BYTES_PER_4BPP_TILE > tileData.size) continue
 
             val (subDx, subDy) = subOffsets[si]
             // With flipping, the sub-tile positions are mirrored
@@ -645,10 +645,4 @@ class EnemySpritemap(private val romParser: RomParser) {
         return frames
     }
 
-    private fun readU16(data: ByteArray, offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
-
-    companion object {
-        const val BYTES_PER_TILE = 32
-    }
 }

@@ -774,8 +774,8 @@ private fun EmulatorViewport(workspaceState: EmulatorWorkspaceState) {
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0B0F12))
-                    .border(1.dp, Color(0xFF2D3942), RoundedCornerShape(8.dp))
+                    .background(EditorColors.emulatorPanelBg)
+                    .border(1.dp, EditorColors.emulatorBorder, RoundedCornerShape(8.dp))
                     .focusRequester(focusRequester)
                     .focusable()
                     .onPreviewKeyEvent { event ->
@@ -858,7 +858,7 @@ private fun EmulatorViewport(workspaceState: EmulatorWorkspaceState) {
                         Spacer(Modifier.height(6.dp))
                         Text(
                             "Click Play to start. Focus this panel for keyboard input.\nArrows + Z/X/A/S/Q/W + Shift/Tab + Enter | F1-F4 save | Shift+F1-F4 reload | ` reload last",
-                            color = Color(0xFFB6C3CC),
+                            color = EditorColors.emulatorText,
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
                         )
@@ -895,25 +895,25 @@ private fun ViewportStatusOverlay(
         )
         Text(
             "controller ${workspaceState.controllerSummary()}  source ${snapshot?.lastActionSource ?: "manual"}  applied ${workspaceState.activeInputSummary()}",
-            color = Color(0xFFB6C3CC),
+            color = EditorColors.emulatorText,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
         )
         Text(
             "checkpoints F1-F4 save  Shift+F1-F4 reload  ` reload-last",
-            color = Color(0xFFB6C3CC),
+            color = EditorColors.emulatorText,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
         )
         Text(
             "route ${snapshot?.expectedTraceLabel ?: "none"}  ${(((snapshot?.pathCompletion ?: 0f) * 100f).toInt())}%  err=${snapshot?.pathErrorPx?.toInt() ?: "-"}px  rec=${snapshot?.recordedFrames ?: 0}",
-            color = Color(0xFFB6C3CC),
+            color = EditorColors.emulatorText,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
         )
         Text(
             "room ${snapshot?.roomName ?: "?"}  x=${snapshot?.samusX ?: "?"} y=${snapshot?.samusY ?: "?"}  trace=${snapshot?.trace?.size ?: 0}",
-            color = Color(0xFFB6C3CC),
+            color = EditorColors.emulatorText,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
         )

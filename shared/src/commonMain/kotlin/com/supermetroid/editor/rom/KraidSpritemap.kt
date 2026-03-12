@@ -27,8 +27,8 @@ class KraidSpritemap(private val romParser: RomParser) {
         const val BODY_PALETTE_ROW = 7
         const val TILE_INDEX_BASE = 0x100
         const val TILE_COUNT = 128
-        const val EMPTY_TILE = 0x338
-        const val BYTES_PER_TILE = 32
+        const val EMPTY_TILE = RomConstants.EMPTY_TILE
+        const val BYTES_PER_TILE = RomConstants.BYTES_PER_4BPP_TILE
 
         val BODY_TILEMAPS = listOf(
             BodyTilemapDef("Body (initial)", 0xA797C8, 32, 12),

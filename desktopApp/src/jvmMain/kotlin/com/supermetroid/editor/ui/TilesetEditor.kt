@@ -412,7 +412,7 @@ fun TilesetCanvas(
 
             // ── Main grid area ──
             Box(
-                modifier = Modifier.fillMaxSize().background(Color(0xFF0C0C18))
+                modifier = Modifier.fillMaxSize().background(EditorColors.romBackground)
             ) {
                 when {
                     tilesetEditorState.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -442,7 +442,7 @@ fun TilesetCanvas(
                                     val sd = event.changes.first().scrollDelta
                                     val zoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
                                     if (zoom) {
-                                        zoomState.value = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.5f, 8f)
+                                        zoomState.value = (zoomLevel * if (sd.y < 0) EditorColors.ZOOM_FACTOR else 1f / EditorColors.ZOOM_FACTOR).coerceIn(0.5f, 8f)
                                     } else if (ne?.isShiftDown == true) {
                                         val delta = if (sd.x != 0f) sd.x else sd.y
                                         coroutineScope.launch {

@@ -888,7 +888,7 @@ fun MapCanvas(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF0C0C18)),
+                        .background(EditorColors.romBackground),
                     contentAlignment = Alignment.Center
                 ) {
                     when {
@@ -979,7 +979,7 @@ fun MapCanvas(
                                             val mousePos = event.changes.first().position
                                             val contentXBefore = (hScrollState.value + mousePos.x) / zoomLevel
                                             val contentYBefore = (vScrollState.value + mousePos.y) / zoomLevel
-                                            val newZoom = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(0.25f, 4f)
+                                            val newZoom = (zoomLevel * if (sd.y < 0) EditorColors.ZOOM_FACTOR else 1f / EditorColors.ZOOM_FACTOR).coerceIn(0.25f, 4f)
                                             zoomState.value = newZoom
                                             coroutineScope.launch {
                                                 val newScrollX = (contentXBefore * newZoom - mousePos.x).toInt().coerceAtLeast(0)

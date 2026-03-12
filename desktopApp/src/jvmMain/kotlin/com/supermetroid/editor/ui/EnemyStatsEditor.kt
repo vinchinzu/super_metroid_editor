@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.SmPatch
+import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
 
 // ─── Common enemy definitions ────────────────────────────────────
@@ -287,7 +288,7 @@ private fun EnemyStatInput(
 private fun readEnemyStat(romParser: RomParser?, speciesId: Int, offset: Int): Int? {
     if (romParser == null) return null
     return try {
-        val snesAddr = 0xA00000 or speciesId
+        val snesAddr = RomConstants.BANK_ENEMY_AI or speciesId
         val pc = romParser.snesToPc(snesAddr) + offset
         val rom = romParser.getRomData()
         if (pc + 1 < rom.size) {

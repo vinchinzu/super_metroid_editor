@@ -15,7 +15,8 @@ package com.supermetroid.editor.rom
 class EnemySpriteGraphics(private val romParser: RomParser) {
 
     companion object {
-        const val BYTES_PER_TILE = 32
+        /** @see RomConstants.BYTES_PER_4BPP_TILE */
+        const val BYTES_PER_TILE = RomConstants.BYTES_PER_4BPP_TILE
 
         /**
          * One LZ5-compressed block of sprite tiles in the ROM.
@@ -250,21 +251,19 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
          */
         fun readEnemyPalette(romParser: RomParser, speciesId: Int): IntArray? {
             val rom = romParser.getRomData()
-            val headerPc = romParser.snesToPc(0xA00000 or speciesId)
+            val headerPc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
             if (headerPc < 0 || headerPc + 0x0D > rom.size) return null
-            val palPtr = (rom[headerPc + 2].toInt() and 0xFF) or
-                ((rom[headerPc + 3].toInt() and 0xFF) shl 8)
-            val aiBank = rom[headerPc + 0x0C].toInt() and 0xFF
+            val palPtr = readU16(rom, headerPc + 2)
+            val aiBank = readU8(rom, headerPc + 0x0C)
 
             val palSnes = (aiBank shl 16) or (palPtr and 0xFFFF)
             val palPc = romParser.snesToPc(palSnes)
             if (palPc < 0 || palPc + 32 > rom.size) return null
 
-            val pal = IntArray(16)
+            val pal = IntArray(RomConstants.COLORS_PER_PALETTE)
             pal[0] = 0x00000000
-            for (i in 1 until 16) {
-                val bgr = (rom[palPc + i * 2].toInt() and 0xFF) or
-                    ((rom[palPc + i * 2 + 1].toInt() and 0xFF) shl 8)
+            for (i in 1 until RomConstants.COLORS_PER_PALETTE) {
+                val bgr = readU16(rom, palPc + i * 2)
                 pal[i] = snesColorToArgb(bgr)
             }
             return pal
@@ -276,12 +275,12 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
          */
         fun readSpeciesStats(romParser: RomParser, speciesId: Int): Triple<Int, Int, Int>? {
             val rom = romParser.getRomData()
-            val pc = romParser.snesToPc(0xA00000 or speciesId)
+            val pc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
             if (pc < 0 || pc + 8 > rom.size) return null
-            val rawTileSize = (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
+            val rawTileSize = readU16(rom, pc)
             val tileSize = rawTileSize and 0x7FFF // bit 15 is a VRAM offset flag, not size
-            val hp = (rom[pc + 4].toInt() and 0xFF) or ((rom[pc + 5].toInt() and 0xFF) shl 8)
-            val damage = (rom[pc + 6].toInt() and 0xFF) or ((rom[pc + 7].toInt() and 0xFF) shl 8)
+            val hp = readU16(rom, pc + 4)
+            val damage = readU16(rom, pc + 6)
             return Triple(tileSize, hp, damage)
         }
 
@@ -295,11 +294,10 @@ class EnemySpriteGraphics(private val romParser: RomParser) {
          */
         fun readGraphicsBlock(romParser: RomParser, speciesId: Int): SpriteBlock? {
             val rom = romParser.getRomData()
-            val pc = romParser.snesToPc(0xA00000 or speciesId)
+            val pc = romParser.snesToPc(RomConstants.BANK_ENEMY_AI or speciesId)
             if (pc < 0 || pc + 0x39 > rom.size) return null
-            val gfxOffset = (rom[pc + 0x36].toInt() and 0xFF) or
-                ((rom[pc + 0x37].toInt() and 0xFF) shl 8)
-            val gfxBank = rom[pc + 0x38].toInt() and 0xFF
+            val gfxOffset = readU16(rom, pc + 0x36)
+            val gfxBank = readU8(rom, pc + 0x38)
             if (gfxBank == 0 && gfxOffset == 0) return null
             val snesAddr = (gfxBank shl 16) or gfxOffset
             val pcAddr = romParser.snesToPc(snesAddr)

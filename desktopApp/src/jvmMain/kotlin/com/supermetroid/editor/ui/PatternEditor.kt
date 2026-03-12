@@ -199,7 +199,7 @@ private fun PatternListItem(
         ) {
             Box(
                 modifier = Modifier.size(48.dp)
-                    .background(Color(0xFF0C0C18), RoundedCornerShape(3.dp)),
+                    .background(EditorColors.romBackground, RoundedCornerShape(3.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (thumb != null) {
@@ -458,7 +458,7 @@ fun PatternEditorCanvas(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF0C0C18))
+                .background(EditorColors.romBackground)
                 .focusRequester(focusReq)
                 .focusable()
                 .onKeyEvent { event ->
@@ -489,7 +489,7 @@ fun PatternEditorCanvas(
                     val isZoom = ne?.let { it.isControlDown || it.isMetaDown } ?: false
                     val sd = event.changes.firstOrNull()?.scrollDelta ?: return@onPointerEvent
                     if (isZoom) {
-                        zoomLevel = (zoomLevel * if (sd.y < 0) 1.15f else 1f / 1.15f).coerceIn(1f, 8f)
+                        zoomLevel = (zoomLevel * if (sd.y < 0) EditorColors.ZOOM_FACTOR else 1f / EditorColors.ZOOM_FACTOR).coerceIn(1f, 8f)
                     }
                 }
         ) {
@@ -1136,7 +1136,7 @@ fun PatternThumbnailList(
                     ) {
                         Box(
                             modifier = Modifier.size(48.dp)
-                                .background(Color(0xFF0C0C18), RoundedCornerShape(3.dp)),
+                                .background(EditorColors.romBackground, RoundedCornerShape(3.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             if (thumb != null) {

@@ -17,7 +17,7 @@ class PhantoonSpritemap(private val romParser: RomParser) {
 
     companion object {
         const val PHANTOON_ROOM_SNES = 0x8FCD13
-        const val EMPTY_TILE = 0x338
+        const val EMPTY_TILE = RomConstants.EMPTY_TILE
         const val PALETTE_ROW = 7
         /** Phantoon in-game palette: $A7:CA21, 16 BGR555 words. */
         const val PALETTE_SNES = 0xA7CA21
