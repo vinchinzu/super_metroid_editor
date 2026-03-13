@@ -2506,12 +2506,10 @@ class EditorState {
                             ((romData[headerPc + 0x3D].toInt() and 0xFF) shl 8)
                     if (ptr == 0 || ptr == 0xFFFF) continue
                     val resPc = romParser.snesToPc(0xB40000 or ptr)
-                    if (resPc + 16 > romData.size) continue
-                    for (i in 0..7) {
+                    if (resPc + 22 > romData.size) continue
+                    for (i in 0..21) {
                         val value = data["${e.key}_vuln$i"] ?: continue
-                        val off = resPc + i * 2
-                        romData[off] = (value and 0xFF).toByte()
-                        romData[off + 1] = ((value shr 8) and 0xFF).toByte()
+                        romData[resPc + i] = (value and 0xFF).toByte()
                         modCount++
                     }
                 }
@@ -2522,9 +2520,8 @@ class EditorState {
                 for (field in ALL_PHYSICS_FIELDS) {
                     val value = data[field.key] ?: continue
                     val pc = field.pcOffset
-                    if (pc + 1 < romData.size) {
+                    if (pc < romData.size) {
                         romData[pc] = (value and 0xFF).toByte()
-                        romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
                     }
                     modCount++
                 }

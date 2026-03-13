@@ -40,14 +40,15 @@ import com.supermetroid.editor.data.SmPatch
 import com.supermetroid.editor.rom.RomParser
 
 // ─── Samus Physics data definitions ─────────────────────────────────
-// All values are in bank $91 (SNES addresses). Values are 16-bit LE.
-// PC offset = ((0x91 & 0x7F) * 0x8000) + (snesOffset - 0x8000) = 0x088000 + offset
+// All values are single bytes at verified PC offsets.
+// Addresses confirmed from hex_edits.txt (begrimed.com) and direct ROM inspection.
+// DO NOT treat as 16-bit: these are 1-byte values in jump/gravity/speed tables.
 
 data class PhysicsField(
     val key: String,
     val label: String,
-    val pcOffset: Int,      // PC file offset
-    val defaultValue: Int,  // Vanilla ROM value
+    val pcOffset: Int,      // PC file offset (no SMC header)
+    val defaultValue: Int,  // Vanilla ROM value (single byte)
     val description: String = "",
 )
 
@@ -58,52 +59,35 @@ data class PhysicsCategory(
 )
 
 // ─── Physics value addresses ────────────────────────────────────────
-// Addresses sourced from SM disassembly (bank $91) and SMILE SamusForm.frm
-// All are 16-bit LE values at the given PC offsets.
+// All addresses verified against vanilla ROM bytes. Each is a 1-byte value.
+// Source: hex_edits.txt (begrimed.com community reference)
 
 val PHYSICS_CATEGORIES = listOf(
     PhysicsCategory("Jump", Color(0xFF2196F3), listOf(
-        // Normal jump speed (initial upward velocity)
-        PhysicsField("jump_speed", "Normal Jump Speed", 0x081EA0, 0x0500, "Initial Y velocity for a standing jump"),
-        // High jump boots speed
-        PhysicsField("hijump_speed", "Hi-Jump Speed", 0x081EA4, 0x0600, "Initial Y velocity with Hi-Jump Boots"),
-        // Spin jump speed
-        PhysicsField("spinjump_speed", "Spin Jump Speed", 0x081EA8, 0x04E0, "Initial Y velocity for spin jump"),
-        // Spin jump hi-jump
-        PhysicsField("spinjump_hijump", "Spin Jump + Hi-Jump", 0x081EAC, 0x05E0, "Spin jump with Hi-Jump Boots"),
-        // Underwater jump
-        PhysicsField("water_jump", "Underwater Jump Speed", 0x081EB0, 0x0280, "Jump speed underwater (no Gravity)"),
-        // Wall jump speed
-        PhysicsField("walljump_speed", "Walljump Speed", 0x081006, 0x00FF, "Horizontal push-off from wall"),
+        // Jump heights: scale is additive — higher byte = higher jump
+        PhysicsField("jump_height",       "Jump Height",              0x081EB9, 0x04, "Standing/springball height (03=lower, 04=normal, 05=higher)"),
+        PhysicsField("hijump_height",     "Jump Height (Hi-Jump)",    0x081EC5, 0x06, "Height with Hi-Jump Boots (05=lower, 06=normal, 07=higher)"),
+        PhysicsField("walljump",          "Walljump Height",          0x081ED1, 0x04, "Walljump height (03=lower, 04=normal, 05=higher)"),
+        PhysicsField("walljump_hijump",   "Walljump (Hi-Jump)",       0x081EDD, 0x05, "Walljump height with Hi-Jump Boots (04=lower, 05=normal)"),
+        PhysicsField("jump_water",        "Jump Height (Water)",      0x081EBB, 0x01, "Jump height underwater without Gravity Suit (00=lower, 01=normal)"),
+        PhysicsField("hijump_water",      "Jump (Hi-Jump, Water)",    0x081EC7, 0x02, "Hi-Jump height underwater (01=lower, 02=normal)"),
+        PhysicsField("walljump_water",    "Walljump (Water)",         0x081ED3, 0x00, "Walljump height underwater (00=normal, 01=higher)"),
+        PhysicsField("jump_lava",         "Jump Height (Lava)",       0x081EBD, 0x02, "Jump height in lava/acid (01=lower, 02=normal)"),
+        PhysicsField("hijump_lava",       "Jump (Hi-Jump, Lava)",     0x081EC9, 0x03, "Hi-Jump height in lava (02=lower, 03=normal)"),
+        PhysicsField("walljump_lava",     "Walljump (Lava)",          0x081ED5, 0x02, "Walljump height in lava (01=lower, 02=normal)"),
     )),
     PhysicsCategory("Gravity & Falling", Color(0xFF9C27B0), listOf(
-        PhysicsField("gravity", "Gravity", 0x081EA2, 0x001C, "Downward acceleration per frame"),
-        PhysicsField("max_fall", "Max Fall Speed", 0x081EB4, 0x0500, "Terminal velocity when falling"),
-        PhysicsField("water_gravity", "Underwater Gravity", 0x081EB8, 0x000E, "Gravity underwater (no Gravity Suit)"),
-        PhysicsField("water_max_fall", "Underwater Max Fall", 0x081EBC, 0x0280, "Max fall speed underwater"),
-        PhysicsField("lava_gravity", "Lava/Acid Gravity", 0x081EC0, 0x0010, "Gravity in lava or acid"),
+        PhysicsField("gravity",     "Gravity",          0x081EA2, 0x1C, "Downward acceleration per frame (0C=lower, 1C=normal, 2C=higher)"),
+        PhysicsField("max_fall",    "Max Fall Speed",   0x081110, 0x05, "Terminal fall velocity (04=slower, 05=normal, 06=faster)"),
     )),
     PhysicsCategory("Running", Color(0xFF4CAF50), listOf(
-        PhysicsField("run_accel", "Run Acceleration", 0x081B34, 0x000E, "Ground acceleration per frame"),
-        PhysicsField("run_max", "Run Max Speed", 0x081B30, 0x0180, "Maximum running speed"),
-        PhysicsField("run_decel", "Run Deceleration", 0x081B38, 0x0020, "Friction when releasing run"),
-        PhysicsField("moonwalk_max", "Moonwalk Max Speed", 0x081B40, 0x0100, "Maximum backward moonwalk speed"),
+        PhysicsField("run_accel",   "Run Acceleration", 0x081F64, 0x30, "Ground acceleration per frame"),
+        PhysicsField("run_max",     "Run Max Speed",    0x081F65, 0x02, "Max run speed (>05 crashes intro, >07 glitches speed booster)"),
     )),
     PhysicsCategory("Air Control", Color(0xFF00BCD4), listOf(
-        PhysicsField("air_accel", "Air Horizontal Accel", 0x081B2C, 0x000A, "Horizontal acceleration in midair"),
-        PhysicsField("air_max", "Air Max Horizontal", 0x081B28, 0x0100, "Maximum horizontal speed in air"),
-        PhysicsField("air_friction", "Air Physics Mode", 0x081B2F, 0x0002, "02=normal, 04=realistic (no air control)"),
-    )),
-    PhysicsCategory("Speed Booster", Color(0xFFFF9800), listOf(
-        PhysicsField("speedboost_accel", "Speed Booster Accel", 0x081B44, 0x0004, "Acceleration during speed boost"),
-        PhysicsField("speedboost_max", "Speed Booster Max", 0x081B48, 0x0400, "Maximum speed boost velocity"),
-        PhysicsField("shinespark_speed", "Shinespark Speed", 0x081B4C, 0x0800, "Shinespark dash velocity"),
-    )),
-    PhysicsCategory("Damage & Knockback", Color(0xFFF44336), listOf(
-        PhysicsField("kb_speed_x", "Knockback X Speed", 0x081B50, 0x0300, "Horizontal knockback velocity"),
-        PhysicsField("kb_speed_y", "Knockback Y Speed", 0x081B54, 0x0200, "Vertical knockback velocity"),
-        PhysicsField("kb_duration", "Knockback Duration", 0x081B58, 0x000C, "Frames of knockback stun"),
-        PhysicsField("iframes", "I-Frame Duration", 0x081B5C, 0x003C, "Invincibility frames after hit"),
+        PhysicsField("air_spin",    "Air Speed (Spin Jump)",    0x081F7D, 0x01, "Horizontal speed mid-air during spin jump (01=normal)"),
+        PhysicsField("air_normal",  "Air Speed (Normal Jump)",  0x081F71, 0x01, "Horizontal speed mid-air during normal jump/fall (01=normal)"),
+        PhysicsField("air_physics", "Air Physics Mode",         0x081B2F, 0x02, "02=normal mid-air control, 04=no mid-air direction change"),
     )),
 )
 
@@ -111,14 +95,12 @@ val ALL_PHYSICS_FIELDS: List<PhysicsField> = PHYSICS_CATEGORIES.flatMap { it.fie
 
 // ─── ROM access ────────────────────────────────────────────────────
 
-private fun readPhysicsValue(romParser: RomParser?, field: PhysicsField): Int? {
+internal fun readPhysicsValue(romParser: RomParser?, field: PhysicsField): Int? {
     if (romParser == null) return null
     return try {
         val rom = romParser.getRomData()
         val pc = field.pcOffset
-        if (pc + 1 < rom.size) {
-            (rom[pc].toInt() and 0xFF) or ((rom[pc + 1].toInt() and 0xFF) shl 8)
-        } else null
+        if (pc < rom.size) (rom[pc].toInt() and 0xFF) else null
     } catch (_: Exception) { null }
 }
 
