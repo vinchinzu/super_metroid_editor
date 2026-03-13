@@ -276,7 +276,18 @@ fun RoomPropertiesPanel(
         val plmCount = remember(plmSetPtr) { romParser.parsePlmSet(plmSetPtr).size }
         PropertyRow("PLM Set", "\$8F:${plmSetPtr.toString(16).uppercase().padStart(4, '0')} ($plmCount PLMs)")
         PropertyRow("Enemy Set", "\$A1:${enemySetPtr.toString(16).uppercase().padStart(4, '0')} ($enemyCount enemies)")
-        PropertyRow("Enemy GFX", "\$B4:${enemyGfxPtr.toString(16).uppercase().padStart(4, '0')}")
+        val gfxEntries = remember(enemyGfxPtr) { romParser.parseEnemyGfxSet(enemyGfxPtr) }
+        val gfxCount = gfxEntries.size
+        PropertyRow("Enemy GFX", "\$B4:${enemyGfxPtr.toString(16).uppercase().padStart(4, '0')} ($gfxCount slots)")
+        if (gfxCount > 4) {
+            Text(
+                "\u26A0 GFX limit exceeded ($gfxCount/4) — SNES hardware supports max 4 enemy tilesets. " +
+                "Excess species will have garbled sprites.",
+                fontSize = 9.sp,
+                color = Color(0xFFFF5722),
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+            )
+        }
         PropertyRow("Main ASM", if (mainAsmPtr == 0) "None" else "\$8F:${mainAsmPtr.toString(16).uppercase().padStart(4, '0')}")
         PropertyRow("Setup ASM", if (setupAsmPtr == 0) "None" else "\$8F:${setupAsmPtr.toString(16).uppercase().padStart(4, '0')}")
 

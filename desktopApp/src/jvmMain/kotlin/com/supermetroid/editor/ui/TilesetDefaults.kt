@@ -347,6 +347,36 @@ val ENEMY_STATS_PATCH = SmPatch(
     configType = "enemy_stats"
 )
 
+/** Config patch: Enemy Drop Rate overrides. Stores per-enemy drop probabilities in configData. */
+val ENEMY_DROP_RATE_PATCH = SmPatch(
+    id = "config_enemy_drops",
+    name = "Enemy Drop Rates",
+    description = "Override item drop probabilities (small/large energy, missile, super, PB) for each enemy.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "enemy_drops"
+)
+
+/** Config patch: Enemy Vulnerability overrides. Stores per-weapon damage multipliers in configData. */
+val ENEMY_VULNERABILITY_PATCH = SmPatch(
+    id = "config_enemy_vuln",
+    name = "Enemy Vulnerabilities",
+    description = "Override per-weapon damage multipliers for each enemy. 0=immune, 2=normal, 4=double.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "enemy_vuln"
+)
+
+/** Config patch: Samus Physics overrides. Stores movement/gravity/speed values in configData. */
+val SAMUS_PHYSICS_PATCH = SmPatch(
+    id = "config_samus_physics",
+    name = "Samus Physics",
+    description = "Override Samus movement physics — jump heights, gravity, run speed, air control, and more.",
+    enabled = false,
+    writes = mutableListOf(),
+    configType = "samus_physics"
+)
+
 /** Legacy/superseded patch IDs — removed on seed to avoid duplicates from old configs. */
 internal val LEGACY_PATCH_IDS = setOf(
     "respin", "fast_doors", "no_fanfare", "blue_speed_air", "no_walljump_kick", "instant_stop",
