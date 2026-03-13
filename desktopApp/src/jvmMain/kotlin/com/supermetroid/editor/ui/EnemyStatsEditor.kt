@@ -53,17 +53,15 @@ data class EnemyDef(
 )
 
 // Defaults are fallbacks; actual values are always read from ROM at runtime.
+// Species IDs must be on the 0x40-byte grid (address ≡ 0x3F or 0x13 mod 0x40).
+// "Zoomer grey" is not a separate species — grey Zoomers are palette variants of 0xDCFF.
 val ENEMY_DEFS = listOf(
     // ── Crawlers & Hoppers ──
     EnemyDef("zoomer", "Zoomer", 0xDCFF, 15, 5, "Crawler"),
-    EnemyDef("zoomer_grey", "Zoomer (grey)", 0xD75F, 15, 5, "Crawler"),
-    EnemyDef("geemer", "Geemer", 0xD91F, 50, 10, "Crawler"),
-    EnemyDef("geemer_horiz", "Geemer (horizontal)", 0xDC3F, 50, 10, "Crawler"),
+    EnemyDef("geemer_horiz", "Geemer (horizontal)", 0xDC3F, 15, 5, "Crawler"),
     EnemyDef("sidehopper", "Sidehopper", 0xD93F, 60, 20, "Hopper"),
-    EnemyDef("sidehopper_large", "Sidehopper (large)", 0xD97F, 200, 30, "Hopper"),
-    EnemyDef("sidehopper_big", "Sidehopper (big)", 0xD99F, 400, 60, "Hopper"),
-    EnemyDef("dessgeega", "Dessgeega", 0xD9BF, 400, 40, "Hopper"),
-    EnemyDef("dessgeega_big", "Dessgeega (big)", 0xD9DF, 800, 80, "Hopper"),
+    EnemyDef("sidehopper_large", "Sidehopper (large)", 0xD97F, 120, 80, "Hopper"),
+    EnemyDef("dessgeega", "Dessgeega", 0xD9BF, 320, 80, "Hopper"),
 
     // ── Flyers ──
     EnemyDef("skree", "Skree", 0xD7FF, 40, 16, "Flyer"),

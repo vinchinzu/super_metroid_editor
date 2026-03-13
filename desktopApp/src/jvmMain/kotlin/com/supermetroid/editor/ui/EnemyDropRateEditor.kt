@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -120,7 +122,9 @@ fun EnemyDropRateEditor(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .horizontalScroll(rememberScrollState())
             .verticalScroll(rememberScrollState())
+            .widthIn(min = 540.dp)
             .padding(20.dp)
     ) {
         Text("Enemy Drop Rate Editor", fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -187,12 +191,12 @@ private fun DropCategorySection(
 
             // Header row
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                modifier = Modifier.padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Enemy", fontSize = 9.sp, fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f))
+                    modifier = Modifier.width(220.dp))
                 for (slot in DROP_SLOTS) {
                     Text(slot.shortLabel, fontSize = 8.sp, fontWeight = FontWeight.Medium,
                         color = slot.color,
@@ -223,14 +227,13 @@ private fun DropRow(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
             .padding(vertical = 2.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             enemy.name,
             fontSize = 11.sp,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.width(220.dp),
             color = MaterialTheme.colorScheme.onSurface
         )
         for (slot in DROP_SLOTS) {
