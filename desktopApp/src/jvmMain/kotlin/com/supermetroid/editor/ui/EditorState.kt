@@ -1287,7 +1287,7 @@ class EditorState {
         val ordered = mutableListOf<SmPatch>()
 
         // 1. GUI config patches (featured at top)
-        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, BOSS_DEFEATED_PATCH, CONTROLLER_CONFIG_PATCH, CERES_ESCAPE_PATCH)) {
+        for (guiPatch in listOf(BEAM_DAMAGE_PATCH, BOSS_STATS_PATCH, PHANTOON_PATCH, ENEMY_STATS_PATCH, ENEMY_DROP_RATE_PATCH, ENEMY_VULNERABILITY_PATCH, SAMUS_PHYSICS_PATCH, BOSS_DEFEATED_PATCH, CONTROLLER_CONFIG_PATCH, CERES_ESCAPE_PATCH)) {
             if (guiPatch.id !in existingIds) {
                 ordered.add(SmPatch(
                     id = guiPatch.id,
@@ -2474,6 +2474,61 @@ class EditorState {
                     }
                 }
                 println("[EXPORT]   Enemy stats: $modCount values modified")
+            } else if (patch.configType == "enemy_drops") {
+                val data = patch.configData ?: continue
+                var modCount = 0
+                for (e in ENEMY_DEFS) {
+                    // Resolve drop table pointer: species header +$3A → bank $B4
+                    val snesAddr = RomConstants.BANK_ENEMY_AI or e.speciesId
+                    val headerPc = romParser.snesToPc(snesAddr)
+                    if (headerPc + 0x3C > romData.size) continue
+                    val ptr = (romData[headerPc + 0x3A].toInt() and 0xFF) or
+                            ((romData[headerPc + 0x3B].toInt() and 0xFF) shl 8)
+                    if (ptr == 0 || ptr == 0xFFFF) continue
+                    val dropPc = romParser.snesToPc(0xB40000 or ptr)
+                    if (dropPc + 6 > romData.size) continue
+                    for (i in 0..5) {
+                        val value = data["${e.key}_drop$i"] ?: continue
+                        romData[dropPc + i] = (value and 0xFF).toByte()
+                        modCount++
+                    }
+                }
+                println("[EXPORT]   Enemy drop rates: $modCount values modified")
+            } else if (patch.configType == "enemy_vuln") {
+                val data = patch.configData ?: continue
+                var modCount = 0
+                for (e in ENEMY_DEFS) {
+                    // Resolve resistance table pointer: species header +$3C → bank $B4
+                    val snesAddr = RomConstants.BANK_ENEMY_AI or e.speciesId
+                    val headerPc = romParser.snesToPc(snesAddr)
+                    if (headerPc + 0x3E > romData.size) continue
+                    val ptr = (romData[headerPc + 0x3C].toInt() and 0xFF) or
+                            ((romData[headerPc + 0x3D].toInt() and 0xFF) shl 8)
+                    if (ptr == 0 || ptr == 0xFFFF) continue
+                    val resPc = romParser.snesToPc(0xB40000 or ptr)
+                    if (resPc + 16 > romData.size) continue
+                    for (i in 0..7) {
+                        val value = data["${e.key}_vuln$i"] ?: continue
+                        val off = resPc + i * 2
+                        romData[off] = (value and 0xFF).toByte()
+                        romData[off + 1] = ((value shr 8) and 0xFF).toByte()
+                        modCount++
+                    }
+                }
+                println("[EXPORT]   Enemy vulnerabilities: $modCount values modified")
+            } else if (patch.configType == "samus_physics") {
+                val data = patch.configData ?: continue
+                var modCount = 0
+                for (field in ALL_PHYSICS_FIELDS) {
+                    val value = data[field.key] ?: continue
+                    val pc = field.pcOffset
+                    if (pc + 1 < romData.size) {
+                        romData[pc] = (value and 0xFF).toByte()
+                        romData[pc + 1] = ((value shr 8) and 0xFF).toByte()
+                    }
+                    modCount++
+                }
+                println("[EXPORT]   Samus physics: $modCount values modified")
             } else if (patch.configType == "controller_config") {
                 val data = patch.configData ?: continue
                 var slotCount = 0

@@ -1515,6 +1515,16 @@ class RomParser(internal val romData: ByteArray) {
             0xF753 to "Space Pirate Mk.III (Maridia)",
             0xF793 to "Space Pirate Mk.III (Tourian)",
 
+            // ── Torizo sub-parts / Wrecked Ship / Misc ──
+            0xEDBF to "Torizo Corpse (helper)",
+            0xEDFF to "Torizo Corpse (ceiling)",
+            0xEE3F to "Wrecked Ship Robot",
+            0xEE7F to "Wrecked Ship Robot (piece)",
+            0xEFFF to "Golden Torizo (piece)",
+            0xF0FF to "Draygon (hand)",
+            0xF2D3 to "Tourian Escape Pirate",
+            0xF313 to "Tourian Escape Pirate (runner)",
+
             // Ceres-only species (shared IDs like E0BF/E0FF/E17F/E27F
             // are already mapped above as their main-game names)
             0xE1FF to "Ceres Smoke/Steam",
