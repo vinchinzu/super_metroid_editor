@@ -83,6 +83,7 @@ import com.supermetroid.editor.ui.PatternListPanel
 import com.supermetroid.editor.ui.PatternThumbnailList
 import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.RoomListView
+import com.supermetroid.editor.ui.SamusSpriteViewer
 import com.supermetroid.editor.ui.RoomPropertiesPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
 import com.supermetroid.editor.ui.PaletteEditor
@@ -328,7 +329,7 @@ fun main() = application {
                 var leftColumnWidthDp by remember { mutableStateOf(330f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
                 var leftTab by remember { mutableStateOf(0) }
-                var selectedSpriteIdx by remember { mutableStateOf(0) }
+                var selectedSpriteIdx by remember { mutableStateOf(-1) } // -1 = Samus
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
@@ -571,6 +572,25 @@ fun main() = application {
                                             .verticalScroll(rememberScrollState()),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        // Samus at the top
+                                        Text("Player", fontSize = fs.body,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface)
+                                        Spacer(Modifier.height(2.dp))
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .clickable { selectedSpriteIdx = -1 },
+                                            color = if (selectedSpriteIdx == -1) MaterialTheme.colorScheme.primaryContainer
+                                                    else MaterialTheme.colorScheme.surface,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text("Samus", fontSize = fs.body,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                color = if (selectedSpriteIdx == -1) MaterialTheme.colorScheme.onPrimaryContainer
+                                                        else MaterialTheme.colorScheme.onSurface)
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+
                                         for ((category, items) in grouped) {
                                             Text(category, fontSize = fs.body,
                                                 fontWeight = FontWeight.Bold,
@@ -645,6 +665,13 @@ fun main() = application {
                                         modifier = Modifier.fillMaxSize()
                                     )
                                     4 -> {
+                                        if (selectedSpriteIdx == -1) {
+                                            SamusSpriteViewer(
+                                                romParser = romParser,
+                                                editorState = editorState,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
                                         val entries = com.supermetroid.editor.rom.EnemySpriteGraphics.EDITOR_ENEMIES
                                         val selected = entries.getOrNull(selectedSpriteIdx) ?: entries.first()
                                         if (selected.speciesId == 0xE4BF) {
@@ -674,6 +701,7 @@ fun main() = application {
                                                 modifier = Modifier.fillMaxSize()
                                             )
                                         }
+                                        } // else (enemy sprites)
                                     }
                                 }
                                 }
