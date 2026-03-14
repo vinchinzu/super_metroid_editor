@@ -3077,6 +3077,18 @@ class EditorState {
                         println("WARN: Room 0x$roomKey GFX set already has ${newEntries.size} entries (SNES max 4) — skipping species 0x${specId.toString(16)}")
                         continue
                     }
+                    // Validate species: read HP from DNA at offset +4.
+                    // Species with HP=0 are likely invalid (mid-structure reads from
+                    // wrong species IDs) and would cause ProcessEnemyTilesets to load
+                    // garbage tile data into VRAM, corrupting the room's graphics.
+                    val specPc = romParser.snesToPc(0xA00000 or specId)
+                    val specHp = if (specPc + 6 < romData.size) {
+                        (romData[specPc + 4].toInt() and 0xFF) or ((romData[specPc + 5].toInt() and 0xFF) shl 8)
+                    } else 0
+                    if (specHp == 0) {
+                        println("WARN: Room 0x$roomKey: skipping species 0x${specId.toString(16)} from GFX set — HP=0 (invalid species ID)")
+                        continue
+                    }
                     newEntries.add(RomParser.EnemyGfxEntry(specId, nextPal))
                     println("Room 0x$roomKey: added species 0x${specId.toString(16)} to GFX set (palette=$nextPal)")
                     nextPal++

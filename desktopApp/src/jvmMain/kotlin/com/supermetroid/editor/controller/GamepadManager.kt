@@ -48,6 +48,8 @@ class GamepadManager {
 
     private var manager: ControllerManager? = null
     private var initialized = false
+    private var disabled = false
+    private var consecutiveErrors = 0
 
     /** Name of the connected controller, or null. */
     var controllerName: String? = null
@@ -64,14 +66,17 @@ class GamepadManager {
     private val stickDeadzone = 0.4f
 
     fun init() {
-        if (initialized) return
+        if (initialized || disabled) return
         try {
             val mgr = ControllerManager()
             mgr.initSDLGamepad()
             manager = mgr
             initialized = true
+            consecutiveErrors = 0
         } catch (e: Throwable) {
             System.err.println("[GamepadManager] Failed to init SDL gamepad: ${e.message}")
+            statusEvent = "Gamepad init failed: ${e.message}"
+            disabled = true
         }
     }
 
@@ -81,8 +86,26 @@ class GamepadManager {
      * Must be called from the main/UI thread or a consistent polling thread.
      */
     fun poll(): List<Int>? {
+        if (disabled) return null
         val mgr = manager ?: return null
+        try {
+            return pollInternal(mgr)
+        } catch (e: Throwable) {
+            consecutiveErrors++
+            System.err.println("[GamepadManager] poll error #$consecutiveErrors: ${e.message}")
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                System.err.println("[GamepadManager] Too many errors, disabling gamepad support")
+                statusEvent = "Gamepad disabled due to repeated errors"
+                disabled = true
+                safeClose()
+            }
+            return null
+        }
+    }
+
+    private fun pollInternal(mgr: ControllerManager): List<Int>? {
         mgr.update()
+        consecutiveErrors = 0  // reset on successful update
 
         val state: ControllerState = mgr.getState(0)
         if (!state.isConnected) {
@@ -147,10 +170,22 @@ class GamepadManager {
     }
 
     fun close() {
-        manager?.quitSDLGamepad()
+        safeClose()
+    }
+
+    private fun safeClose() {
+        try {
+            manager?.quitSDLGamepad()
+        } catch (e: Throwable) {
+            System.err.println("[GamepadManager] Error during close: ${e.message}")
+        }
         manager = null
         initialized = false
         isConnected = false
         controllerName = null
+    }
+
+    companion object {
+        private const val MAX_CONSECUTIVE_ERRORS = 3
     }
 }
