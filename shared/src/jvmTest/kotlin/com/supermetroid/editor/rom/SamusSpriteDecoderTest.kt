@@ -43,7 +43,7 @@ class SamusSpriteDecoderTest {
         val pose = decoder.getPose(0, 0)
         assertNotNull(pose, "Should be able to extract standing pose (anim=0, pose=0)")
         assertTrue(pose!!.tilemaps.isNotEmpty(), "Standing pose should have tilemap entries")
-        assertTrue(pose.vram.size == 32 * 8 * 32, "VRAM should be 8192 bytes")
+        assertTrue(pose.vram.size == 32 * 16 * 32, "VRAM should be 16384 bytes (512 tiles)")
     }
 
     @Test

@@ -37,8 +37,16 @@ class SamusSpriteDecoder(private val romParser: RomParser) {
     /** Default VRAM size: 0x2000 bytes = 256 tiles × 32 bytes */
     private val DEFAULT_VRAM_SIZE = 0x2000
 
-    /** VRAM total size: 32 tile rows × 8 tiles/row × 32 bytes/tile */
-    private val VRAM_SIZE = 32 * 8 * 32  // 8192 bytes for 256 tiles
+    /**
+     * VRAM total size: SNES OBJ VRAM uses 16 tiles per row, 32 rows.
+     * Each tile = 32 bytes, so total = 32 rows × 16 tiles/row × 32 bytes = 16384 bytes (512 tiles).
+     * Rows 0x00-0x07 = top body row 1, 0x08-0x0F = bottom body row 1,
+     * 0x10-0x17 = top body row 2, 0x18-0x1F = bottom body row 2.
+     */
+    private val VRAM_SIZE = 32 * 16 * 32  // 16384 bytes for 512 tiles
+
+    /** Bytes per VRAM row (16 tiles × 32 bytes) */
+    private val VRAM_ROW_STRIDE = 0x200  // 512
 
     /** Suit palette addresses */
     private val POWER_SUIT_PALETTE = 0x9B9400
@@ -126,13 +134,21 @@ class SamusSpriteDecoder(private val romParser: RomParser) {
         for (baseAddr in intArrayOf(LOWER_TILEMAP_INDEX, UPPER_TILEMAP_INDEX)) {
             val idxOff = romParser.snesToPc(baseAddr + 2 * animationId)
             val idx = readU16(rom, idxOff)
-            val tmPtrOff = romParser.snesToPc(TILEMAP_PTRS + 2 * idx + 2 * poseIndex)
+            val ptrTableOff = TILEMAP_PTRS + 2 * idx + 2 * poseIndex
+            // Bounds check: pointer must be within bank $92
+            if ((ptrTableOff and 0xFF0000) != 0x920000) continue
+            val tmPtrOff = romParser.snesToPc(ptrTableOff)
+            if (tmPtrOff + 2 > rom.size) continue
             val tmPtr = readU16(rom, tmPtrOff)
             val tmAddr = romParser.snesToPc(0x920000 + tmPtr)
+            if (tmAddr + 2 > rom.size) continue
 
             val count = readU16(rom, tmAddr)
+            // Sanity check: Samus sprites never have more than ~20 tilemap entries per half
+            if (count > 128) continue
             for (i in 0 until count) {
                 val base = tmAddr + 2 + 5 * i
+                if (base + 5 > rom.size) break
                 tilemaps.add(parseTilemapEntry(base))
             }
         }
@@ -248,14 +264,14 @@ class SamusSpriteDecoder(private val romParser: RomParser) {
 
         val srcPc = romParser.snesToPc(srcPtr)
 
-        // Row 1 → vram at vramRowOffset * 0x200 (tiles per row = 8, 32 bytes each)
-        val dst1 = vramRowOffset * 32 * 8 // 0x100 per row in our simplified layout
+        // Row 1 → vram at vramRowOffset × VRAM_ROW_STRIDE (0x200 = 16 tiles × 32 bytes)
+        val dst1 = vramRowOffset * VRAM_ROW_STRIDE
         if (row1Size > 0 && dst1 + row1Size <= vram.size && srcPc + row1Size <= rom.size) {
             System.arraycopy(rom, srcPc, vram, dst1, row1Size)
         }
 
-        // Row 2 → vram at (0x10 + vramRowOffset) * tile-row-stride
-        val dst2 = (0x10 + vramRowOffset) * 32 * 8
+        // Row 2 → vram at (0x10 + vramRowOffset) × VRAM_ROW_STRIDE
+        val dst2 = (0x10 + vramRowOffset) * VRAM_ROW_STRIDE
         if (row2Size > 0 && dst2 + row2Size <= vram.size && srcPc + row1Size + row2Size <= rom.size) {
             System.arraycopy(rom, srcPc + row1Size, vram, dst2, row2Size)
         }
