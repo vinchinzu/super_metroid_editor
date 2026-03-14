@@ -47,6 +47,10 @@ class EditorState {
     var tilesetSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
         private set
 
+    /** Last sampled palette row (set by sample tool). Palette editor reads this. */
+    var sampledPaletteRow by mutableStateOf(-1)
+    var sampledPaletteCol by mutableStateOf(-1)
+
     val undoStack = mutableListOf<EditOperation>()
     val redoStack = mutableListOf<EditOperation>()
     var undoVersion by mutableStateOf(0)
@@ -1507,6 +1511,16 @@ class EditorState {
         brush = TileBrush(tiles = listOf(listOf(metatileIdx)), blockType = bt, hFlip = hf, vFlip = vf, btsOverrides = btsMap)
         tilesetSelStart = Pair(metatileIdx % gridCols, metatileIdx / gridCols)
         tilesetSelEnd = tilesetSelStart
+        // Capture palette row from the sampled metatile's first sub-tile
+        val tg = editorTileGraphics
+        if (tg != null) {
+            val palRows = tg.getMetatilePalettes(metatileIdx)
+            sampledPaletteRow = palRows.firstOrNull() ?: -1
+            // Read the pixel's palette color index at the click position within the metatile
+            val px = (bx * 16) % 16  // sub-pixel position defaults to top-left
+            val py = (by * 16) % 16
+            sampledPaletteCol = tg.readMetatilePixel(metatileIdx, px, py).coerceIn(0, 15)
+        }
         activeTool = EditorTool.PAINT
     }
 

@@ -51,6 +51,8 @@ fun PaletteEditor(
     tileGraphics: TileGraphics?,
     tilesetId: String?,
     hasCustomPalette: Boolean,
+    sampledPaletteRow: Int = -1,
+    sampledPaletteCol: Int = -1,
     onPaletteSaved: () -> Unit,
     onPaletteReset: () -> Unit,
     onRefreshNeeded: () -> Unit,
@@ -67,7 +69,15 @@ fun PaletteEditor(
     var selectedRow by remember { mutableStateOf(0) }
     var selectedCol by remember { mutableStateOf(1) }
     var editVersion by remember { mutableStateOf(0) }
-    var showHsvPicker by remember { mutableStateOf(false) }
+    var showHsvPicker by remember { mutableStateOf(true) }
+
+    // Auto-select palette row/col when user samples a tile on the map
+    if (sampledPaletteRow in 0..7) {
+        selectedRow = sampledPaletteRow
+        if (sampledPaletteCol in 1..15) {
+            selectedCol = sampledPaletteCol
+        }
+    }
 
     // Undo/redo stacks for palette edits
     data class PaletteEdit(val row: Int, val col: Int, val oldBgr555: Int, val newBgr555: Int)
@@ -236,12 +246,14 @@ fun PaletteEditor(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     if (selectedCol != 0) {
-                        Text(
-                            if (showHsvPicker) "Switch to RGB" else "Switch to HSV",
-                            fontSize = 9.sp,
-                            color = Color(0xFF64B5F6),
-                            modifier = Modifier.clickable { showHsvPicker = !showHsvPicker }
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("HSV", fontSize = 9.sp, fontWeight = if (showHsvPicker) FontWeight.Bold else FontWeight.Normal,
+                                color = if (showHsvPicker) Color(0xFF64B5F6) else Color(0xFF6A6F88),
+                                modifier = Modifier.clickable { showHsvPicker = true })
+                            Text("RGB", fontSize = 9.sp, fontWeight = if (!showHsvPicker) FontWeight.Bold else FontWeight.Normal,
+                                color = if (!showHsvPicker) Color(0xFF64B5F6) else Color(0xFF6A6F88),
+                                modifier = Modifier.clickable { showHsvPicker = false })
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))

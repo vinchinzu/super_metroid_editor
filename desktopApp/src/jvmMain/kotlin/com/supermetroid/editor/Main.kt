@@ -511,6 +511,8 @@ fun main() = application {
                                                 tileGraphics = editorState.editorTileGraphics,
                                                 tilesetId = currentTilesetId?.toString(),
                                                 hasCustomPalette = currentTilesetId != null && editorState.hasCustomPalette(currentTilesetId),
+                                                sampledPaletteRow = editorState.sampledPaletteRow,
+                                                sampledPaletteCol = editorState.sampledPaletteCol,
                                                 onPaletteSaved = {
                                                     currentTilesetId?.let { editorState.savePaletteOverride(it) }
                                                 },
