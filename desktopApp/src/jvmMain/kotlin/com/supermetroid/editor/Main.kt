@@ -325,14 +325,19 @@ fun main() = application {
                 }
                 
                 // Main content: resizable left column + right canvas
-                var leftColumnWidthDp by remember { mutableStateOf(280f) }
+                var leftColumnWidthDp by remember { mutableStateOf(330f) }
                 var tilesetHeightDp by remember { mutableStateOf(400f) }
                 var leftTab by remember { mutableStateOf(0) }
                 var selectedSpriteIdx by remember { mutableStateOf(0) }
                 val tilesetEditorState = remember { TilesetEditorState() }
                 val soundEditorState = remember { SoundEditorState() }
                 var bottomPaneTab by remember { mutableStateOf(0) } // 0 = Tileset, 1 = Patterns (in Rooms bottom pane)
-                var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns (in Tilesets left column)
+                var tilesetSubTab by remember { mutableStateOf(0) } // 0 = Tilesets, 1 = Patterns, 2 = Palette
+                // Auto-switch to Palette tab when user samples a tile
+                val sampledRow = editorState.sampledPaletteRow
+                if (sampledRow >= 0 && leftTab == 1) {
+                    tilesetSubTab = 2
+                }
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val maxLeftWidth = maxWidth.value - 100f
                     Row(
@@ -506,7 +511,8 @@ fun main() = application {
                                             )
                                         }
                                         2 -> {
-                                            val currentTilesetId = editorState.editorTileGraphics?.getCachedTilesetId()?.takeIf { it >= 0 }
+                                            // Use observable editorTilesetId so Compose recomposes when tileset changes
+                                            val currentTilesetId = editorState.editorTilesetId.takeIf { it >= 0 }
                                             PaletteEditor(
                                                 tileGraphics = editorState.editorTileGraphics,
                                                 tilesetId = currentTilesetId?.toString(),
@@ -529,8 +535,13 @@ fun main() = application {
                                                     }
                                                 },
                                                 onRefreshNeeded = {
-                                                    // Trigger tileset grid re-render
+                                                    // Trigger tileset grid + pixel editor re-render
                                                     tilesetEditorState.refreshGrid(editorState.editorTileGraphics)
+                                                    editorState.paletteVersion++
+                                                },
+                                                onColorSelected = { row, col ->
+                                                    editorState.sampledPaletteRow = row
+                                                    editorState.sampledPaletteCol = col
                                                 },
                                                 modifier = Modifier.fillMaxSize()
                                             )

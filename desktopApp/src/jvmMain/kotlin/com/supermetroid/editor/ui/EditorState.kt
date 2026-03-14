@@ -51,6 +51,9 @@ class EditorState {
     var sampledPaletteRow by mutableStateOf(-1)
     var sampledPaletteCol by mutableStateOf(-1)
 
+    /** Incremented when palette colors change — triggers reactive re-read in pixel editor and tileset grid. */
+    var paletteVersion by mutableStateOf(0)
+
     val undoStack = mutableListOf<EditOperation>()
     val redoStack = mutableListOf<EditOperation>()
     var undoVersion by mutableStateOf(0)

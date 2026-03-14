@@ -23,7 +23,7 @@ Gap analysis and implementation plan derived from studying the SMILE (Super Metr
 | # | Feature | Status | Notes |
 |---|---------|--------|-------|
 | 6 | **Samus Physics Editor** | ✅ Done (2026-03-14) | 17 verified fields across 4 categories (Jump, Gravity, Running, Air Control). Single-byte reads from verified hex_edits.txt addresses. |
-| 7 | **Palette Editor** | ❌ Not started | RGB color editing for tilesets and enemies — the biggest remaining gap |
+| 7 | **Palette Editor** | ✅ Done (2026-03-14) | HSV/RGB color picker, 8x16 grid, undo/redo, eyedropper sampling, save/reset, interop with pixel editor |
 | 8 | **Enemy Vulnerability Editor** | ✅ Done (2026-03-14) | 22 weapon slots per species, single-byte reads from bank $B4. SMILE-accurate weapon labels. |
 | 9 | **Room Header Editor** | ❌ Not started | Make all 11 header bytes editable |
 
@@ -33,10 +33,8 @@ Gap analysis and implementation plan derived from studying the SMILE (Super Metr
 
 ### CRITICAL (Features SMILE has that we still lack)
 
-#### 1. Palette Editor
-SMILE edits 256-color tileset palettes (16-color rows), enemy palettes (RGB sliders), import/export .pal files, palette blending modes.
-**Data:** Tileset palettes in bank $8F (tileset table entries), enemy palettes in bank $A0/B4.
-**Plan:** Add "Palette" tab to tileset editor. 8 rows x 16 swatches, click for RGB slider. Store as base64 in customGfx. Import/export .pal.
+#### ~~1. Palette Editor~~ — DONE
+Implemented with HSV/RGB color picker, 8x16 grid, undo/redo, eyedropper, save to project, reset to ROM. Integrated with pixel editor.
 
 #### 2. Room Header Editor (Currently Read-Only)
 SMILE edits: room index, area assignment, minimap X/Y, dimensions, up/down scrollers, CRE flag, door-out pointer.
@@ -88,7 +86,7 @@ SMILE has dedicated spawn X/Y/screen configuration per save station.
 ## Implementation Priority (Remaining Work)
 
 ### Next Up: High Impact
-1. **Palette Editor** — Visual customization is #1 requested ROM hacking feature
+1. ~~**Palette Editor**~~ — ✅ Done
 2. **Room Header Editor** — Needed for creating new rooms, area reassignment
 
 ### Medium Term: Infrastructure

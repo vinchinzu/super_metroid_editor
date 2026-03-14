@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -28,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,29 +71,26 @@ fun HsvColorPicker(
         onColorChanged((b5 shl 10) or (g5 shl 5) or r5)
     }
 
-    val density = LocalDensity.current.density
-
-    Column(modifier = modifier) {
-        // ── Saturation/Brightness square ──
-        val sqSize = 180.dp
+    Column(modifier = modifier.fillMaxWidth()) {
+        // ── Saturation/Brightness square (fills available width) ──
         var sqDragging by remember { mutableStateOf(false) }
 
-        Box(modifier = Modifier.size(sqSize)) {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f)) {
             Canvas(
                 modifier = Modifier
-                    .size(sqSize)
+                    .fillMaxSize()
                     .onPointerEvent(PointerEventType.Press) { e ->
                         sqDragging = true
                         val pos = e.changes.first().position
-                        sat = (pos.x / (sqSize.value * density)).coerceIn(0f, 1f)
-                        bri = 1f - (pos.y / (sqSize.value * density)).coerceIn(0f, 1f)
+                        sat = (pos.x / size.width).coerceIn(0f, 1f)
+                        bri = 1f - (pos.y / size.height).coerceIn(0f, 1f)
                         emit()
                     }
                     .onPointerEvent(PointerEventType.Move) { e ->
                         if (sqDragging) {
                             val pos = e.changes.first().position
-                            sat = (pos.x / (sqSize.value * density)).coerceIn(0f, 1f)
-                            bri = 1f - (pos.y / (sqSize.value * density)).coerceIn(0f, 1f)
+                            sat = (pos.x / size.width).coerceIn(0f, 1f)
+                            bri = 1f - (pos.y / size.height).coerceIn(0f, 1f)
                             emit()
                         }
                     }
@@ -128,6 +126,7 @@ fun HsvColorPicker(
 
         // ── Hue strip ──
         var hueDragging by remember { mutableStateOf(false) }
+        var hueStripWidth by remember { mutableStateOf(1f) }
         val hueHeight = 20.dp
 
         Canvas(
@@ -137,18 +136,19 @@ fun HsvColorPicker(
                 .onPointerEvent(PointerEventType.Press) { e ->
                     hueDragging = true
                     val px = e.changes.first().position.x
-                    hue = ((px / (size.width * density)) * 360f).coerceIn(0f, 360f)
+                    hue = ((px / hueStripWidth) * 360f).coerceIn(0f, 360f)
                     emit()
                 }
                 .onPointerEvent(PointerEventType.Move) { e ->
                     if (hueDragging) {
                         val px = e.changes.first().position.x
-                        hue = ((px / (size.width * density)) * 360f).coerceIn(0f, 360f)
+                        hue = ((px / hueStripWidth) * 360f).coerceIn(0f, 360f)
                         emit()
                     }
                 }
                 .onPointerEvent(PointerEventType.Release) { hueDragging = false }
         ) {
+            hueStripWidth = size.width
             val w = size.width
             val h = size.height
             val steps = 72

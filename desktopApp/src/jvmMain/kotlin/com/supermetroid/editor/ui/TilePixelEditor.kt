@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +95,7 @@ fun TilePixelEditor(
     var zoomLevel by remember { mutableStateOf(24) } // pixels per SNES pixel
     var editVersion by remember { mutableStateOf(0) }
     var showGrid by remember { mutableStateOf(true) }
+    var showHsvPicker by remember { mutableStateOf(true) }
 
     // Undo/redo stacks
     val undoStack = remember { mutableStateListOf<List<PixelEdit>>() }
@@ -101,8 +103,24 @@ fun TilePixelEditor(
     var pendingEdits by remember { mutableStateOf(mutableListOf<PixelEdit>()) }
     var isDrawing by remember { mutableStateOf(false) }
 
+    @Suppress("UNUSED_VARIABLE")
+    val palVer = editorState.paletteVersion  // observe palette changes from left-column editor
     val palettes = tileGraphics.getPalettes()
     val coroutineScope = rememberCoroutineScope()
+
+    // Sync selection from left-column palette editor (via editorState.sampledPaletteRow/Col)
+    val extRow = editorState.sampledPaletteRow
+    val extCol = editorState.sampledPaletteCol
+    var lastExtRow by remember { mutableStateOf(-1) }
+    var lastExtCol by remember { mutableStateOf(-1) }
+    if (extRow in 0..7 && (extRow != lastExtRow || extCol != lastExtCol)) {
+        selectedPalRow = extRow
+        lastExtRow = extRow
+        if (extCol in 1..15) {
+            selectedColorIdx = extCol
+        }
+        lastExtCol = extCol
+    }
 
     fun commitPending() {
         if (pendingEdits.isNotEmpty()) {
@@ -173,6 +191,9 @@ fun TilePixelEditor(
         val idx = tileGraphics.readMetatilePixel(metatileIdx, px, py)
         selectedColorIdx = idx
         selectedPalRow = tileGraphics.getMetatilePixelPaletteRow(metatileIdx, px, py)
+        // Sync to EditorState so left-column Palette Editor can follow
+        editorState.sampledPaletteRow = selectedPalRow
+        editorState.sampledPaletteCol = idx
         activeTool = PixelTool.PENCIL
     }
 
@@ -332,6 +353,8 @@ fun TilePixelEditor(
                 val canvasSize = 16 * zoomLevel
                 var hoverPixel by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
+                // key forces Canvas recreation when palette data or selection changes
+                key(palVer, editVersion, selectedPalRow) {
                 Box(
                     modifier = Modifier
                         .size(canvasSize.dp + if (showGrid) 1.dp else 0.dp)
@@ -373,9 +396,6 @@ fun TilePixelEditor(
                                 hoverPixel = null
                             }
                     ) {
-                        @Suppress("UNUSED_EXPRESSION")
-                        editVersion // trigger recomposition on edits
-
                         val cellW = size.width / 16f
                         val cellH = size.height / 16f
                         val pal = palettes ?: return@Canvas
@@ -383,8 +403,7 @@ fun TilePixelEditor(
                         for (y in 0..15) {
                             for (x in 0..15) {
                                 val idx = tileGraphics.readMetatilePixel(metatileIdx, x, y)
-                                val palRow = tileGraphics.getMetatilePixelPaletteRow(metatileIdx, x, y)
-                                val argb = if (idx == 0) null else pal[palRow][idx]
+                                val argb = if (idx == 0) null else pal[selectedPalRow][idx]
                                 val left = x * cellW
                                 val top = y * cellH
 
@@ -424,6 +443,7 @@ fun TilePixelEditor(
                         }
                     }
                 }
+                } // key(palVer, editVersion)
 
                 // Hover info
                 val hp = hoverPixel
@@ -538,6 +558,8 @@ fun TilePixelEditor(
                                         .clickable {
                                             selectedPalRow = palRow
                                             selectedColorIdx = colIdx
+                                            editorState.sampledPaletteRow = palRow
+                                            editorState.sampledPaletteCol = colIdx
                                         }
                                 ) {
                                     if (colIdx == 0 && isSelected) {
@@ -553,22 +575,46 @@ fun TilePixelEditor(
                 Spacer(Modifier.height(16.dp))
 
                 // SNES Colour Picker
-                Text("SNES Colour Editor", fontSize = 10.sp, color = Color(0xFFB0B8D1),
-                    fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("SNES Colour Editor", fontSize = 10.sp, color = Color(0xFFB0B8D1),
+                        fontWeight = FontWeight.SemiBold)
+                    if (selectedColorIdx != 0) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("HSV", fontSize = 9.sp,
+                                fontWeight = if (showHsvPicker) FontWeight.Bold else FontWeight.Normal,
+                                color = if (showHsvPicker) Color(0xFF64B5F6) else Color(0xFF6A6F88),
+                                modifier = Modifier.clickable { showHsvPicker = true })
+                            Text("RGB", fontSize = 9.sp,
+                                fontWeight = if (!showHsvPicker) FontWeight.Bold else FontWeight.Normal,
+                                color = if (!showHsvPicker) Color(0xFF64B5F6) else Color(0xFF6A6F88),
+                                modifier = Modifier.clickable { showHsvPicker = false })
+                        }
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    "Click a palette colour above, then adjust below",
-                    fontSize = 8.sp, color = Color(0xFF6A6F88)
-                )
-                Spacer(Modifier.height(8.dp))
-
-                if (palettes != null) {
-                    SnesColorEditor(
-                        tileGraphics = tileGraphics,
-                        palRow = selectedPalRow,
-                        colIdx = selectedColorIdx,
-                        onColorChanged = { editVersion++ }
-                    )
+                if (selectedColorIdx == 0) {
+                    Text("Index 0 is transparent (cannot edit)", fontSize = 9.sp, color = Color(0xFF6A6F88))
+                } else if (palettes != null) {
+                    val bgr555 = tileGraphics.getSnesBgr555(selectedPalRow, selectedColorIdx)
+                    if (bgr555 >= 0) {
+                        if (showHsvPicker) {
+                            HsvColorPicker(bgr555, onColorChanged = { newBgr ->
+                                tileGraphics.setPaletteEntry(selectedPalRow, selectedColorIdx, newBgr)
+                                editorState.paletteVersion++
+                                editVersion++
+                            })
+                        } else {
+                            SnesBgr555Editor(bgr555) { newBgr ->
+                                tileGraphics.setPaletteEntry(selectedPalRow, selectedColorIdx, newBgr)
+                                editorState.paletteVersion++
+                                editVersion++
+                            }
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))

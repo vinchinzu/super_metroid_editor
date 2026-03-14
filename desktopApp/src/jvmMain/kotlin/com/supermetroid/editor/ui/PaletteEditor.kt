@@ -56,6 +56,7 @@ fun PaletteEditor(
     onPaletteSaved: () -> Unit,
     onPaletteReset: () -> Unit,
     onRefreshNeeded: () -> Unit,
+    onColorSelected: (row: Int, col: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val tg = tileGraphics
@@ -71,12 +72,16 @@ fun PaletteEditor(
     var editVersion by remember { mutableStateOf(0) }
     var showHsvPicker by remember { mutableStateOf(true) }
 
-    // Auto-select palette row/col when user samples a tile on the map
-    if (sampledPaletteRow in 0..7) {
+    // Auto-select palette row/col ONLY when sampled values change (not on every recomposition)
+    var lastSampledRow by remember { mutableStateOf(-1) }
+    var lastSampledCol by remember { mutableStateOf(-1) }
+    if (sampledPaletteRow in 0..7 && (sampledPaletteRow != lastSampledRow || sampledPaletteCol != lastSampledCol)) {
         selectedRow = sampledPaletteRow
+        lastSampledRow = sampledPaletteRow
         if (sampledPaletteCol in 1..15) {
             selectedCol = sampledPaletteCol
         }
+        lastSampledCol = sampledPaletteCol
     }
 
     // Undo/redo stacks for palette edits
@@ -186,7 +191,8 @@ fun PaletteEditor(
                         Text(
                             "$row",
                             fontSize = 8.sp,
-                            color = Color(0xFF6A6F88),
+                            color = if (row == selectedRow) Color(0xFFFFD54F) else Color(0xFF6A6F88),
+                            fontWeight = if (row == selectedRow) FontWeight.Bold else FontWeight.Normal,
                             modifier = Modifier.width(20.dp),
                             fontFamily = FontFamily.Monospace
                         )
@@ -212,6 +218,7 @@ fun PaletteEditor(
                                     .clickable {
                                         selectedRow = row
                                         selectedCol = col
+                                        onColorSelected(row, col)
                                     }
                             ) {
                                 if (isTransparent) {
