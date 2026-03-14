@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.supermetroid.editor.data.FxChange
+import com.supermetroid.editor.data.RoomHeaderChange
 import com.supermetroid.editor.data.Room
 import com.supermetroid.editor.data.StateDataChange
 import com.supermetroid.editor.rom.RomParser
@@ -165,6 +166,31 @@ fun RoomPropertiesPanel(
         }
     }
 
+    // Room header edit state
+    val savedHeader = roomEdits?.roomHeaderChange
+    var editArea by remember(room.roomId) { mutableStateOf(savedHeader?.area ?: room.area) }
+    var editMapX by remember(room.roomId) { mutableStateOf(savedHeader?.mapX ?: room.mapX) }
+    var editMapY by remember(room.roomId) { mutableStateOf(savedHeader?.mapY ?: room.mapY) }
+    var editUpScroller by remember(room.roomId) { mutableStateOf(savedHeader?.upScroller ?: room.upScroller) }
+    var editDownScroller by remember(room.roomId) { mutableStateOf(savedHeader?.downScroller ?: room.downScroller) }
+    var editCreBitflag by remember(room.roomId) { mutableStateOf(savedHeader?.creBitflag ?: room.creBitflag) }
+
+    fun syncHeaderToState() {
+        val change = RoomHeaderChange(
+            area = editArea.takeIf { it != room.area },
+            mapX = editMapX.takeIf { it != room.mapX },
+            mapY = editMapY.takeIf { it != room.mapY },
+            upScroller = editUpScroller.takeIf { it != room.upScroller },
+            downScroller = editDownScroller.takeIf { it != room.downScroller },
+            creBitflag = editCreBitflag.takeIf { it != room.creBitflag },
+        )
+        if (change == RoomHeaderChange()) {
+            editorState.project.getOrCreateRoom(room.roomId).roomHeaderChange = null
+        } else {
+            editorState.setRoomHeaderChange(change)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -172,24 +198,24 @@ fun RoomPropertiesPanel(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // ── Room Header (read-only) ──
+        // ── Room Header ──
         SectionHeader("Room Header")
         PropertyRow("Room ID", "0x${room.roomId.toString(16).uppercase().padStart(4, '0')}")
-        PropertyRow("Area", "${room.area} — ${AREA_NAMES.getOrElse(room.area) { "Unknown" }}")
-        PropertyRow("Map Position", "(${room.mapX}, ${room.mapY})")
+        EditableIntRow("Area", editArea, 0, 6) { editArea = it; syncHeaderToState() }
+        PropertyRow("Area Name", AREA_NAMES.getOrElse(editArea) { "Unknown" })
+        EditableIntRow("Map X", editMapX, 0, 255) { editMapX = it; syncHeaderToState() }
+        EditableIntRow("Map Y", editMapY, 0, 255) { editMapY = it; syncHeaderToState() }
         PropertyRow("Dimensions", "${room.width} x ${room.height} screens")
         PropertyRow("Room Index", "0x${room.index.toString(16).uppercase().padStart(2, '0')}")
-        PropertyRow("Up Scroller", "0x${room.upScroller.toString(16).uppercase().padStart(2, '0')} " +
-                when (room.upScroller) {
-                    0x70 -> "(default)"
-                    0x90 -> "(grapple rooms)"
-                    0x99 -> "(ascent rooms)"
-                    else -> ""
-                })
-        PropertyRow("Down Scroller", "0x${room.downScroller.toString(16).uppercase().padStart(2, '0')} " +
-                if (room.downScroller == 0xA0) "(default)" else "")
-        PropertyRow("CRE Bitflag", "0x${room.creBitflag.toString(16).uppercase().padStart(2, '0')} — " +
-                (CRE_BITFLAG_NAMES[room.creBitflag] ?: "Custom"))
+        EditableHexRow("Up Scroller", editUpScroller, 1,
+            suffix = when (editUpScroller) { 0x70 -> " (default)"; 0x90 -> " (grapple)"; 0x99 -> " (ascent)"; else -> "" }
+        ) { editUpScroller = it; syncHeaderToState() }
+        EditableHexRow("Down Scroller", editDownScroller, 1,
+            suffix = if (editDownScroller == 0xA0) " (default)" else ""
+        ) { editDownScroller = it; syncHeaderToState() }
+        EditableHexRow("CRE Bitflag", editCreBitflag, 1,
+            suffix = " — ${CRE_BITFLAG_NAMES[editCreBitflag] ?: "Custom"}"
+        ) { editCreBitflag = it; syncHeaderToState() }
         PropertyRow("Door Out Ptr", "\$8F:${room.doorOut.toString(16).uppercase().padStart(4, '0')}")
 
         Spacer(modifier = Modifier.height(4.dp))

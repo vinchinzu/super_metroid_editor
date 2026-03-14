@@ -85,6 +85,7 @@ import com.supermetroid.editor.ui.PhantoonSpriteEditor
 import com.supermetroid.editor.ui.RoomListView
 import com.supermetroid.editor.ui.RoomPropertiesPanel
 import com.supermetroid.editor.ui.SoundEditorCanvas
+import com.supermetroid.editor.ui.PaletteEditor
 import com.supermetroid.editor.ui.SoundEditorState
 import com.supermetroid.editor.ui.SoundListPanel
 import com.supermetroid.editor.ui.TilesetCanvas
@@ -457,7 +458,7 @@ fun main() = application {
                                     }
                                 }
                                 1 -> {
-                                    // Tilesets tab: sub-tabs [Tilesets | Patterns]
+                                    // Tilesets tab: sub-tabs [Tilesets | Patterns | Palette]
                                     TabRow(
                                         selectedTabIndex = tilesetSubTab,
                                         modifier = Modifier.fillMaxWidth().height(26.dp)
@@ -471,6 +472,10 @@ fun main() = application {
                                             editorState.seedBuiltInPatterns(romParser)
                                         }, modifier = Modifier.height(26.dp)) {
                                             Text("Patterns", fontSize = fs.tabLabel)
+                                        }
+                                        Tab(selected = tilesetSubTab == 2, onClick = { tilesetSubTab = 2 },
+                                            modifier = Modifier.height(26.dp)) {
+                                            Text("Palette", fontSize = fs.tabLabel)
                                         }
                                     }
                                     key(tilesetSubTab) {
@@ -498,6 +503,34 @@ fun main() = application {
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(tilesetHeightDp.dp)
+                                            )
+                                        }
+                                        2 -> {
+                                            val currentTilesetId = editorState.editorTileGraphics?.getCachedTilesetId()?.takeIf { it >= 0 }
+                                            PaletteEditor(
+                                                tileGraphics = editorState.editorTileGraphics,
+                                                tilesetId = currentTilesetId?.toString(),
+                                                hasCustomPalette = currentTilesetId != null && editorState.hasCustomPalette(currentTilesetId),
+                                                onPaletteSaved = {
+                                                    currentTilesetId?.let { editorState.savePaletteOverride(it) }
+                                                },
+                                                onPaletteReset = {
+                                                    if (currentTilesetId != null) {
+                                                        editorState.resetPaletteOverride(currentTilesetId)
+                                                        // Reload tileset to restore ROM palette
+                                                        editorState.editorTileGraphics?.invalidateCache()
+                                                        editorState.editorTileGraphics?.loadTileset(currentTilesetId)
+                                                        editorState.applyCustomGfxToTileGraphics(
+                                                            editorState.editorTileGraphics!!, currentTilesetId
+                                                        )
+                                                        tilesetEditorState.refreshGrid(editorState.editorTileGraphics)
+                                                    }
+                                                },
+                                                onRefreshNeeded = {
+                                                    // Trigger tileset grid re-render
+                                                    tilesetEditorState.refreshGrid(editorState.editorTileGraphics)
+                                                },
+                                                modifier = Modifier.fillMaxSize()
                                             )
                                         }
                                     }

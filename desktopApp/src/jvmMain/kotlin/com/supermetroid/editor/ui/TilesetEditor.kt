@@ -84,6 +84,13 @@ class TilesetEditorState {
     var isLoading by mutableStateOf(false)
     var errorMessage by mutableStateOf<String?>(null)
     var highlightPalette by mutableStateOf(-1)
+
+    /** Re-render the tileset grid and palette swatches from current TileGraphics state. */
+    fun refreshGrid(tileGraphics: TileGraphics?) {
+        val tg = tileGraphics ?: return
+        gridData = tg.renderTilesetGrid()
+        palettes = tg.getPalettes()
+    }
 }
 
 // ─── Left column: tileset list + palette ───────────────────────────────

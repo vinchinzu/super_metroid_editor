@@ -614,14 +614,28 @@ private fun SnesColorEditor(
     val bgr555 = tileGraphics.getSnesBgr555(palRow, colIdx)
     if (bgr555 < 0) return
 
-    var r5 by remember(palRow, colIdx) { mutableStateOf(bgr555 and 0x1F) }
-    var g5 by remember(palRow, colIdx) { mutableStateOf((bgr555 shr 5) and 0x1F) }
-    var b5 by remember(palRow, colIdx) { mutableStateOf((bgr555 shr 10) and 0x1F) }
+    SnesBgr555Editor(bgr555) { newBgr ->
+        tileGraphics.setPaletteEntry(palRow, colIdx, newBgr)
+        onColorChanged()
+    }
+}
+
+/**
+ * Reusable SNES BGR555 color editor with R/G/B gradient sliders.
+ * Accepts a raw BGR555 value and calls [onColorChanged] with the new BGR555 on each edit.
+ */
+@Composable
+internal fun SnesBgr555Editor(
+    bgr555: Int,
+    onColorChanged: (Int) -> Unit
+) {
+    var r5 by remember(bgr555) { mutableStateOf(bgr555 and 0x1F) }
+    var g5 by remember(bgr555) { mutableStateOf((bgr555 shr 5) and 0x1F) }
+    var b5 by remember(bgr555) { mutableStateOf((bgr555 shr 10) and 0x1F) }
 
     fun applyColor() {
         val newBgr = (b5 shl 10) or (g5 shl 5) or r5
-        tileGraphics.setPaletteEntry(palRow, colIdx, newBgr)
-        onColorChanged()
+        onColorChanged(newBgr)
     }
 
     // Preview of current colour
@@ -656,7 +670,7 @@ private fun SnesColorEditor(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun SnesChannelSlider(
+internal fun SnesChannelSlider(
     label: String,
     channelColor: Color,
     value: Int,

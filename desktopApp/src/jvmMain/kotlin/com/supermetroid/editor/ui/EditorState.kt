@@ -8,6 +8,7 @@ import com.supermetroid.editor.data.EditOperation
 import com.supermetroid.editor.data.PatchRepository
 import com.supermetroid.editor.data.EnemyChange
 import com.supermetroid.editor.data.FxChange
+import com.supermetroid.editor.data.RoomHeaderChange
 import com.supermetroid.editor.data.PatchWrite
 import com.supermetroid.editor.data.PlmChange
 import com.supermetroid.editor.data.ScrollChange
@@ -174,7 +175,7 @@ class EditorState {
         return true
     }
 
-    /** Apply any project-stored custom graphics to a TileGraphics instance. */
+    /** Apply any project-stored custom graphics and palette to a TileGraphics instance. */
     internal fun applyCustomGfxToTileGraphics(tg: TileGraphics, tilesetId: Int) {
         val gfxData = project.customGfx
         val varB64 = gfxData.varGfx[tilesetId.toString()]
@@ -187,7 +188,43 @@ class EditorState {
             try { tg.applyCustomCreGfx(java.util.Base64.getDecoder().decode(creB64)) }
             catch (_: Exception) {}
         }
+        applyCustomPaletteToTileGraphics(tg, tilesetId)
     }
+
+    // ─── Palette editing ──────────────────────────────────────────────
+
+    /** Apply any project-stored custom palette to a TileGraphics instance. */
+    internal fun applyCustomPaletteToTileGraphics(tg: TileGraphics, tilesetId: Int) {
+        val palB64 = project.customGfx.palettes[tilesetId.toString()] ?: return
+        try {
+            val rawBgr = java.util.Base64.getDecoder().decode(palB64)
+            if (rawBgr.size != 256) return  // 8 rows × 16 colors × 2 bytes
+            for (row in 0..7) for (col in 0..15) {
+                val offset = (row * 16 + col) * 2
+                val bgr555 = (rawBgr[offset].toInt() and 0xFF) or
+                        ((rawBgr[offset + 1].toInt() and 0xFF) shl 8)
+                tg.setPaletteEntry(row, col, bgr555)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** Save the current TileGraphics palette to the project as a base64 BGR555 override. */
+    fun savePaletteOverride(tilesetId: Int) {
+        val tg = editorTileGraphics ?: return
+        val rawBgr = tg.getRawPaletteData() ?: return
+        project.customGfx.palettes[tilesetId.toString()] = java.util.Base64.getEncoder().encodeToString(rawBgr)
+        dirty = true
+    }
+
+    /** Remove the custom palette override, restoring the ROM default. */
+    fun resetPaletteOverride(tilesetId: Int) {
+        project.customGfx.palettes.remove(tilesetId.toString())
+        dirty = true
+    }
+
+    /** Check if the project has a custom palette for the given tileset. */
+    fun hasCustomPalette(tilesetId: Int): Boolean =
+        project.customGfx.palettes.containsKey(tilesetId.toString())
 
     // ─── Tileset graphics export / import ────────────────────────────
 
@@ -2091,6 +2128,15 @@ class EditorState {
         editVersion++
     }
 
+    // ─── Room header editing (area, map position, scrollers, CRE) ──
+
+    fun setRoomHeaderChange(change: RoomHeaderChange) {
+        val roomEdits = project.getOrCreateRoom(currentRoomId)
+        roomEdits.roomHeaderChange = change
+        dirty = true
+        editVersion++
+    }
+
     // ─── State data editing (tileset, music, BG scrolling) ──────
 
     fun setStateDataChange(change: StateDataChange) {
@@ -2732,8 +2778,9 @@ class EditorState {
             val hasScrollEdits = roomEdits.scrollChanges.isNotEmpty()
             val hasFxEdits = roomEdits.fxChange != null
             val hasStateEdits = roomEdits.stateDataChange != null
+            val hasHeaderEdits = roomEdits.roomHeaderChange != null
             if (!hasTileEdits && !hasPlmEdits && !hasDoorEdits && !hasEnemyEdits &&
-                !hasScrollEdits && !hasFxEdits && !hasStateEdits) continue
+                !hasScrollEdits && !hasFxEdits && !hasStateEdits && !hasHeaderEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
 
@@ -3188,6 +3235,19 @@ class EditorState {
                 }
             }
 
+            // Patch room header fields (area, map position, scrollers, CRE)
+            if (hasHeaderEdits) {
+                val hc = roomEdits.roomHeaderChange!!
+                val headerPc = romParser.snesToPc(RomConstants.BANK_ROOM_DATA or roomId)
+                hc.area?.let { romData[headerPc + 1] = it.toByte() }
+                hc.mapX?.let { romData[headerPc + 2] = it.toByte() }
+                hc.mapY?.let { romData[headerPc + 3] = it.toByte() }
+                hc.upScroller?.let { romData[headerPc + 6] = it.toByte() }
+                hc.downScroller?.let { romData[headerPc + 7] = it.toByte() }
+                hc.creBitflag?.let { romData[headerPc + 8] = it.toByte() }
+                println("Room 0x$roomKey: patched room header")
+            }
+
             // Patch state data fields (tileset, music, BG scrolling)
             if (hasStateEdits) {
                 val sd = roomEdits.stateDataChange!!
@@ -3255,6 +3315,30 @@ class EditorState {
                     println("WARN: Compressed tileset $tsId gfx (${compressed.size}) exceeds original ($origSize) — skipped")
                 }
             } catch (e: Exception) { println("WARN: Tileset $tsId gfx patch failed: ${e.message}") }
+        }
+
+        // Custom palette overrides per tileset (raw BGR555 → LZ5 compress → write in-place)
+        for ((tsIdStr, palB64) in gfxData.palettes) {
+            val tsId = tsIdStr.toIntOrNull() ?: continue
+            try {
+                val rawPal = java.util.Base64.getDecoder().decode(palB64)
+                if (rawPal.size != 256) { println("WARN: Palette $tsId has ${rawPal.size} bytes (expected 256) — skipped"); continue }
+                val compressed = lz5Compress(rawPal)
+                val entryOffset = tablePC + tsId * 9
+                val palSnes = (romData[entryOffset + 6].toInt() and 0xFF) or
+                        ((romData[entryOffset + 7].toInt() and 0xFF) shl 8) or
+                        ((romData[entryOffset + 8].toInt() and 0xFF) shl 16)
+                val palPc = romParser.snesToPc(palSnes)
+                val (_, origSize) = romParser.decompressLZ2WithSize(palSnes)
+                if (compressed.size <= origSize) {
+                    System.arraycopy(compressed, 0, romData, palPc, compressed.size)
+                    for (i in compressed.size until origSize) romData[palPc + i] = 0xFF.toByte()
+                    gfxPatched++
+                    println("Patched tileset $tsId palette in-place (${compressed.size}/$origSize bytes)")
+                } else {
+                    println("WARN: Compressed tileset $tsId palette (${compressed.size}) exceeds original ($origSize) — skipped")
+                }
+            } catch (e: Exception) { println("WARN: Tileset $tsId palette patch failed: ${e.message}") }
         }
 
         // Apply Phantoon sprite tile patches (raw 4bpp → LZ5 compress → write to $B7)

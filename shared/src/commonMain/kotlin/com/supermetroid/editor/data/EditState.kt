@@ -131,6 +131,24 @@ data class StateDataChange(
 )
 
 /**
+ * Room header change: modify the 11-byte room header in bank $8F.
+ * Only non-null fields are applied on export. Field names match the Room data class.
+ *
+ * Header layout (relative to room PC offset):
+ *   Byte 0: index, 1: area, 2: mapX, 3: mapY, 4: width, 5: height,
+ *   6: upScroller, 7: downScroller, 8: creBitflag, 9-10: doorOut (LE word)
+ */
+@Serializable
+data class RoomHeaderChange(
+    val area: Int? = null,           // 0-6 (Crateria, Brinstar, Norfair, Wrecked Ship, Maridia, Tourian, Ceres)
+    val mapX: Int? = null,           // 0-255 minimap X position
+    val mapY: Int? = null,           // 0-255 minimap Y position
+    val upScroller: Int? = null,     // screen-edge up scroller threshold (0x70 default, 0x90 grapple)
+    val downScroller: Int? = null,   // screen-edge down scroller threshold (0xA0 default)
+    val creBitflag: Int? = null      // 0x00=no CRE, 0x01=CRE used, 0x02=has BG, 0x05=CRE+BG
+)
+
+/**
  * Per-room edit state: all operations applied to a specific room.
  */
 @Serializable
@@ -142,11 +160,13 @@ data class RoomEdits(
     val enemyChanges: MutableList<EnemyChange> = mutableListOf(),
     val scrollChanges: MutableList<ScrollChange> = mutableListOf(),
     var fxChange: FxChange? = null,
-    var stateDataChange: StateDataChange? = null
+    var stateDataChange: StateDataChange? = null,
+    var roomHeaderChange: RoomHeaderChange? = null
 ) {
     val hasEdits: Boolean get() =
         operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
-        enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null || stateDataChange != null
+        enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
+        stateDataChange != null || roomHeaderChange != null
 }
 
 /**
@@ -196,7 +216,8 @@ data class TilesetGfxData(
     val varGfx: MutableMap<String, String> = mutableMapOf(),         // key = tilesetId, value = base64 raw 4bpp
     var creGfx: String? = null,                                       // base64 raw 4bpp, shared
     val enemyGfx: MutableMap<String, String> = mutableMapOf(),       // key = speciesId hex, value = base64 PNG bytes
-    val spriteTileBlocks: MutableMap<String, String> = mutableMapOf() // key = "boss:N" (e.g. "phantoon:0"), value = base64 raw 4bpp
+    val spriteTileBlocks: MutableMap<String, String> = mutableMapOf(), // key = "boss:N" (e.g. "phantoon:0"), value = base64 raw 4bpp
+    val palettes: MutableMap<String, String> = mutableMapOf()         // key = tilesetId, value = base64 BGR555 (256 bytes raw)
 )
 
 /**
