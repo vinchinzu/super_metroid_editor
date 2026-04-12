@@ -21,6 +21,7 @@ import com.supermetroid.editor.data.PatternCell
 import com.supermetroid.editor.data.PatternLibrary
 import com.supermetroid.editor.data.EnemyUpdate
 import com.supermetroid.editor.rom.LZ5Compressor
+import com.supermetroid.editor.rom.LevelDataResize
 import com.supermetroid.editor.rom.RomConstants
 import com.supermetroid.editor.rom.RomParser
 import com.supermetroid.editor.rom.TileGraphics
@@ -2819,13 +2820,47 @@ class EditorState {
             val roomId = roomKey.toIntOrNull(16) ?: continue
             val room = romParser.readRoomHeader(roomId) ?: continue
 
+            // Detect a width/height change in the header edit. When the room is
+            // being enlarged, the level data and scroll data must be rebuilt to
+            // match the new dimensions BEFORE the new header bytes are written.
+            // We only support growing right/down — old PLM/door/enemy coordinates
+            // are absolute block offsets from the top-left, so they remain valid.
+            val oldW = room.width
+            val oldH = room.height
+            val requestedW = roomEdits.roomHeaderChange?.width ?: oldW
+            val requestedH = roomEdits.roomHeaderChange?.height ?: oldH
+            var newW = requestedW
+            var newH = requestedH
+            var needsResize = newW != oldW || newH != oldH
+            if (needsResize) {
+                val ok = newW in 1..LevelDataResize.MAX_ROOM_DIMENSION &&
+                        newH in 1..LevelDataResize.MAX_ROOM_DIMENSION &&
+                        newW * newH <= LevelDataResize.MAX_ROOM_SCREENS &&
+                        newW >= oldW && newH >= oldH
+                if (!ok) {
+                    println("WARN: Room 0x$roomKey resize ${oldW}x${oldH} -> ${newW}x${newH} rejected " +
+                            "(grow right/down only, max ${LevelDataResize.MAX_ROOM_SCREENS} screens, " +
+                            "max dim ${LevelDataResize.MAX_ROOM_DIMENSION})")
+                    // Defensive: clear width/height so the header writeback below
+                    // doesn't write inconsistent dimension bytes.
+                    val hcOld = roomEdits.roomHeaderChange!!
+                    roomEdits.roomHeaderChange = hcOld.copy(width = null, height = null)
+                    newW = oldW
+                    newH = oldH
+                    needsResize = false
+                }
+            }
+            val bwForEdits = newW * 16  // tile-edit indexing always uses post-resize stride
+
             // Patch tile data — apply edits to ALL states' level data so that
             // non-default states (boss-dead, escape, etc.) also reflect tile changes.
             // Without this, rooms with multiple states show the original layout when
             // a non-default state is active, causing phantom door blocks/caps.
-            if (hasTileEdits && room.levelDataPtr != 0) {
+            // When `needsResize` is true we enter this block even without tile edits
+            // so the level data blob gets resized for the new dimensions.
+            if ((hasTileEdits || needsResize) && room.levelDataPtr != 0) {
                 val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
-                val bw = room.width * 16
+                val bw = bwForEdits
 
                 // Group states by their level data pointer
                 val ptrToStates = mutableMapOf<Int, MutableList<Int>>()
@@ -2842,7 +2877,19 @@ class EditorState {
 
                 for ((lvlPtr, statesForPtr) in ptrToStates) {
                     val (originalData, origSize) = romParser.decompressLZ2WithSize(lvlPtr)
-                    val editedData = originalData.copyOf()
+                    val editedData: ByteArray = if (needsResize) {
+                        try {
+                            LevelDataResize.resize(originalData, oldW, oldH, newW, newH)
+                        } catch (e: UnsupportedOperationException) {
+                            println("WARN: Room 0x$roomKey lvlPtr=\$${lvlPtr.toString(16)} resize unsupported: ${e.message} — skipping this pointer")
+                            continue
+                        } catch (e: IllegalArgumentException) {
+                            println("WARN: Room 0x$roomKey lvlPtr=\$${lvlPtr.toString(16)} resize rejected: ${e.message} — skipping this pointer")
+                            continue
+                        }
+                    } else {
+                        originalData.copyOf()
+                    }
                     val layer1Size = (editedData[0].toInt() and 0xFF) or ((editedData[1].toInt() and 0xFF) shl 8)
                     for (op in roomEdits.operations) for (edit in op.edits) {
                         val idx = edit.blockY * bw + edit.blockX; val off = 2 + idx * 2
@@ -3216,17 +3263,83 @@ class EditorState {
                 romData[goff + 1] = 0xFF.toByte()
             }
 
-            // Patch scroll data
-            if (hasScrollEdits && room.roomScrollsPtr > 1) {
-                val originalScrolls = romParser.parseScrollData(room.roomScrollsPtr, room.width, room.height)
-                val modifiedScrolls = originalScrolls.copyOf()
-                for (sc in roomEdits.scrollChanges) {
-                    val idx = sc.screenY * room.width + sc.screenX
-                    if (idx in modifiedScrolls.indices) modifiedScrolls[idx] = sc.newValue
+            // Patch scroll data.
+            //
+            // Two trigger paths:
+            //   1. User scroll edits (existing behavior) — applied in place.
+            //   2. Header width/height change (room enlargement) — the entire
+            //      scroll byte array must be rebuilt at the new size and
+            //      relocated to bank $8F free space.
+            //
+            // Special pointers 0x0000 (all blue) and 0x0001 (all green) are
+            // synthetic — the game returns constants regardless of room size,
+            // so no rebuild or relocation is needed when resizing. Scroll
+            // edits against synthetic pointers are still ignored (no place to
+            // write them).
+            if ((hasScrollEdits || needsResize) && room.roomScrollsPtr != 0) {
+                val allStateOffsets = romParser.findAllStateDataOffsets(roomId)
+
+                // Group state offsets by their current scroll pointer (read live from ROM
+                // because earlier export passes may have already updated it).
+                val ptrToStateOffsets = mutableMapOf<Int, MutableList<Int>>()
+                for (stateOffset in allStateOffsets) {
+                    val sp = (romData[stateOffset + 14].toInt() and 0xFF) or
+                            ((romData[stateOffset + 15].toInt() and 0xFF) shl 8)
+                    ptrToStateOffsets.getOrPut(sp) { mutableListOf() }.add(stateOffset)
                 }
-                val scrollPc = romParser.snesToPc(RomConstants.BANK_ROOM_DATA or room.roomScrollsPtr)
-                for (i in modifiedScrolls.indices) {
-                    if (scrollPc + i < romData.size) romData[scrollPc + i] = modifiedScrolls[i].toByte()
+
+                for ((scrollPtr, statesForPtr) in ptrToStateOffsets) {
+                    if (scrollPtr == 0x0000 || scrollPtr == 0x0001) {
+                        if (hasScrollEdits) {
+                            println("INFO: Room 0x$roomKey scroll ptr 0x${scrollPtr.toString(16)} is synthetic — scroll edits ignored for these states")
+                        }
+                        continue
+                    }
+                    val scrollPc = romParser.snesToPc(RomConstants.BANK_ROOM_DATA or scrollPtr)
+                    val oldSize = oldW * oldH
+                    if (scrollPc + oldSize > romData.size) {
+                        println("WARN: Room 0x$roomKey scroll ptr 0x${scrollPtr.toString(16)} out of ROM bounds — skipping")
+                        continue
+                    }
+
+                    val newSize = newW * newH
+                    val newScrolls = ByteArray(newSize) { 0x01 }  // default new screens to blue
+                    // Copy preserved rows (each old row of length oldW into the
+                    // first oldW columns of the corresponding new row).
+                    for (sy in 0 until oldH) {
+                        for (sx in 0 until oldW) {
+                            newScrolls[sy * newW + sx] = romData[scrollPc + sy * oldW + sx]
+                        }
+                    }
+                    // Apply user scroll edits (indexed against the post-resize stride).
+                    for (sc in roomEdits.scrollChanges) {
+                        val idx = sc.screenY * newW + sc.screenX
+                        if (idx in newScrolls.indices) newScrolls[idx] = sc.newValue.toByte()
+                    }
+
+                    if (newSize <= oldSize) {
+                        // In-place write (only path for pure scroll edits, no resize).
+                        for (i in 0 until newSize) romData[scrollPc + i] = newScrolls[i]
+                    } else {
+                        // Relocate to bank $8F free space and update every state pointer.
+                        if (freePtr + newSize > bank8FEnd) {
+                            println("WARN: Room 0x$roomKey no free space in \$8F for relocated scroll data (${newSize} bytes) — skipped")
+                            continue
+                        }
+                        val writePc = freePtr
+                        freePtr += newSize
+                        System.arraycopy(newScrolls, 0, romData, writePc, newSize)
+                        val newSnes = romParser.pcToSnes(writePc)
+                        val newPtr = newSnes and 0xFFFF
+                        for (stateOffset in statesForPtr) {
+                            romData[stateOffset + 14] = (newPtr and 0xFF).toByte()
+                            romData[stateOffset + 15] = ((newPtr shr 8) and 0xFF).toByte()
+                        }
+                        // Zero-fill the old region so a future free-space scan
+                        // doesn't trip over it (matches the PLM relocator pattern).
+                        for (i in 0 until oldSize) romData[scrollPc + i] = 0
+                        println("Room 0x$roomKey: relocated scroll data 0x${scrollPtr.toString(16)} -> 0x${newPtr.toString(16)} ($newSize bytes, ${statesForPtr.size} state(s))")
+                    }
                 }
                 roomsPatched.add(roomKey)
             }
