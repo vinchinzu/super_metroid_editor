@@ -53,6 +53,7 @@ fun main(args: Array<String>) {
         "room" -> cmdRoom(roomExporter, json, commandArgs)
         "graph" -> cmdGraph(roomExporter, json)
         "export" -> cmdExport(roomExporter, json, commandArgs)
+        "enlarge" -> cmdEnlarge(parser, commandArgs)
         else -> {
             System.err.println("Unknown command: $command")
             printUsage()

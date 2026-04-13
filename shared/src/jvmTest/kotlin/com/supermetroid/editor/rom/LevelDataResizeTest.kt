@@ -203,7 +203,7 @@ class LevelDataResizeTest {
     }
 
     @Test
-    fun `layer 2 stored blobs are explicitly rejected`() {
+    fun `layer 2 stored blobs are resized correctly`() {
         // Synthetic blob with: header + L1 + L2 (=L1) + BTS
         val w = 1; val h = 1
         val l1 = w * h * 512
@@ -211,10 +211,14 @@ class LevelDataResizeTest {
         val blob = ByteArray(2 + 2 * l1 + bts)
         blob[0] = (l1 and 0xFF).toByte()
         blob[1] = ((l1 shr 8) and 0xFF).toByte()
-        // (L1, L2, BTS contents are zero — only the size matters for detection)
-        assertThrows(UnsupportedOperationException::class.java) {
-            LevelDataResize.resize(blob, w, h, 2, 1)
-        }
+        // Put a recognizable pattern in Layer 2
+        for (i in 2 + l1 until 2 + 2 * l1) blob[i] = 0x42
+        val out = LevelDataResize.resize(blob, w, h, 2, 1)
+        val newL1 = 2 * 1 * 512
+        val expectedSize = 2 + 2 * newL1 + (2 * 1 * 256)
+        assertEquals(expectedSize, out.size)
+        // Layer 2 old tiles should be preserved at their positions
+        assertEquals(0x42, out[2 + newL1].toInt() and 0xFF)
     }
 
     @Test

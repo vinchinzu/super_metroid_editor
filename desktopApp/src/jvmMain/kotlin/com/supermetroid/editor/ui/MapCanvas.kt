@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -1003,6 +1006,7 @@ fun MapCanvas(
                             val editBitmap = remember(compositeForEdit) { compositeForEdit.toComposeImageBitmap() }
                             
                             LaunchedEffect(Unit) { mapFocusReq.requestFocus() }
+                            Box(modifier = Modifier.fillMaxSize()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1027,9 +1031,14 @@ fun MapCanvas(
                                                 hScrollState.scrollTo(newScrollX)
                                                 vScrollState.scrollTo(newScrollY)
                                             }
+                                        } else if (ne?.isShiftDown == true) {
+                                            val delta = if (sd.x != 0f) sd.x else sd.y
+                                            coroutineScope.launch {
+                                                hScrollState.scrollTo((hScrollState.value + (delta * 40).toInt()).coerceIn(0, hScrollState.maxValue))
+                                            }
                                         } else coroutineScope.launch {
-                                            hScrollState.scrollTo((hScrollState.value + sd.x).toInt().coerceIn(0, hScrollState.maxValue))
-                                            vScrollState.scrollTo((vScrollState.value + sd.y).toInt().coerceIn(0, vScrollState.maxValue))
+                                            hScrollState.scrollTo((hScrollState.value + (sd.x * 40).toInt()).coerceIn(0, hScrollState.maxValue))
+                                            vScrollState.scrollTo((vScrollState.value + (sd.y * 40).toInt()).coerceIn(0, vScrollState.maxValue))
                                         }
                                     }
                                     .onPointerEvent(PointerEventType.Press) { event ->
@@ -1388,6 +1397,15 @@ fun MapCanvas(
                                         }
                                     }
                                 }
+                            }
+                            VerticalScrollbar(
+                                adapter = rememberScrollbarAdapter(vScrollState),
+                                modifier = Modifier.align(androidx.compose.ui.Alignment.CenterEnd).fillMaxHeight()
+                            )
+                            HorizontalScrollbar(
+                                adapter = rememberScrollbarAdapter(hScrollState),
+                                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth()
+                            )
                             }
 
                             // ─── Right-click context menu (multi-tile selection only) ──────

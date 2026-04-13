@@ -76,21 +76,18 @@ object LevelDataResize {
         val expectedNoLayer2Size = 2 + oldL1Size + oldBtsBytes
         val expectedWithLayer2Size = 2 + 2 * oldL1Size + oldBtsBytes
 
-        if (original.size >= expectedWithLayer2Size) {
-            throw UnsupportedOperationException(
-                "Layer 2-stored rooms are not supported by LevelDataResize " +
-                        "(original blob size ${original.size} >= ${expectedWithLayer2Size})"
-            )
-        }
-        require(original.size >= expectedNoLayer2Size) {
-            "level data blob ${original.size} bytes too small for ${oldW}x${oldH} " +
-                    "(expected at least ${expectedNoLayer2Size})"
+        val hasLayer2 = original.size >= expectedWithLayer2Size
+        if (!hasLayer2) {
+            require(original.size >= expectedNoLayer2Size) {
+                "level data blob ${original.size} bytes too small for ${oldW}x${oldH} " +
+                        "(expected at least ${expectedNoLayer2Size})"
+            }
         }
 
         val newL1Size = newW * newH * 512
         val newBlocksPerScreenRow = newW * 16
         val newBtsBytes = newW * newH * 256
-        val newSize = 2 + newL1Size + newBtsBytes
+        val newSize = if (hasLayer2) 2 + 2 * newL1Size + newBtsBytes else 2 + newL1Size + newBtsBytes
         val out = ByteArray(newSize)
 
         // Header: new layer1Size, little-endian.
@@ -99,8 +96,10 @@ object LevelDataResize {
 
         val oldL1Start = 2
         val newL1Start = 2
-        val oldBtsStart = 2 + oldL1Size
-        val newBtsStart = 2 + newL1Size
+        val oldL2Start = if (hasLayer2) 2 + oldL1Size else -1
+        val newL2Start = if (hasLayer2) 2 + newL1Size else -1
+        val oldBtsStart = if (hasLayer2) 2 + 2 * oldL1Size else 2 + oldL1Size
+        val newBtsStart = if (hasLayer2) 2 + 2 * newL1Size else 2 + newL1Size
 
         val fillLow = (fillBlockWord and 0xFF).toByte()
         val fillHigh = ((fillBlockWord shr 8) and 0xFF).toByte()
@@ -110,14 +109,12 @@ object LevelDataResize {
         for (by in 0 until oldBlocksPerScreenCol) {
             val srcRowStart = oldL1Start + (by * oldBlocksPerScreenRow) * 2
             val dstRowStart = newL1Start + (by * newBlocksPerScreenRow) * 2
-            // copy oldBlocksPerScreenRow words (×2 bytes each)
             original.copyInto(
                 destination = out,
                 destinationOffset = dstRowStart,
                 startIndex = srcRowStart,
                 endIndex = srcRowStart + oldBlocksPerScreenRow * 2,
             )
-            // Fill the new columns to the right of the preserved region with the fill word.
             var col = oldBlocksPerScreenRow
             var fillOff = newL1Start + (by * newBlocksPerScreenRow + col) * 2
             while (col < newBlocksPerScreenRow) {
@@ -136,6 +133,39 @@ object LevelDataResize {
                     out[off] = fillLow
                     out[off + 1] = fillHigh
                     off += 2
+                }
+            }
+        }
+
+        // 2b. Copy preserved Layer 2 region (same layout as Layer 1, fill with 0x0000).
+        if (hasLayer2) {
+            for (by in 0 until oldBlocksPerScreenCol) {
+                val srcRowStart = oldL2Start + (by * oldBlocksPerScreenRow) * 2
+                val dstRowStart = newL2Start + (by * newBlocksPerScreenRow) * 2
+                original.copyInto(
+                    destination = out,
+                    destinationOffset = dstRowStart,
+                    startIndex = srcRowStart,
+                    endIndex = srcRowStart + oldBlocksPerScreenRow * 2,
+                )
+                // Fill new columns with transparent (0x0000)
+                var col = oldBlocksPerScreenRow
+                var fillOff = newL2Start + (by * newBlocksPerScreenRow + col) * 2
+                while (col < newBlocksPerScreenRow) {
+                    out[fillOff] = 0
+                    out[fillOff + 1] = 0
+                    col++
+                    fillOff += 2
+                }
+            }
+            if (newH > oldH) {
+                for (by in oldBlocksPerScreenCol until newH * 16) {
+                    var off = newL2Start + (by * newBlocksPerScreenRow) * 2
+                    for (bx in 0 until newBlocksPerScreenRow) {
+                        out[off] = 0
+                        out[off + 1] = 0
+                        off += 2
+                    }
                 }
             }
         }

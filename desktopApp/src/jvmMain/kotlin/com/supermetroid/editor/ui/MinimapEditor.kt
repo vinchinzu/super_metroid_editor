@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
@@ -302,6 +306,7 @@ fun MinimapCanvas(state: MinimapEditorState, editorState: EditorState, modifier:
         val canvasH = (state.cellSize * MinimapData.MAP_HEIGHT).dp
         // Pixel cell size for pointer coordinate conversion (dp cellSize * density)
         val csPx = with(density) { state.cellSize.dp.toPx() }
+        Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()
             .onPointerEvent(PointerEventType.Scroll) { event ->
                 val ne = event.nativeEvent as? MouseEvent
@@ -319,6 +324,11 @@ fun MinimapCanvas(state: MinimapEditorState, editorState: EditorState, modifier:
                     coroutineScope.launch {
                         hScroll.scrollTo(((contentXBefore * newCsPx) - mousePos.x).toInt().coerceAtLeast(0))
                         vScroll.scrollTo(((contentYBefore * newCsPx) - mousePos.y).toInt().coerceAtLeast(0))
+                    }
+                } else if (ne?.isShiftDown == true) {
+                    val delta = if (sd.x != 0f) sd.x else sd.y
+                    coroutineScope.launch {
+                        hScroll.scrollTo((hScroll.value + (delta * 40).toInt()).coerceIn(0, hScroll.maxValue))
                     }
                 } else coroutineScope.launch {
                     vScroll.scrollTo((vScroll.value + sd.y * 40).toInt().coerceIn(0, vScroll.maxValue))
@@ -395,6 +405,15 @@ fun MinimapCanvas(state: MinimapEditorState, editorState: EditorState, modifier:
                 state.stationData, state.areaRooms, state.hoverX, state.hoverY,
                 state.tool, state.selectedTile, state.selectedPalette, state.selectedRoom, state.moveBuffer)
         }
+        }
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(vScroll),
+            modifier = Modifier.align(androidx.compose.ui.Alignment.CenterEnd).fillMaxHeight()
+        )
+        HorizontalScrollbar(
+            adapter = rememberScrollbarAdapter(hScroll),
+            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth()
+        )
         }
     }
 }
