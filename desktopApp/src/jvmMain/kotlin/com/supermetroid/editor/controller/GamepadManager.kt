@@ -20,10 +20,10 @@ import com.supermetroid.editor.libretro.LibretroConstants
  *   └─────────────────────────┘
  *
  * SDL uses Xbox-style ABXY naming. For a Bluetooth SNES controller:
- *   SDL A → SNES B (east/right face button)
- *   SDL B → SNES A (south face button)
- *   SDL X → SNES Y (north face button)
- *   SDL Y → SNES X (west face button)
+ *   SDL A → SNES B (south/bottom face button)
+ *   SDL B → SNES A (east/right face button)
+ *   SDL X → SNES Y (west/left face button)
+ *   SDL Y → SNES X (north/top face button)
  *
  * However, SDL's GameController DB remaps controllers so that
  * SDL button names match *position* (A=south, B=east, X=west, Y=north).
@@ -140,11 +140,13 @@ class GamepadManager {
         if (state.leftStickX < -stickDeadzone) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_LEFT] = 1
         if (state.leftStickX > stickDeadzone) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_RIGHT] = 1
 
-        // Face buttons: SDL → SNES (SNES BT controllers report A/B/X/Y directly)
-        if (state.a) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_A] = 1
-        if (state.b) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_B] = 1
-        if (state.x) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_X] = 1
-        if (state.y) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_Y] = 1
+        applySdlPositionFaceButtonsToSnes(
+            buttons = buttons,
+            sdlA = state.a,
+            sdlB = state.b,
+            sdlX = state.x,
+            sdlY = state.y,
+        )
 
         // Shoulders
         if (state.lb) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_L] = 1
@@ -188,4 +190,17 @@ class GamepadManager {
     companion object {
         private const val MAX_CONSECUTIVE_ERRORS = 3
     }
+}
+
+internal fun applySdlPositionFaceButtonsToSnes(
+    buttons: MutableList<Int>,
+    sdlA: Boolean,
+    sdlB: Boolean,
+    sdlX: Boolean,
+    sdlY: Boolean,
+) {
+    if (sdlA) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_B] = 1
+    if (sdlB) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_A] = 1
+    if (sdlX) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_Y] = 1
+    if (sdlY) buttons[LibretroConstants.RETRO_DEVICE_ID_JOYPAD_X] = 1
 }

@@ -160,3 +160,31 @@ tasks.register<JavaExec>("verifyReplay") {
         System.getenv(key)?.let { environment(key, it) }
     }
 }
+
+tasks.register<JavaExec>("hillClimbReplay") {
+    description = "Hill-climb a replay input window and write a mutated replay bundle"
+    group = "verification"
+    dependsOn("jvmMainClasses", rootProject.tasks.named("buildLibretroCore"))
+    mainClass.set("com.supermetroid.editor.emulator.ReplayHillClimbKt")
+    val jvmTarget = kotlin.targets.getByName("jvm")
+    val mainCompilation = jvmTarget.compilations.getByName("main")
+    classpath = mainCompilation.output.allOutputs + mainCompilation.runtimeDependencyFiles!!
+    workingDir = rootProject.projectDir
+    listOf(
+        "SMEDIT_HILL_REPLAY",
+        "SMEDIT_HILL_OUTPUT_DIR",
+        "SMEDIT_HILL_ITERATIONS",
+        "SMEDIT_HILL_SEED",
+        "SMEDIT_HILL_START_ROOM",
+        "SMEDIT_HILL_TARGET_ROOM",
+        "SMEDIT_HILL_MAX_EXTRA_FRAMES",
+        "SMEDIT_HILL_EVAL_SLACK",
+        "SMEDIT_HILL_APPEND_TAIL",
+        "SMEDIT_HILL_WORKERS",
+        "SMEDIT_HILL_ALLOW_PARALLEL",
+        "SMEDIT_ROM_PATH",
+        "SMEDIT_LIBRETRO_CORE",
+    ).forEach { key ->
+        System.getenv(key)?.let { environment(key, it) }
+    }
+}

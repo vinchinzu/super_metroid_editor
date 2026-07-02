@@ -17,6 +17,10 @@ data class SuperMetroidFrameState(
     val health: Int? = null,
     val doorTransition: Boolean = false,
 ) {
+    /** True when Samus is playable (game state 8) in [roomId] and not in a door transition. */
+    fun isPlayableIn(roomId: Int): Boolean =
+        this.roomId == roomId && gameState == 8 && !doorTransition
+
     fun differingFields(actual: SuperMetroidFrameState): List<String> {
         val fields = mutableListOf<String>()
         if (roomId != actual.roomId) fields += "roomId"

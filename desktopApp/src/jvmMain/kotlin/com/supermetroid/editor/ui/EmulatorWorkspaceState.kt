@@ -167,6 +167,9 @@ class EmulatorWorkspaceState(
     private val roomExportCache = mutableMapOf<Int, EditorRoomExport>()
     private var currentRomPath: String? = null
     private var comboConsumedUntilRelease = false
+    private val bootStateOverride = System.getenv("SMEDIT_BOOT_STATE")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
 
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
@@ -918,7 +921,7 @@ class EmulatorWorkspaceState(
                 null
             }
         }.getOrNull()
-        return listOfNotNull(metadataDefault, "ZebesStart", "Start")
+        return listOfNotNull(bootStateOverride, metadataDefault, "ZebesStart", "Start")
             .firstOrNull { it in stateNames }
     }
 

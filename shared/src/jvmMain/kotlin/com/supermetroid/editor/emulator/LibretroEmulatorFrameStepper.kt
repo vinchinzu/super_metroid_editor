@@ -26,14 +26,24 @@ class LibretroEmulatorFrameStepper(
         nextFrameNumber = firstFrameNumber
     }
 
-    override fun runOneFrame(inputBits: Int): FrameRecord {
+    override fun advanceFrame(inputBits: Int): SuperMetroidFrameState {
         val normalizedInput = SnesInputBits.normalize(inputBits)
         core.setInput(0, SnesInputBits.toButtonList(normalizedInput))
         core.run()
+        nextFrameNumber++
+        val wram = readSystemRam(0, core.systemRamSize())
+        return SuperMetroidWram.frameState(wram)
+    }
 
+    override fun runOneFrame(inputBits: Int): FrameRecord {
+        val normalizedInput = SnesInputBits.normalize(inputBits)
+        val frameNumber = nextFrameNumber
+        core.setInput(0, SnesInputBits.toButtonList(normalizedInput))
+        core.run()
+        nextFrameNumber++
         val wram = readSystemRam(0, core.systemRamSize())
         return FrameRecord(
-            frameNumber = nextFrameNumber++,
+            frameNumber = frameNumber,
             inputBits = normalizedInput,
             systemRamHash = Sha256.hex(wram),
             frameState = SuperMetroidWram.frameState(wram),

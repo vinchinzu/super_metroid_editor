@@ -36,10 +36,7 @@ fun main() {
         }
 
     val bundle = AttemptReplayBundle.read(replayFile)
-    val resolvedRom = findRomForHash(bundle.log.romHash)
-        ?: System.getenv("SMEDIT_ROM_PATH")?.trim()?.takeIf { it.isNotEmpty() }
-            ?.let { File(it).absoluteFile }
-            ?.takeIf { it.isFile }
+    val resolvedRom = RomHashResolver.resolveRom(bundle.log.romHash)
         ?: run {
             System.err.println("Could not find ROM matching bundle hash ${bundle.log.romHash}")
             return
@@ -95,21 +92,5 @@ fun main() {
         if (initialized) {
             core.close()
         }
-    }
-}
-
-private fun findRomForHash(expectedHash: String): File? {
-    val candidates = buildList {
-        System.getenv("SMEDIT_ROM_PATH")?.trim()?.takeIf { it.isNotEmpty() }?.let { add(File(it)) }
-        var dir = File(System.getProperty("user.dir")).absoluteFile
-        repeat(6) {
-            add(File(dir, "custom_integrations/SuperMetroid-Snes/rom-v1.0.sfc"))
-            add(File(dir, "custom_integrations/SuperMetroid-Snes/rom.sfc"))
-            add(File(dir, "test-resources/Super Metroid (JU) [!].smc"))
-            dir = dir.parentFile ?: return@repeat
-        }
-    }
-    return candidates.distinct().firstOrNull { file ->
-        file.isFile && Sha256.hex(file.readBytes()) == expectedHash
     }
 }

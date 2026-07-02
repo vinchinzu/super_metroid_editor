@@ -173,6 +173,8 @@ fun FloatingEmulatorWindow(
         val replayPath = System.getenv("SMEDIT_REPLAY_PATH")?.trim()?.takeIf { it.isNotEmpty() }
         if (replayPath != null) {
             workspaceState.openReplay(replayPath)
+        } else if (System.getenv("SMEDIT_AUTO_RECORD") == "1") {
+            workspaceState.setRecording(true)
         }
     }
 
