@@ -27,6 +27,7 @@ object TasCli {
             "tas-info" -> cmdInfo(args, out)
             "tas-convert" -> cmdConvert(args)
             "tas-run" -> cmdRun(romPath, args, out)
+            "tas-batch" -> cmdBatch(romPath, args, out)
             else -> {
                 System.err.println("Unknown TAS command: $command")
                 exitProcess(1)
@@ -151,6 +152,86 @@ object TasCli {
                 stopAtGoal = stopAtGoal,
             )
             println(out.encodeToString(result))
+        }
+    }
+
+    @Serializable
+    private data class BatchJob(
+        val movie: String,
+        /** Start state file; null starts from power-on. */
+        val state: String? = null,
+        val goal: TasGoal? = null,
+        val traceEvery: Int = 0,
+        val stopAtGoal: Boolean = true,
+    )
+
+    @Serializable
+    private data class BatchSpec(
+        val core: String? = null,
+        val jobs: List<BatchJob> = emptyList(),
+    )
+
+    @Serializable
+    private data class BatchEntry(
+        val movie: String,
+        val error: String? = null,
+        val result: com.supermetroid.editor.tas.TasRunResult? = null,
+    )
+
+    /**
+     * Evaluate many movies in one process/core session — the fan-in path for
+     * Python optimizers, ~one JVM+core load per hundreds of candidates instead
+     * of per candidate. Reads a job spec JSON, emits a result array.
+     */
+    private fun cmdBatch(romPath: String?, args: List<String>, out: Json) {
+        if (romPath == null) {
+            System.err.println("tas-batch requires --rom <path>")
+            exitProcess(1)
+        }
+        val specPath = opt(args, "--jobs") ?: run {
+            System.err.println(
+                "Usage: --rom <rom> tas-batch --jobs <spec.json> [--out <results.json>]\n" +
+                    "  spec: {\"core\": \"optional/core.so\", \"jobs\": [{\"movie\": ..., " +
+                    "\"state\": ..., \"goal\": {...}, \"traceEvery\": 0, \"stopAtGoal\": true}]}"
+            )
+            exitProcess(1)
+        }
+        val spec = json.decodeFromString<BatchSpec>(File(specPath).readText())
+        val corePath = LibretroCoreDiscovery.findCore(spec.core ?: opt(args, "--core")) ?: run {
+            System.err.println("No SNES libretro core found; set \"core\" in the spec or pass --core")
+            exitProcess(1)
+        }
+        // Linear evaluation never seeks backwards, so greenzone anchors are pure overhead.
+        TasSession(corePath, romPath, anchorInterval = 0).use { session ->
+            val stateCache = HashMap<String, ByteArray>()
+            val entries = spec.jobs.map { job ->
+                runCatching {
+                    require(File(job.movie).isFile) { "Movie not found: ${job.movie}" }
+                    val (movie, embeddedState) = loadMovie(job.movie)
+                    when {
+                        job.state != null -> session.loadStateBytes(
+                            stateCache.getOrPut(job.state) { Bk2Io.loadStateFile(File(job.state)) }
+                        )
+                        embeddedState != null -> session.loadStateBytes(embeddedState)
+                        else -> session.reset()
+                    }
+                    TasEvaluator.run(
+                        session = session,
+                        movie = movie,
+                        goal = job.goal,
+                        traceEvery = job.traceEvery,
+                        stopAtGoal = job.stopAtGoal,
+                    )
+                }.fold(
+                    onSuccess = { BatchEntry(movie = job.movie, result = it) },
+                    onFailure = { BatchEntry(movie = job.movie, error = it.message ?: it.toString()) },
+                )
+            }
+            val encoded = out.encodeToString(entries)
+            // Emulator cores may log to stdout, so support writing results to a
+            // file the caller can parse cleanly.
+            val outPath = opt(args, "--out")
+            if (outPath != null) File(outPath).writeText(encoded) else println(encoded)
         }
     }
 }

@@ -21,7 +21,7 @@ shared/src/jvmMain/.../tas/          Pure TAS engine (no UI)
 ├── TasGoal.kt       Serializable goals (room/position/item/boss/survive) + results
 └── TasEvaluator.kt  Movie → TasRunResult (framesToGoal, IGT, transitions, trace)
 
-cli/.../TasCli.kt    tas-run / tas-info / tas-convert (JSON on stdout)
+cli/.../TasCli.kt    tas-run / tas-batch / tas-info / tas-convert (JSON on stdout)
 desktopApp/.../ui/TasWorkspaceState.kt + TasCard   Record/playback in the emulator tab
 ```
 
@@ -61,7 +61,17 @@ Button order everywhere is env order — identical to
 # Inspect / convert movies
 ... tas-info --movie run.bk2
 ... tas-convert --movie run.bk2 --out run.tasmovie.json --extract-state start.state
+
+# Evaluate many candidates in ONE core session (the optimizer fan-in path).
+# Spec: {"core": "optional/core.so", "jobs": [{"movie", "state", "goal",
+# "traceEvery", "stopAtGoal"}, ...]}; --out avoids core log noise on stdout.
+... tas-batch --jobs /abs/spec.json --out /abs/results.json
 ```
+
+For plain-`java` invocation without a gradle build per call (parallel search
+workers), dump the classpath once with `:cli:printCliClasspath` and run
+`java -cp <cp> com.supermetroid.editor.cli.CliMainKt ...`. Note core
+auto-discovery is CWD-relative — pass the core path explicitly.
 
 Notes:
 - Paths must be absolute (`runCli` executes with `cli/` as CWD).
@@ -97,6 +107,15 @@ time (`$09DA`, the speedrun clock), escape timer, 8 enemy slots (x/y/hp,
 stride `0x40` — slot 0 is the boss), beam charge, controller mirrors.
 `SmSnapshot` is the serializable observation shared by the evaluator, CLI
 output, and future models.
+
+## The runs library (`../tas/` in super_metroid_rl)
+
+All historical recordings are promoted into a standardized library one level
+up: `super_metroid_rl/tas/runs/` — every run as `.tasmovie.json` with
+`meta.startState`, provenance in `index.json`, replay verdicts in
+`manifest.json`. See `super_metroid_rl/tas/README.md` for the standard,
+`promote_runs.py` (legacy converters), `verify_runs.py` (library-wide replay
+verification via `tas-batch`), and `climb_optimizer.py` (mutation search).
 
 ## Roadmap hooks (what this foundation is for)
 

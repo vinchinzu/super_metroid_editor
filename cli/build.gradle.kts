@@ -19,6 +19,16 @@ kotlin {
     }
 }
 
+// One-shot classpath dump so external drivers (Python optimizers) can invoke
+// the CLI with plain `java -cp` instead of paying a gradle build per call.
+tasks.register("printCliClasspath") {
+    val cp = kotlin.jvm().compilations["main"].runtimeDependencyFiles +
+        kotlin.jvm().compilations["main"].output.allOutputs
+    doLast {
+        println(cp.files.joinToString(File.pathSeparator))
+    }
+}
+
 tasks.register<JavaExec>("runCli") {
     val cliArgs: String = project.findProperty("args") as? String ?: ""
     mainClass.set("com.supermetroid.editor.cli.CliMainKt")
