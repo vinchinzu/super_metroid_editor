@@ -157,6 +157,7 @@ Commands:
 TAS commands (headless emulator; --rom is the ROM to run, original or edited):
   tas-run --movie <m> [--state <f>] [--goal <g>] [--core <so>]   Play movie, emit JSON result
   tas-batch --jobs <spec.json>        Evaluate many movies in one core session (JSON array out)
+  tas-optimize --movie <seed> --goal <g> --out <dir>   Hill-climb a verified movie (greenzone seek)
   tas-info --movie <m>                Inspect a .tasmovie.json or .bk2 movie
   tas-convert --movie <in> --out <o>  Convert between .tasmovie.json and .bk2
 

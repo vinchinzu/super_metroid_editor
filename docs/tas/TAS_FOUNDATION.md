@@ -19,9 +19,12 @@ shared/src/jvmMain/.../tas/          Pure TAS engine (no UI)
 ├── TasSession.kt    Headless LibretroCore session: frame step, savestates,
 │                    greenzone anchors, seek(frame, movie)
 ├── TasGoal.kt       Serializable goals (room/position/item/boss/survive) + results
-└── TasEvaluator.kt  Movie → TasRunResult (framesToGoal, IGT, transitions, trace)
+├── TasEvaluator.kt  Movie → TasRunResult (framesToGoal, IGT, transitions, trace)
+├── TasMutator.kt    Seeded frame mutations (delete/insert/replace/toggle/revert/
+│                    shift/swap spans) + firstChangedFrame seek hints
+└── TasOptimizer.kt  Greenzone hill climb: mutate → seek → replay suffix → keep wins
 
-cli/.../TasCli.kt    tas-run / tas-batch / tas-info / tas-convert (JSON on stdout)
+cli/.../TasCli.kt    tas-run / tas-batch / tas-optimize / tas-info / tas-convert
 desktopApp/.../ui/TasWorkspaceState.kt + TasCard   Record/playback in the emulator tab
 ```
 
@@ -66,7 +69,25 @@ Button order everywhere is env order — identical to
 # Spec: {"core": "optional/core.so", "jobs": [{"movie", "state", "goal",
 # "traceEvery", "stopAtGoal"}, ...]}; --out avoids core log noise on stdout.
 ... tas-batch --jobs /abs/spec.json --out /abs/results.json
+
+# Improve a VERIFIED run in-process (greenzone hill climb). The seed must
+# already achieve the goal; fitness is fewer framesToGoal, then lower IGT.
+# Writes best.tasmovie.json / history.jsonl / summary.json under --out.
+... tas-optimize --movie /abs/seed.tasmovie.json --state /abs/start.state \
+    --goal '{\"type\":\"room\",\"roomId\":37629,\"maxFrames\":3600}' \
+    --iterations 500 [--rng-seed N] [--window a:b] --out /abs/opt_dir
 ```
+
+`tas-optimize` vs the Python `climb_optimizer.py`: the Python tool mutates
+externally and pays a full replay per candidate via `tas-batch` — use it for
+*discovery* (it has shaped progress fitness for non-achieving movies). The
+native optimizer only replays from each mutation's first changed frame
+(`TasSession.seek` + greenzone), so late-movie edits cost a fraction of a
+replay — use it to *tighten verified runs*. It re-verifies the winner with a
+linear replay before reporting, so greenzone bookkeeping can never fabricate
+an improvement. `--window a:b` protects frames outside `[a, b)` (e.g. a
+verified opening); mutations never touch Select/Start or hold opposing
+directions.
 
 For plain-`java` invocation without a gradle build per call (parallel search
 workers), dump the classpath once with `:cli:printCliClasspath` and run
@@ -119,12 +140,14 @@ verification via `tas-batch`), and `climb_optimizer.py` (mutation search).
 
 ## Roadmap hooks (what this foundation is for)
 
-- **Hill climbing / genetic**: `platformer_common.hillclimb` / `genetic`
-  currently drive stable-retro directly. They can now also emit
-  `.tasmovie.json` candidates and fan out `tas-run` processes — same fitness
-  signal (`framesToGoal`, `endIgtFrames`) on original *and edited* ROMs.
-  `TasMovie.spliced()` + `TasSession.seek()` are the segment-mutation
-  primitives (invalidate greenzone after the edit point via `invalidateAfter`).
+- **Hill climbing / genetic**: `tas-optimize` is the native single-process
+  hill climb (greenzone-accelerated, improvement-only). Python stacks
+  (`platformer_common.hillclimb` / `genetic`, `tas/climb_optimizer.py`) keep
+  owning discovery and population search, fanning out `tas-run`/`tas-batch` —
+  same fitness signal (`framesToGoal`, `endIgtFrames`) on original *and
+  edited* ROMs. `TasMovie.spliced()` + `TasSession.seek()` +
+  `invalidateAfter()` remain available for custom mutation loops;
+  `TasMutator` packages the standard operators.
 - **Maze-finder models**: `Generate` tab levels → export ROM → `tas-run` with
   `position`/`room` goals gives the reward; nav export (`nav_graph.json`)
   provides waypoints.

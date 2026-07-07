@@ -5,6 +5,7 @@ import com.supermetroid.editor.tas.Bk2Io
 import com.supermetroid.editor.tas.TasEvaluator
 import com.supermetroid.editor.tas.TasGoal
 import com.supermetroid.editor.tas.TasMovie
+import com.supermetroid.editor.tas.TasOptimizer
 import com.supermetroid.editor.tas.TasSession
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -28,6 +29,7 @@ object TasCli {
             "tas-convert" -> cmdConvert(args)
             "tas-run" -> cmdRun(romPath, args, out)
             "tas-batch" -> cmdBatch(romPath, args, out)
+            "tas-optimize" -> cmdOptimize(romPath, args, out)
             else -> {
                 System.err.println("Unknown TAS command: $command")
                 exitProcess(1)
@@ -232,6 +234,102 @@ object TasCli {
             // file the caller can parse cleanly.
             val outPath = opt(args, "--out")
             if (outPath != null) File(outPath).writeText(encoded) else println(encoded)
+        }
+    }
+
+    @Serializable
+    private data class OptimizeSummary(
+        val seedMovie: String,
+        val seedFramesToGoal: Int,
+        val bestFramesToGoal: Int,
+        val framesSaved: Int,
+        val endIgtFrames: Long,
+        val evaluations: Int,
+        val improvements: List<TasOptimizer.Improvement>,
+        val bestMoviePath: String,
+    )
+
+    /**
+     * In-process hill climb: mutate a verified movie and keep frame-saving
+     * candidates, replaying only from each mutation's first changed frame via
+     * greenzone seek. Much faster per candidate than tas-batch fan-out.
+     */
+    private fun cmdOptimize(romPath: String?, args: List<String>, out: Json) {
+        if (romPath == null) {
+            System.err.println("tas-optimize requires --rom <path>")
+            exitProcess(1)
+        }
+        val moviePath = opt(args, "--movie")
+        val outDir = opt(args, "--out")
+        val goalSpec = opt(args, "--goal")
+        if (moviePath == null || outDir == null || goalSpec == null) {
+            System.err.println(
+                "Usage: --rom <rom> tas-optimize --movie <seed> --goal <goal.json|inline-json> --out <dir>\n" +
+                    "       [--state <file.state>] [--iterations N=200] [--rng-seed N] [--window a:b]\n" +
+                    "       [--core <core.so>] [--anchor-interval N=300]\n" +
+                    "  Seed must already achieve the goal; writes best.tasmovie.json, history.jsonl, summary.json"
+            )
+            exitProcess(1)
+        }
+        val corePath = LibretroCoreDiscovery.findCore(opt(args, "--core")) ?: run {
+            System.err.println("No SNES libretro core found; pass --core <path to snes9x_libretro.so>")
+            exitProcess(1)
+        }
+        val (movie, embeddedState) = loadMovie(moviePath)
+        val goalFile = File(goalSpec)
+        val goal = json.decodeFromString<TasGoal>(if (goalFile.isFile) goalFile.readText() else goalSpec)
+        val window = opt(args, "--window")?.split(":", limit = 2)
+        val config = TasOptimizer.Config(
+            iterations = opt(args, "--iterations")?.toIntOrNull() ?: 200,
+            rngSeed = opt(args, "--rng-seed")?.toLongOrNull() ?: 0x5EED,
+            windowStart = window?.getOrNull(0)?.toIntOrNull() ?: 0,
+            windowEnd = window?.getOrNull(1)?.toIntOrNull() ?: 0,
+        )
+        val anchorInterval = opt(args, "--anchor-interval")?.toIntOrNull() ?: 300
+
+        val dir = File(outDir).apply { mkdirs() }
+        val historyFile = File(dir, "history.jsonl").apply { writeText("") }
+        TasSession(corePath, romPath, anchorInterval = anchorInterval).use { session ->
+            val statePath = opt(args, "--state") ?: movie.meta.startState
+            when {
+                statePath != null && File(statePath).isFile -> session.loadStateFile(File(statePath))
+                embeddedState != null -> session.loadStateBytes(embeddedState)
+                statePath != null -> {
+                    System.err.println("Start state not found: $statePath")
+                    exitProcess(1)
+                }
+            }
+            val result = TasOptimizer(session, goal, config).optimize(movie) { improvement ->
+                historyFile.appendText(json.encodeToString(improvement) + "\n")
+                System.err.println(
+                    "Improved @${improvement.iteration}: ${improvement.framesToGoal}f " +
+                        "igt=${improvement.endIgtFrames} edit=${improvement.source}"
+                )
+            }
+            val bestFile = File(dir, "best.tasmovie.json")
+            result.best
+                .withMeta(
+                    result.best.meta.copy(
+                        startState = opt(args, "--state") ?: movie.meta.startState,
+                        rerecordCount = movie.meta.rerecordCount + result.evaluations,
+                        notes = "tas-optimize: ${result.seedResult.framesToGoal}f -> " +
+                            "${result.bestResult.framesToGoal}f from ${File(moviePath).name}",
+                    )
+                )
+                .save(bestFile, pretty = true)
+            val summary = OptimizeSummary(
+                seedMovie = moviePath,
+                seedFramesToGoal = result.seedResult.framesToGoal,
+                bestFramesToGoal = result.bestResult.framesToGoal,
+                framesSaved = result.seedResult.framesToGoal - result.bestResult.framesToGoal,
+                endIgtFrames = result.bestResult.endIgtFrames,
+                evaluations = result.evaluations,
+                improvements = result.improvements,
+                bestMoviePath = bestFile.absolutePath,
+            )
+            val encoded = out.encodeToString(summary)
+            File(dir, "summary.json").writeText(encoded)
+            println(encoded)
         }
     }
 }
