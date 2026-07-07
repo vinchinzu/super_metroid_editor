@@ -31,6 +31,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -352,6 +353,8 @@ fun EmulatorWorkspace(
                     EmulatorViewport(workspaceState = workspaceState)
                     Spacer(Modifier.height(8.dp))
                     EmulatorCheckpointCard(workspaceState = workspaceState)
+                    Spacer(Modifier.height(8.dp))
+                    TasCard(workspaceState = workspaceState)
                     Spacer(Modifier.height(8.dp))
                     SnapshotHud(workspaceState = workspaceState)
                 }
@@ -1032,6 +1035,90 @@ private fun EmulatorCheckpointCard(workspaceState: EmulatorWorkspaceState) {
                         Spacer(Modifier.weight(1f))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TasCard(workspaceState: EmulatorWorkspaceState) {
+    val scope = rememberCoroutineScope()
+    val tas = workspaceState.tas
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("TAS Movie", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text(
+                    when (tas.mode) {
+                        TasWorkspaceState.Mode.RECORDING -> "● REC  frame ${tas.frameIndex}"
+                        TasWorkspaceState.Mode.PLAYING ->
+                            "▶ ${tas.frameIndex}/${tas.loadedMovie?.frameCount ?: 0}"
+                        TasWorkspaceState.Mode.IDLE ->
+                            tas.loadedMovie?.let { "${it.frameCount} frames loaded" } ?: "idle"
+                    },
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = when (tas.mode) {
+                        TasWorkspaceState.Mode.RECORDING -> MaterialTheme.colorScheme.error
+                        TasWorkspaceState.Mode.PLAYING -> MaterialTheme.colorScheme.primary
+                        TasWorkspaceState.Mode.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            OutlinedTextField(
+                value = tas.movieName,
+                onValueChange = { tas.movieName = it },
+                label = { Text("Movie name", fontSize = 10.sp) },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val sessionReady = workspaceState.session.active && !workspaceState.isBusy
+                if (tas.mode == TasWorkspaceState.Mode.IDLE) {
+                    OutlinedButton(
+                        onClick = { scope.launch { workspaceState.tasStartRecording() } },
+                        enabled = sessionReady,
+                    ) { Text("Record", fontSize = 11.sp) }
+                    OutlinedButton(
+                        onClick = { scope.launch { workspaceState.tasStartPlayback() } },
+                        enabled = sessionReady && tas.loadedMovie != null,
+                    ) { Text("Play", fontSize = 11.sp) }
+                } else {
+                    Button(onClick = { workspaceState.tasStop() }) { Text("Stop", fontSize = 11.sp) }
+                }
+                OutlinedButton(
+                    onClick = { tas.saveMovie() },
+                    enabled = tas.mode == TasWorkspaceState.Mode.IDLE && tas.loadedMovie != null,
+                ) { Text("Save", fontSize = 11.sp) }
+                OutlinedButton(
+                    onClick = { tas.loadMovie(tas.movieName) },
+                    enabled = tas.mode == TasWorkspaceState.Mode.IDLE,
+                ) { Text("Load", fontSize = 11.sp) }
+            }
+            tas.statusText?.let {
+                Text(it, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            val movies = tas.listMovies()
+            if (movies.isNotEmpty() && tas.mode == TasWorkspaceState.Mode.IDLE) {
+                Text(
+                    "In editor_recordings/: ${movies.take(6).joinToString("  ")}" +
+                        if (movies.size > 6) "  (+${movies.size - 6} more)" else "",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

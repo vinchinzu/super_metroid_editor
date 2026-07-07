@@ -33,13 +33,20 @@ fun main(args: Array<String>) {
         }
     }
 
-    if (romPath == null) {
-        System.err.println("Error: --rom <path> is required")
-        exitProcess(1)
-    }
     if (command == null) {
         System.err.println("Error: no command specified")
         printUsage()
+        exitProcess(1)
+    }
+
+    // TAS commands run the emulator headlessly and don't need a parsed ROM.
+    if (command.startsWith("tas-")) {
+        TasCli.run(command, romPath, commandArgs, pretty = !compact)
+        return
+    }
+
+    if (romPath == null) {
+        System.err.println("Error: --rom <path> is required")
         exitProcess(1)
     }
 
@@ -146,6 +153,11 @@ Commands:
   room <id|handle>   Export single room with full collision grid
   graph              Export navigation graph (nodes + edges)
   export -o <dir>    Export everything: rooms.json, nav_graph.json, rooms/*.json
+
+TAS commands (headless emulator; --rom is the ROM to run, original or edited):
+  tas-run --movie <m> [--state <f>] [--goal <g>] [--core <so>]   Play movie, emit JSON result
+  tas-info --movie <m>                Inspect a .tasmovie.json or .bk2 movie
+  tas-convert --movie <in> --out <o>  Convert between .tasmovie.json and .bk2
 
 Options:
   --rom <path>       Path to Super Metroid ROM file (.smc)

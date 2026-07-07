@@ -236,6 +236,9 @@ class EmulatorWorkspaceState(
     val plannedRouteRoomIds = mutableStateListOf<Int>()
     val saveSlots: List<EmulatorSaveSlot> = DEFAULT_SAVE_SLOTS
 
+    /** TAS movie recording/playback for the emulator session. */
+    val tas = TasWorkspaceState()
+
     suspend fun loadNavGraph() {
         val navFile = File(navExportDir, "nav_graph.json")
         roomExportCache.clear()
@@ -412,20 +415,24 @@ class EmulatorWorkspaceState(
         val previousFrameCounter = session.frameCounter
         val startedAt = System.nanoTime()
         try {
+            val buttons = tas.playbackAction() ?: currentAction()
+            // Movie playback must be frame-accurate: no turbo batching of one input.
+            val effectiveRepeat = if (tas.isPlaying) 1 else repeat
             val result = b.step(
                 EmulatorInput(
-                    buttons = currentAction(),
-                    repeat = repeat,
+                    buttons = buttons,
+                    repeat = effectiveRepeat,
                     includeFrame = includeFrame,
                     includeTrace = includeTrace,
                 )
             )
+            tas.onFrameStepped(buttons, effectiveRepeat)
             applyStepResult(result)
             updateLoopMetrics(
                 previousFrameCounter = previousFrameCounter,
                 currentFrameCounter = result.session.frameCounter,
                 elapsedNanos = System.nanoTime() - startedAt,
-                repeat = repeat,
+                repeat = effectiveRepeat,
                 frameIncluded = includeFrame,
             )
         } catch (e: Exception) {
@@ -695,6 +702,52 @@ class EmulatorWorkspaceState(
 
     suspend fun setRecording(@Suppress("UNUSED_PARAMETER") active: Boolean) {
         // Recording is not supported by the libretro backend
+    }
+
+    /**
+     * Start TAS recording. Saves an anchor state first so the movie is always
+     * replayable from a known start point (here and via `cli tas-run --state`).
+     */
+    suspend fun tasStartRecording() {
+        if (!session.active) {
+            setStatus("Start a session before recording")
+            return
+        }
+        val anchorName = "tas_${tas.movieName.ifBlank { "recording" }}_start"
+        saveQuickState(anchorName)
+        tas.startRecording(anchorName)
+        setStatus("TAS recording armed (anchor: $anchorName)")
+    }
+
+    fun tasStopRecording() {
+        val movie = tas.stopRecording()
+        setStatus("TAS recorded ${movie.frameCount} frames — save it from the TAS panel")
+    }
+
+    /**
+     * Play the loaded movie from its start state (restored automatically when
+     * the movie names one and it exists in the state inventory).
+     */
+    suspend fun tasStartPlayback() {
+        val movie = tas.loadedMovie ?: run {
+            setStatus("No TAS movie loaded")
+            return
+        }
+        if (!session.active) {
+            setStatus("Start a session before playback")
+            return
+        }
+        val startState = movie.meta.startState
+        if (startState != null && saveStates.any { it.name == startState }) {
+            loadNamedState(startState)
+        }
+        tas.startPlayback(movie)
+        setLoopRunning(true)
+    }
+
+    fun tasStop() {
+        tas.stop()
+        setStatus("TAS stopped at frame ${tas.frameIndex}")
     }
 
     fun setLoopRunning(running: Boolean) {

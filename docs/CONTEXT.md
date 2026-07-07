@@ -87,6 +87,12 @@ $A1:8000 → PC 0x108000    $B4:8000 → PC 0x1A0000
 | [`project/smile_parity.md`](project/smile_parity.md) | Complete SMILE vs SMEDIT feature comparison matrix with priority tiers and implementation notes.   |
 | [`project/codebase_notes.md`](project/codebase_notes.md) | Local repo/codebase map, current sound branch architecture notes, and piano-roll editor implementation notes. |
 
+### TAS Tools (`docs/tas/`)
+
+| File                                       | Contents                                                                                          |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------|
+| [`tas/TAS_FOUNDATION.md`](tas/TAS_FOUNDATION.md) | TAS infrastructure: movie formats (.tasmovie.json/.bk2), headless session + greenzone, RAM map, goals/evaluator, CLI `tas-run`, editor record/playback, Python-stack interop and optimizer roadmap. |
+
 ### Analysis Scripts (`docs/code/`)
 
 | Script                                                         | Usage                                                                                                                       |
