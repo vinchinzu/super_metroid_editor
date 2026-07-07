@@ -82,7 +82,7 @@ class TasOptimizer(
         }
 
         // Frames past the goal are dead weight and would dilute the window.
-        var best = seed.truncated(seedResult.framesToGoal)
+        var best = seed.trimmedTo(seedResult.framesToGoal)
         var bestResult = seedResult
         val mutator = TasMutator(
             seed = best,
@@ -98,9 +98,12 @@ class TasOptimizer(
             val candidate = mutator.mutate(best)
             if (candidate.firstChangedFrame >= bestResult.framesToGoal) continue
             session.seek(candidate.firstChangedFrame, candidate.movie)
-            val result = TasEvaluator.run(session, candidate.movie, goal, traceEvery = 0)
+            // A candidate that hasn't achieved by the current best's goal
+            // frame can never win — don't emulate past it.
+            val cappedGoal = goal.copy(maxFrames = bestResult.framesToGoal)
+            val result = TasEvaluator.run(session, candidate.movie, cappedGoal, traceEvery = 0)
             if (result.improvesOn(bestResult)) {
-                best = candidate.movie.truncated(result.framesToGoal)
+                best = candidate.movie.trimmedTo(result.framesToGoal)
                 bestResult = result
                 val improvement = Improvement(
                     iteration = iteration,
@@ -137,6 +140,14 @@ class TasOptimizer(
             improvements = improvements,
         )
     }
+
+    /**
+     * Resize to exactly [length] frames — truncating dead weight past the
+     * goal, or materializing noop padding when the goal was achieved past the
+     * movie's end (the evaluator noop-pads, so those frames are real inputs).
+     */
+    private fun TasMovie.trimmedTo(length: Int): TasMovie =
+        TasMovie(meta, List(length) { frameAt(it) })
 
     private fun TasRunResult.improvesOn(current: TasRunResult): Boolean =
         achieved && (
