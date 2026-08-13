@@ -1283,6 +1283,11 @@ fun MapCanvas(
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0x55FFF8D6), 8f)
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0xFFFFD166), 4.5f)
                                             drawPolyline(
+                                                emulatorOverlay.tasRouteTrace,
+                                                color = Color(0xFF9D4EDD),
+                                                strokeWidth = 4.5f,
+                                            )
+                                            drawPolyline(
                                                 emulatorOverlay.liveTrace,
                                                 color = Color(0xFF68D391),
                                                 strokeWidth = 4f,

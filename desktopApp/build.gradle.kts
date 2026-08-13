@@ -1,11 +1,25 @@
 plugins {
     kotlin("multiplatform")
     id("org.jetbrains.compose")
+    java
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 kotlin {
     jvm {
-        jvmToolchain(17)
+        compilations.all {
+            kotlinOptions {
+                jvmTarget = "17"
+            }
+            compileJavaTaskProvider?.configure {
+                sourceCompatibility = "17"
+                targetCompatibility = "17"
+            }
+        }
         withJava()
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()

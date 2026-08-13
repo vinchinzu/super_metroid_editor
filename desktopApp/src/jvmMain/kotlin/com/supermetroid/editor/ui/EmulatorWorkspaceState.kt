@@ -68,6 +68,7 @@ data class RoomMapOverlay(
     val routeLabel: String? = null,
     val plannedRoute: List<LocalRoomPoint> = emptyList(),
     val liveTrace: List<LocalRoomPoint> = emptyList(),
+    val tasRouteTrace: List<LocalRoomPoint> = emptyList(),
     val currentPosition: LocalRoomPoint? = null,
     val focusPoint: LocalRoomPoint? = null,
     val startAnchor: LocalRoomPoint? = null,
@@ -127,6 +128,7 @@ class EmulatorWorkspaceState(
     private val pressedKeys = mutableSetOf<Key>()
     private var lastFollowedRoomId: Int? = null
     private val roomExportCache = mutableMapOf<Int, EditorRoomExport>()
+    private var playbackInputOverride: List<Int>? = null
 
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
@@ -531,6 +533,8 @@ class EmulatorWorkspaceState(
     }
 
     fun currentAction(): List<Int> {
+        playbackInputOverride?.let { return it }
+
         val action = MutableList(12) { 0 }
         fun on(key: Key) = pressedKeys.contains(key)
 
@@ -558,6 +562,10 @@ class EmulatorWorkspaceState(
             action[5] = 0
         }
         return action
+    }
+
+    fun setPlaybackInputOverride(input: List<Int>?) {
+        playbackInputOverride = input
     }
 
     fun activeInputSummary(): String {
@@ -641,7 +649,7 @@ class EmulatorWorkspaceState(
         return plannedRouteRoomIds.mapNotNull { loaded.roomCenter(it) }
     }
 
-    fun roomMapOverlay(room: RoomInfo?): RoomMapOverlay? {
+    fun roomMapOverlay(room: RoomInfo?, routeEditorState: RouteEditorState? = null): RoomMapOverlay? {
         val currentRoom = room ?: return null
         val roomExport = roomExport(currentRoom.getRoomIdAsInt()) ?: return null
         val currentSnapshot = snapshot
@@ -650,6 +658,10 @@ class EmulatorWorkspaceState(
             ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
             .orEmpty()
         val liveTrace = currentSnapshot?.trace
+            ?.filter { it.roomId == roomExport.roomId }
+            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
+            .orEmpty()
+        val tasRouteTrace = routeEditorState?.currentRoute?.positions
             ?.filter { it.roomId == roomExport.roomId }
             ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
             .orEmpty()
@@ -673,16 +685,18 @@ class EmulatorWorkspaceState(
         }
         val routeLabel = when {
             expectedTrace.isNotEmpty() -> currentSnapshot?.expectedTraceLabel ?: "Expected path (sm_landing_site)"
+            tasRouteTrace.isNotEmpty() -> "TAS Route: ${routeEditorState?.currentRoute?.name}"
             else -> landingSiteRoute(roomExport)?.first
         }
         val focusPoint = shipPoint(roomExport)
             ?: currentPosition
             ?: plannedRoute.firstOrNull()
-        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null) return null
+        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null && tasRouteTrace.isEmpty()) return null
         return RoomMapOverlay(
             routeLabel = routeLabel,
             plannedRoute = plannedRoute,
             liveTrace = liveTrace,
+            tasRouteTrace = tasRouteTrace,
             currentPosition = currentPosition,
             focusPoint = focusPoint,
             startAnchor = plannedRoute.firstOrNull(),
