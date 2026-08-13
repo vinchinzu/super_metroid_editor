@@ -68,8 +68,8 @@ data class RoomMapOverlay(
     val routeLabel: String? = null,
     val plannedRoute: List<LocalRoomPoint> = emptyList(),
     val liveTrace: List<LocalRoomPoint> = emptyList(),
-    val tasRouteTrace: List<LocalRoomPoint> = emptyList(),
     val candidateTracks: List<List<LocalRoomPoint>> = emptyList(),
+    val playheadPosition: LocalRoomPoint? = null,
     val currentPosition: LocalRoomPoint? = null,
     val focusPoint: LocalRoomPoint? = null,
     val startAnchor: LocalRoomPoint? = null,
@@ -129,7 +129,7 @@ class EmulatorWorkspaceState(
     private val pressedKeys = mutableSetOf<Key>()
     private var lastFollowedRoomId: Int? = null
     private val roomExportCache = mutableMapOf<Int, EditorRoomExport>()
-    private var playbackInputOverride: List<Int>? = null
+    private var playbackInputOverride: IntArray? = null
 
     var navExportDir by mutableStateOf(AppConfig.load().emulatorNavExportDir)
     var followLiveRoom by mutableStateOf(AppConfig.load().emulatorFollowLiveRoom)
@@ -534,7 +534,7 @@ class EmulatorWorkspaceState(
     }
 
     fun currentAction(): List<Int> {
-        playbackInputOverride?.let { return it }
+        playbackInputOverride?.let { return it.toList() }
 
         val action = MutableList(12) { 0 }
         fun on(key: Key) = pressedKeys.contains(key)
@@ -565,7 +565,7 @@ class EmulatorWorkspaceState(
         return action
     }
 
-    fun setPlaybackInputOverride(input: List<Int>?) {
+    fun setPlaybackInputOverride(input: IntArray?) {
         playbackInputOverride = input
     }
 
@@ -662,17 +662,20 @@ class EmulatorWorkspaceState(
             ?.filter { it.roomId == roomExport.roomId }
             ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
             .orEmpty()
-        val tasRouteTrace = routeEditorState?.currentRoute?.positions
+        
+        val candidateTracks = mutableListOf<List<LocalRoomPoint>>()
+        val roomFilteredTrace = routeEditorState?.currentMovie?.trace
             ?.filter { it.roomId == roomExport.roomId }
             ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
             .orEmpty()
+        if (roomFilteredTrace.isNotEmpty()) {
+            candidateTracks.add(roomFilteredTrace)
+        }
         
-        val candidateTracks = mutableListOf<List<LocalRoomPoint>>()
-        routeEditorState?.currentMovie?.trace
-            ?.filter { it.roomId == roomExport.roomId }
-            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { candidateTracks.add(it) }
+        val playheadPosition = routeEditorState?.currentMovie?.trace
+            ?.filter { it.roomId == roomExport.roomId && (it.frame ?: 0) <= (routeEditorState.currentFrame) }
+            ?.lastOrNull()
+            ?.let { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
         
         val currentPosition = when {
             currentSnapshot?.doorTransition == true -> null
@@ -695,19 +698,18 @@ class EmulatorWorkspaceState(
         val routeLabel = when {
             expectedTrace.isNotEmpty() -> currentSnapshot?.expectedTraceLabel ?: "Expected path (sm_landing_site)"
             candidateTracks.isNotEmpty() -> "TAS Movie: ${routeEditorState?.currentMovie?.meta?.startState ?: "candidate"}"
-            tasRouteTrace.isNotEmpty() -> "TAS Route: ${routeEditorState?.currentRoute?.name}"
             else -> landingSiteRoute(roomExport)?.first
         }
         val focusPoint = shipPoint(roomExport)
             ?: currentPosition
             ?: plannedRoute.firstOrNull()
-        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null && tasRouteTrace.isEmpty() && candidateTracks.isEmpty()) return null
+        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null && candidateTracks.isEmpty()) return null
         return RoomMapOverlay(
             routeLabel = routeLabel,
             plannedRoute = plannedRoute,
             liveTrace = liveTrace,
-            tasRouteTrace = tasRouteTrace,
             candidateTracks = candidateTracks,
+            playheadPosition = playheadPosition,
             currentPosition = currentPosition,
             focusPoint = focusPoint,
             startAnchor = plannedRoute.firstOrNull(),

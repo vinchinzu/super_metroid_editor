@@ -13,11 +13,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,9 +44,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.supermetroid.editor.tas.TasInput
 import kotlinx.coroutines.launch
 
-private val BUTTON_LABELS = listOf("B", "Y", "Sel", "Sta", "Up", "Dn", "Lt", "Rt", "A", "X", "L", "R")
+private val BUTTON_LABELS = TasInput.BUTTON_ORDER
 
 @Composable
 fun RouteEditorPanel(
@@ -74,7 +74,7 @@ fun RouteEditorPanel(
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("TAS Route Editor", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("TAS Movie Editor", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(
                     routeState.statusMessage,
                     fontSize = 11.sp,
@@ -98,8 +98,8 @@ fun RouteEditorPanel(
                                 "stop" -> routeState.stopPlayback()
                                 "step_back" -> routeState.stepBackward()
                                 "step_forward" -> routeState.stepForward()
-                                "save" -> routeState.saveRoute()
-                                "clear" -> routeState.clearRoute()
+                                "save" -> routeState.saveMovie()
+                                "clear" -> routeState.clearMovie()
                             }
                         }
                     },
@@ -120,13 +120,9 @@ fun RouteEditorPanel(
                     modifier = Modifier.fillMaxSize().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Input Timeline", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    RouteFrameTimeline(routeState)
-                    Divider()
-                    Text("Input List", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    RouteInputList(
+                    Text("Frame Timeline", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    RouteTimelinePanel(
                         routeState = routeState,
-                        onFrameSelected = { routeState.seekToFrame(it) },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -141,10 +137,10 @@ fun RouteEditorPanel(
                     modifier = Modifier.fillMaxSize().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Route Library", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("Movie Library", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     RouteLibraryList(
                         routeState = routeState,
-                        onLoadRoute = { scope.launch { routeState.loadRoute(it) } },
+                        onLoadRoute = { scope.launch { routeState.loadMovie(it) } },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -159,21 +155,21 @@ private fun RouteTransportControls(
     emulatorState: EmulatorWorkspaceState?,
     onAction: (String) -> Unit,
 ) {
-    val route = routeState.currentRoute
+    val movie = routeState.currentMovie
     val playbackState = routeState.playbackState
     val canRecord = emulatorState?.session?.active == true
-    val hasRoute = route != null
+    val hasMovie = movie != null
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (route != null) {
+        if (movie != null) {
             Text(
-                "Route: ${route.name}  ·  ${route.frameCount} frames  ·  ${route.inputs.size} inputs  ·  ${route.positions.size} position samples",
+                "Movie: ${movie.frameCount} frames  ·  ${movie.trace.size} trace points  ·  Start: ${movie.meta.startState ?: "none"}",
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Current frame: ${routeState.currentFrame} / ${route.frameCount}",
+                "Current frame: ${routeState.currentFrame} / ${movie.frameCount}",
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -191,7 +187,7 @@ private fun RouteTransportControls(
                     }
                     Button(
                         onClick = { onAction("play") },
-                        enabled = hasRoute,
+                        enabled = hasMovie,
                     ) {
                         Text("Play", fontSize = 12.sp)
                     }
@@ -221,14 +217,14 @@ private fun RouteTransportControls(
 
             OutlinedButton(
                 onClick = { onAction("step_back") },
-                enabled = hasRoute && routeState.currentFrame > 0,
+                enabled = hasMovie && routeState.currentFrame > 0,
             ) {
                 Text("◀ Step", fontSize = 12.sp)
             }
 
             OutlinedButton(
                 onClick = { onAction("step_forward") },
-                enabled = hasRoute && routeState.currentFrame < (route?.frameCount ?: 0) - 1,
+                enabled = hasMovie && routeState.currentFrame < (movie?.frameCount ?: 0) - 1,
             ) {
                 Text("Step ▶", fontSize = 12.sp)
             }
@@ -237,13 +233,13 @@ private fun RouteTransportControls(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = { onAction("save") },
-                enabled = hasRoute,
+                enabled = hasMovie,
             ) {
-                Text("Save Route", fontSize = 12.sp)
+                Text("Save Movie", fontSize = 12.sp)
             }
             OutlinedButton(
                 onClick = { onAction("clear") },
-                enabled = hasRoute,
+                enabled = hasMovie,
             ) {
                 Text("Clear", fontSize = 12.sp)
             }
@@ -252,71 +248,14 @@ private fun RouteTransportControls(
 }
 
 @Composable
-private fun RouteFrameTimeline(routeState: RouteEditorState) {
-    val route = routeState.currentRoute
-    if (route == null || route.frameCount == 0) {
-        Text(
-            "No route loaded",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-        return
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Slider(
-            value = routeState.currentFrame.toFloat(),
-            onValueChange = { routeState.seekToFrame(it.toInt()) },
-            valueRange = 0f..(route.frameCount - 1).toFloat(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp)),
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val width = size.width
-                val height = size.height
-                val frameCount = route.frameCount
-
-                route.inputs.forEach { input ->
-                    val x = (input.frame.toFloat() / frameCount) * width
-                    drawLine(
-                        color = Color(0xFF7DE1D1),
-                        start = Offset(x, 0f),
-                        end = Offset(x, height),
-                        strokeWidth = 2f,
-                    )
-                }
-
-                val currentX = (routeState.currentFrame.toFloat() / frameCount) * width
-                drawLine(
-                    color = Color(0xFFFF6B6B),
-                    start = Offset(currentX, 0f),
-                    end = Offset(currentX, height),
-                    strokeWidth = 3f,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RouteInputList(
+private fun RouteTimelinePanel(
     routeState: RouteEditorState,
-    onFrameSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val route = routeState.currentRoute
-    if (route == null || route.inputs.isEmpty()) {
+    val movie = routeState.currentMovie
+    if (movie == null || movie.frameCount == 0) {
         Text(
-            "No inputs recorded yet",
+            "No movie loaded",
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = modifier.padding(vertical = 8.dp),
@@ -324,64 +263,123 @@ private fun RouteInputList(
         return
     }
 
-    val listState = rememberLazyListState()
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Slider(
+            value = routeState.currentFrame.toFloat(),
+            onValueChange = { routeState.seekToFrame(it.toInt()) },
+            valueRange = 0f..(movie.frameCount - 1).toFloat().coerceAtLeast(0f),
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-    LaunchedEffect(routeState.currentFrame) {
-        val currentIndex = route.inputs.indexOfFirst { it.frame == routeState.currentFrame }
-        if (currentIndex >= 0) {
-            listState.animateScrollToItem(currentIndex)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { routeState.seekToFrame((routeState.currentFrame - 10).coerceAtLeast(0)) },
+                enabled = routeState.currentFrame > 0,
+            ) {
+                Text("-10", fontSize = 11.sp)
+            }
+            OutlinedButton(
+                onClick = { routeState.seekToFrame(routeState.currentFrame + 10) },
+                enabled = routeState.currentFrame < movie.frameCount - 1,
+            ) {
+                Text("+10", fontSize = 11.sp)
+            }
+            OutlinedButton(
+                onClick = { routeState.truncateMovie(routeState.currentFrame) },
+                enabled = routeState.currentFrame > 0,
+            ) {
+                Text("Truncate here", fontSize = 11.sp)
+            }
+        }
+
+        val listState = rememberLazyListState()
+
+        LaunchedEffect(routeState.currentFrame) {
+            listState.animateScrollToItem(routeState.currentFrame.coerceIn(0, movie.frameCount - 1))
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(movie.frameCount) { frameIdx ->
+                FrameInputRow(
+                    frame = frameIdx,
+                    input = movie.frameAt(frameIdx) ?: TasInput.noop(),
+                    isSelected = frameIdx == routeState.currentFrame,
+                    onSelect = { routeState.seekToFrame(frameIdx) },
+                    onUpdate = { newButtons -> routeState.updateFrame(frameIdx, newButtons) },
+                )
+            }
         }
     }
+}
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+@Composable
+private fun FrameInputRow(
+    frame: Int,
+    input: IntArray,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    onUpdate: (IntArray) -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .clickable { onSelect() },
+        color = if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
     ) {
-        items(route.inputs) { input ->
-            val isCurrentFrame = input.frame == routeState.currentFrame
-            val buttonsText = input.buttons
-                .mapIndexedNotNull { index, value ->
-                    BUTTON_LABELS.getOrNull(index)?.takeIf { value != 0 }
-                }
-                .joinToString(" ")
-                .ifEmpty { "none" }
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { onFrameSelected(input.frame) },
-                color = if (isCurrentFrame) {
-                    MaterialTheme.colorScheme.primaryContainer
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "${frame.toString().padStart(5, '0')}",
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
                 } else {
-                    MaterialTheme.colorScheme.surfaceVariant
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.width(40.dp),
+            )
+
+            for (buttonIdx in 0 until 12) {
+                val isPressed = input.getOrNull(buttonIdx) == 1
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (isPressed) Color(0xFF4CAF50) else Color(0xFF424242))
+                        .border(
+                            width = 1.dp,
+                            color = if (isPressed) Color(0xFF66BB6A) else Color(0xFF616161),
+                            shape = RoundedCornerShape(3.dp),
+                        )
+                        .clickable {
+                            val newInput = input.toMutableList()
+                            while (newInput.size < 12) newInput.add(0)
+                            newInput[buttonIdx] = if (isPressed) 0 else 1
+                            onUpdate(newInput.toIntArray())
+                        },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "F${input.frame.toString().padStart(5, '0')}",
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (isCurrentFrame) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        buttonsText,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (isCurrentFrame) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
+                        BUTTON_LABELS.getOrNull(buttonIdx)?.take(1) ?: "",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPressed) Color.White else Color(0xFF9E9E9E),
                     )
                 }
             }
@@ -414,7 +412,7 @@ private fun RouteLibraryList(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         availableRoutes.forEach { routeName ->
-            val isCurrentRoute = routeState.currentRoute?.name == routeName
+            val isCurrentRoute = false
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()

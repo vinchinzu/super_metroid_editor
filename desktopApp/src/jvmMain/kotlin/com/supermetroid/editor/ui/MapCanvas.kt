@@ -1282,16 +1282,29 @@ fun MapCanvas(
 
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0x55FFF8D6), 8f)
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0xFFFFD166), 4.5f)
-                                            drawPolyline(
-                                                emulatorOverlay.tasRouteTrace,
-                                                color = Color(0xFF9D4EDD),
-                                                strokeWidth = 4.5f,
-                                            )
                                             emulatorOverlay.candidateTracks.forEach { track ->
                                                 drawPolyline(
                                                     track,
                                                     color = Color(0xFFFF6B9D),
                                                     strokeWidth = 3.5f,
+                                                )
+                                            }
+                                            emulatorOverlay.playheadPosition?.let { playhead ->
+                                                val center = canvasPoint(playhead)
+                                                drawCircle(
+                                                    color = Color(0xFFFFD700),
+                                                    radius = 12f,
+                                                    center = center,
+                                                )
+                                                drawCircle(
+                                                    color = Color(0xFF000000),
+                                                    radius = 10f,
+                                                    center = center,
+                                                )
+                                                drawCircle(
+                                                    color = Color(0xFFFFD700),
+                                                    radius = 6f,
+                                                    center = center,
                                                 )
                                             }
                                             drawPolyline(
