@@ -105,7 +105,8 @@ fun EmulatorWorkspace(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val roomOverlay = room?.let { workspaceState.roomMapOverlay(it) }
+    val routeEditorState = remember { RouteEditorState() }
+    val roomOverlay = room?.let { workspaceState.roomMapOverlay(it, routeEditorState) }
     var autoBootCompleted by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -118,7 +119,7 @@ fun EmulatorWorkspace(
         workspaceState.roomToFollow(rooms)?.let(onRoomSelected)
     }
 
-    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active) {
+    LaunchedEffect(workspaceState.isRunning, workspaceState.session.active, routeEditorState.playbackState) {
         var tick = 0L
         var pendingFrames = 0.0
         var lastWallClockNanos = System.nanoTime()
@@ -142,6 +143,30 @@ fun EmulatorWorkspace(
             if (pendingFrames > MAX_STEP_REPEAT * 2) {
                 pendingFrames = MAX_STEP_REPEAT.toDouble()
             }
+
+            if (routeEditorState.playbackState == RoutePlaybackState.RECORDING) {
+                val snapshot = workspaceState.snapshot
+                routeEditorState.recordFrame(
+                    frame = workspaceState.session.frameCounter,
+                    buttons = workspaceState.currentAction(),
+                    roomId = snapshot?.roomId,
+                    x = snapshot?.samusX,
+                    y = snapshot?.samusY,
+                )
+                workspaceState.setPlaybackInputOverride(null)
+            } else if (routeEditorState.playbackState == RoutePlaybackState.PLAYING) {
+                val input = routeEditorState.getCurrentInput()
+                workspaceState.setPlaybackInputOverride(input)
+                routeEditorState.advancePlaybackFrame()
+            } else {
+                workspaceState.setPlaybackInputOverride(null)
+            }
+        }
+    }
+
+    LaunchedEffect(routeEditorState.playbackState) {
+        if (routeEditorState.playbackState != RoutePlaybackState.PLAYING) {
+            workspaceState.setPlaybackInputOverride(null)
         }
     }
 
@@ -271,6 +296,16 @@ fun EmulatorWorkspace(
                                 workspaceState.appendPlannedRoom(selected.getRoomIdAsInt())
                                 onRoomSelected(selected)
                             },
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().height(300.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        tonalElevation = 1.dp,
+                    ) {
+                        RouteEditorPanel(
+                            routeState = routeEditorState,
+                            emulatorState = workspaceState,
                         )
                     }
                 }
