@@ -61,11 +61,13 @@ data class PredictedHop(
 /**
  * Residual profile: difference between predicted and observed traces.
  *
- * R(τ) = (fd_σ+, fd_σ, fd_π, fd_†)
+ * R(τ) = (fd_σ+, fd_σ, fd_π, Oπ)
  * - fd_σ+ : first differing frame (subpixel + pixel)
  * - fd_σ  : first differing frame (pixel only)
  * - fd_π  : first differing frame (pose)
- * - fd_†  : first differing frame (roomId)
+ * - Oπ    : first differing frame (roomId $079B)
+ *
+ * Note: fd_† refers to O† (energy/death) and lag desync, not roomId.
  */
 data class ResidualProfile(
     /** First frame with subpixel+pixel disagreement (nullable). */
@@ -74,7 +76,7 @@ data class ResidualProfile(
     val firstDifferingPixel: Int? = null,
     /** First frame with pose disagreement (nullable). */
     val firstDifferingPose: Int? = null,
-    /** First frame with roomId disagreement (nullable). */
+    /** First frame with roomId ($079B / Oπ) disagreement (nullable). */
     val firstDifferingRoom: Int? = null,
     /** Name of the first differing field. */
     val firstDifferingField: String? = null,
