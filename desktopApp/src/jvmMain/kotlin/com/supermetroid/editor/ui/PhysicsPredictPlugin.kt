@@ -87,14 +87,16 @@ data class ResidualProfile(
 /**
  * Frame trust level for timeline coloring.
  *
- * - TRUSTWORTHY (Oσ/Oπ) — keep editing, prediction matches SuperMetroidEnv
- * - SPOT_CHECK — pure subpixel disagreement, mostly safe
- * - DEAD — $079B roomId mismatch, O†, or lag desync — drop back to emu
+ * - TRUSTWORTHY (Oσ/Oπ) — pixel + pose match, keep editing
+ * - SPOT_CHECK — pure subpixel disagreement only, mostly safe
+ * - NEEDS_EMU — Oπ broke (pixel x/y or pose mismatch) — kinematics drift, not death
+ * - DEAD — $079B roomId mismatch, O† energy/death, or lag desync — critical failure
  * - UNMEASURED — no SuperMetroidEnv harness observation available
  */
 enum class FrameTrust {
     TRUSTWORTHY,
     SPOT_CHECK,
+    NEEDS_EMU,
     DEAD,
     UNMEASURED,
 }

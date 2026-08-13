@@ -95,7 +95,7 @@ class PhysicsPluginTest {
     }
 
     @Test
-    fun `SmRevPredictPlugin - residual detects pixel mismatch as DEAD with SuperMetroidEnv obs`() {
+    fun `SmRevPredictPlugin - residual detects pixel mismatch as NEEDS_EMU with SuperMetroidEnv obs`() {
         val plugin = SmRevPredictPlugin()
         val movie = TasMovie(
             frames = List(10) { TasInput.noop() },
@@ -113,9 +113,37 @@ class PhysicsPluginTest {
         val residual = plugin.residual(movie, superMetroidEnvObservations)
 
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
-        assertEquals(FrameTrust.DEAD, residual.frameTrust[3])
+        assertEquals(FrameTrust.NEEDS_EMU, residual.frameTrust[3])
         assertEquals(3, residual.firstDifferingPixel)
         assertEquals("x/y", residual.firstDifferingField)
+        assertNotNull(residual.cause)
+        assert(residual.cause!!.contains("Oπ kinematics"))
+    }
+
+    @Test
+    fun `SmRevPredictPlugin - residual detects pose mismatch as NEEDS_EMU with SuperMetroidEnv obs`() {
+        val plugin = SmRevPredictPlugin()
+        val movie = TasMovie(
+            frames = List(10) { TasInput.noop() },
+            trace = listOf(
+                TasTracePoint(frame = 0, x = 100, y = 200, pose = 1, roomId = 1000),
+                TasTracePoint(frame = 4, x = 110, y = 210, pose = 2, roomId = 1000),
+            ),
+        )
+
+        val superMetroidEnvObservations = listOf(
+            TasTracePoint(frame = 0, x = 100, y = 200, pose = 1, roomId = 1000),
+            TasTracePoint(frame = 4, x = 110, y = 210, pose = 5, roomId = 1000),
+        )
+
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
+
+        assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
+        assertEquals(FrameTrust.NEEDS_EMU, residual.frameTrust[4])
+        assertEquals(4, residual.firstDifferingPose)
+        assertEquals("pose", residual.firstDifferingField)
+        assertNotNull(residual.cause)
+        assert(residual.cause!!.contains("pose"))
     }
 
     @Test

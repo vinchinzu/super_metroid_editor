@@ -219,15 +219,17 @@ The residual readout shows:
 
 The timeline colors each frame by trust level:
 
-- **Default gray** (TRUSTWORTHY): Prediction matches SuperMetroidEnv, safe to keep editing
-- **Light yellow** (SPOT_CHECK): Pure subpixel disagreement, mostly safe
-- **Light red** (DEAD): $079B roomId mismatch, O†, or lag desync — drop back to emu
+- **Default gray** (TRUSTWORTHY): Oσ/Oπ holding (pixel + pose match), safe to keep editing
+- **Light yellow** (SPOT_CHECK): Pure subpixel disagreement only (fd_σ set, fd_π None), mostly safe
+- **Light orange** (NEEDS_EMU): Oπ broke — pixel x/y mismatch and/or pose $0A1C mismatch (kinematics drift, not death)
+- **Light red** (DEAD): $079B roomId mismatch, O† energy/death, or lag desync — critical failure, drop back to emu
 - **Default gray** (UNMEASURED): No SuperMetroidEnv harness observation available (this is the default state)
 
 **When to trust residual colors**:
-- **TRUSTWORTHY (Oσ/Oπ)**: Keep editing, the prediction matches SuperMetroidEnv
-- **SPOT_CHECK**: Minor subpixel drift, unlikely to affect gameplay
-- **DEAD**: Stop editing, load the state and re-record from this frame
+- **TRUSTWORTHY (Oσ/Oπ)**: Keep editing, prediction matches SuperMetroidEnv (pixel + pose)
+- **SPOT_CHECK**: Minor subpixel drift only, unlikely to affect gameplay
+- **NEEDS_EMU**: Oπ kinematics drift (pixel position or pose mismatch) — not death, but needs emulator verification
+- **DEAD**: Critical failure ($079B roomId mismatch, O†, or lag desync) — stop editing immediately, drop back to emu
 - **UNMEASURED**: No harness observation; cannot verify prediction accuracy
 
 ### Truth vs Hint

@@ -363,6 +363,7 @@ private fun FrameInputRow(
     val baseColor = when (frameTrust) {
         FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.surfaceVariant
         FrameTrust.SPOT_CHECK -> Color(0xFFFFF9C4)
+        FrameTrust.NEEDS_EMU -> Color(0xFFFFE0B2)
         FrameTrust.DEAD -> Color(0xFFFFCDD2)
         FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.surfaceVariant
         null -> MaterialTheme.colorScheme.surfaceVariant
@@ -371,6 +372,7 @@ private fun FrameInputRow(
     val selectedColor = when (frameTrust) {
         FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.primaryContainer
         FrameTrust.SPOT_CHECK -> Color(0xFFFFF59D)
+        FrameTrust.NEEDS_EMU -> Color(0xFFFFCC80)
         FrameTrust.DEAD -> Color(0xFFEF9A9A)
         FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.primaryContainer
         null -> MaterialTheme.colorScheme.primaryContainer

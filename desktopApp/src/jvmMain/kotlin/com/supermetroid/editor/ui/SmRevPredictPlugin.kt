@@ -77,6 +77,7 @@ class SmRevPredictPlugin(private val routeDirectory: File = File("routes")) : Ph
                 continue
             }
 
+            // DEAD: $079B roomId mismatch only (O† and lag desync would go here too)
             if (obs.roomId != null && pred.roomId != null && obs.roomId != pred.roomId) {
                 frameTrust.add(FrameTrust.DEAD)
                 if (firstDifferingRoom == null) {
@@ -88,17 +89,29 @@ class SmRevPredictPlugin(private val routeDirectory: File = File("routes")) : Ph
             }
 
             val pixelMatch = obs.x == pred.x && obs.y == pred.y
+            val poseMatch = (obs.pose == pred.pose) || (obs.pose == null || pred.pose == null)
             val subpixelMatch = (obs.subX == pred.subX && obs.subY == pred.subY) ||
                     (obs.subX == null || pred.subX == null)
 
-            if (!pixelMatch) {
-                frameTrust.add(FrameTrust.DEAD)
-                if (firstDifferingPixel == null) {
+            // NEEDS_EMU: Oπ broke (pixel x/y mismatch and/or pose $0A1C mismatch)
+            if (!pixelMatch || !poseMatch) {
+                frameTrust.add(FrameTrust.NEEDS_EMU)
+                if (!pixelMatch && firstDifferingPixel == null) {
                     firstDifferingPixel = frameIdx
-                    firstDifferingField = "x/y"
-                    cause = "Pixel position mismatch"
+                    if (firstDifferingField == null) {
+                        firstDifferingField = "x/y"
+                        cause = "Oπ kinematics: pixel position mismatch"
+                    }
+                }
+                if (!poseMatch && firstDifferingPose == null) {
+                    firstDifferingPose = frameIdx
+                    if (firstDifferingField == null) {
+                        firstDifferingField = "pose"
+                        cause = "Oπ kinematics: pose $0A1C mismatch"
+                    }
                 }
             } else if (!subpixelMatch) {
+                // SPOT_CHECK: pure subpixel disagreement only
                 frameTrust.add(FrameTrust.SPOT_CHECK)
                 if (firstDifferingSubpixel == null) {
                     firstDifferingSubpixel = frameIdx
@@ -108,6 +121,7 @@ class SmRevPredictPlugin(private val routeDirectory: File = File("routes")) : Ph
                     }
                 }
             } else {
+                // TRUSTWORTHY: Oσ/Oπ holding (pixel + pose match)
                 frameTrust.add(FrameTrust.TRUSTWORTHY)
             }
         }
