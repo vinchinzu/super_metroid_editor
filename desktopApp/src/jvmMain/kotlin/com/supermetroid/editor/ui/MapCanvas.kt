@@ -1287,6 +1287,13 @@ fun MapCanvas(
                                                 color = Color(0xFF9D4EDD),
                                                 strokeWidth = 4.5f,
                                             )
+                                            emulatorOverlay.candidateTracks.forEach { track ->
+                                                drawPolyline(
+                                                    track,
+                                                    color = Color(0xFFFF6B9D),
+                                                    strokeWidth = 3.5f,
+                                                )
+                                            }
                                             drawPolyline(
                                                 emulatorOverlay.liveTrace,
                                                 color = Color(0xFF68D391),

@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.supermetroid.editor.integration.RouteInputFrame
 import com.supermetroid.editor.integration.RoutePositionSample
 import com.supermetroid.editor.integration.TasRoute
+import com.supermetroid.editor.tas.TasMovie
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -25,6 +26,9 @@ class RouteEditorState {
     }
 
     var currentRoute by mutableStateOf<TasRoute?>(null)
+        private set
+
+    var currentMovie by mutableStateOf<TasMovie?>(null)
         private set
 
     var playbackState by mutableStateOf(RoutePlaybackState.IDLE)

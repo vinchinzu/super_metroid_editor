@@ -69,6 +69,7 @@ data class RoomMapOverlay(
     val plannedRoute: List<LocalRoomPoint> = emptyList(),
     val liveTrace: List<LocalRoomPoint> = emptyList(),
     val tasRouteTrace: List<LocalRoomPoint> = emptyList(),
+    val candidateTracks: List<List<LocalRoomPoint>> = emptyList(),
     val currentPosition: LocalRoomPoint? = null,
     val focusPoint: LocalRoomPoint? = null,
     val startAnchor: LocalRoomPoint? = null,
@@ -665,6 +666,14 @@ class EmulatorWorkspaceState(
             ?.filter { it.roomId == roomExport.roomId }
             ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
             .orEmpty()
+        
+        val candidateTracks = mutableListOf<List<LocalRoomPoint>>()
+        routeEditorState?.currentMovie?.trace
+            ?.filter { it.roomId == roomExport.roomId }
+            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { candidateTracks.add(it) }
+        
         val currentPosition = when {
             currentSnapshot?.doorTransition == true -> null
             currentSnapshot?.roomId == roomExport.roomId -> {
@@ -685,18 +694,20 @@ class EmulatorWorkspaceState(
         }
         val routeLabel = when {
             expectedTrace.isNotEmpty() -> currentSnapshot?.expectedTraceLabel ?: "Expected path (sm_landing_site)"
+            candidateTracks.isNotEmpty() -> "TAS Movie: ${routeEditorState?.currentMovie?.meta?.startState ?: "candidate"}"
             tasRouteTrace.isNotEmpty() -> "TAS Route: ${routeEditorState?.currentRoute?.name}"
             else -> landingSiteRoute(roomExport)?.first
         }
         val focusPoint = shipPoint(roomExport)
             ?: currentPosition
             ?: plannedRoute.firstOrNull()
-        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null && tasRouteTrace.isEmpty()) return null
+        if (plannedRoute.isEmpty() && liveTrace.isEmpty() && currentPosition == null && tasRouteTrace.isEmpty() && candidateTracks.isEmpty()) return null
         return RoomMapOverlay(
             routeLabel = routeLabel,
             plannedRoute = plannedRoute,
             liveTrace = liveTrace,
             tasRouteTrace = tasRouteTrace,
+            candidateTracks = candidateTracks,
             currentPosition = currentPosition,
             focusPoint = focusPoint,
             startAnchor = plannedRoute.firstOrNull(),
