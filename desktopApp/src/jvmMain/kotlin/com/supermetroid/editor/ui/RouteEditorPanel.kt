@@ -160,7 +160,7 @@ private fun RouteTransportControls(
     val canRecord = emulatorState?.session?.active == true
     val hasMovie = movie != null
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (movie != null) {
             Text(
                 "Movie: ${movie.frameCount} frames  ·  ${movie.trace.size} trace points  ·  Start: ${movie.meta.startState ?: "none"}",
@@ -174,6 +174,36 @@ private fun RouteTransportControls(
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            
+            val residual = routeState.residualProfile
+            if (residual != null) {
+                val fdSubpixel = residual.firstDifferingSubpixel?.toString() ?: "n.m."
+                val fdPixel = residual.firstDifferingPixel?.toString() ?: "n.m."
+                val fdPose = residual.firstDifferingPose?.toString() ?: "n.m."
+                val fdRoom = residual.firstDifferingRoom?.toString() ?: "n.m."
+                
+                Text(
+                    "Residual: R(τ) = (σ+=$fdSubpixel, σ=$fdPixel, π=$fdPose, †=$fdRoom)",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (residual.firstDifferingField != null) {
+                    Text(
+                        "First diff: ${residual.firstDifferingField} — ${residual.cause ?: "unknown"}",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else if (residual.cause != null) {
+                    Text(
+                        residual.cause,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -307,10 +337,12 @@ private fun RouteTimelinePanel(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             items(movie.frameCount) { frameIdx ->
+                val trust = routeState.getFrameTrust(frameIdx)
                 FrameInputRow(
                     frame = frameIdx,
                     input = movie.frameAt(frameIdx) ?: TasInput.noop(),
                     isSelected = frameIdx == routeState.currentFrame,
+                    frameTrust = trust,
                     onSelect = { routeState.seekToFrame(frameIdx) },
                     onUpdate = { newButtons -> routeState.updateFrame(frameIdx, newButtons) },
                 )
@@ -324,19 +356,34 @@ private fun FrameInputRow(
     frame: Int,
     input: IntArray,
     isSelected: Boolean,
+    frameTrust: FrameTrust? = null,
     onSelect: () -> Unit,
     onUpdate: (IntArray) -> Unit,
 ) {
+    val baseColor = when (frameTrust) {
+        FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.surfaceVariant
+        FrameTrust.SPOT_CHECK -> Color(0xFFFFF9C4)
+        FrameTrust.NEEDS_EMU -> Color(0xFFFFE0B2)
+        FrameTrust.DEAD -> Color(0xFFFFCDD2)
+        FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.surfaceVariant
+        null -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    
+    val selectedColor = when (frameTrust) {
+        FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.primaryContainer
+        FrameTrust.SPOT_CHECK -> Color(0xFFFFF59D)
+        FrameTrust.NEEDS_EMU -> Color(0xFFFFCC80)
+        FrameTrust.DEAD -> Color(0xFFEF9A9A)
+        FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.primaryContainer
+        null -> MaterialTheme.colorScheme.primaryContainer
+    }
+    
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(4.dp))
             .clickable { onSelect() },
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
+        color = if (isSelected) selectedColor else baseColor,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),

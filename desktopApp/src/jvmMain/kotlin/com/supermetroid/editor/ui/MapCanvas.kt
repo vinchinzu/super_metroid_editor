@@ -1282,15 +1282,23 @@ fun MapCanvas(
 
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0x55FFF8D6), 8f)
                                             drawPolyline(emulatorOverlay.plannedRoute, Color(0xFFFFD166), 4.5f)
-                                            emulatorOverlay.candidateTracks.forEach { track ->
-                                                drawPolyline(
-                                                    track,
-                                                    color = Color(0xFFFF6B9D),
-                                                    strokeWidth = 3.5f,
-                                                )
+                                            emulatorOverlay.candidateTracks.forEachIndexed { index, track ->
+                                                if (index == 0) {
+                                                    drawPolyline(
+                                                        track,
+                                                        color = Color(0xFFFF6B9D),
+                                                        strokeWidth = 3.5f,
+                                                    )
+                                                } else {
+                                                    drawPolyline(
+                                                        track,
+                                                        color = Color(0xFF9C27B0),
+                                                        strokeWidth = 2.5f,
+                                                    )
+                                                }
                                             }
                                             emulatorOverlay.playheadPosition?.let { playhead ->
-                                                val center = canvasPoint(playhead)
+                                                val center = androidx.compose.ui.geometry.Offset(playhead.x * scaleX, playhead.y * scaleY)
                                                 drawCircle(
                                                     color = Color(0xFFFFD700),
                                                     radius = 12f,

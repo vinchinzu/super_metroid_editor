@@ -158,12 +158,15 @@ Trace points are **sparse** - you don't need a point for every frame.
 
 ## Trace Visualization
 
-The route editor adds a **pink trajectory overlay** (`candidateTracks`) to the room map:
+The route editor adds trajectory overlays to the room map:
 
-- **Pink polyline**: Connects all trace points in the current movie for this room
+- **Pink polyline** (first candidateTrack): Recorded trace from the loaded movie (truth for visualization)
+- **Purple polyline** (second candidateTrack, thinner): Predicted hop overlay (HINT TRACK ONLY — NOT EMULATOR-LEGAL)
 - **Gold circle**: Playhead cursor showing the most recent trace point at or before the current frame
 - **Green line**: Live trace from current emulator session
 - **Orange line**: Planned route from the planner
+
+**Truth vs Hint**: Desktop snes9x is UI playback only. Recorded snes9x traces are **truth for visualization**. Predicted / MiniStep / hop_short overlays are **HINT TRACKS — NOT EMULATOR-LEGAL**. The hop_short overlay notes say "HINT TRACK ONLY — NOT EMULATOR-LEGAL."
 
 The overlay updates automatically when:
 - Recording a new movie
@@ -173,7 +176,85 @@ The overlay updates automatically when:
 
 ### candidateTracks: Multi-Track Support
 
-`candidateTracks` is a `List<List<LocalRoomPoint>>`, allowing multiple trajectory overlays in the future (e.g., A/B testing, RL candidates). Currently it shows one track: the loaded movie's trace filtered by current room.
+`candidateTracks` is a `List<List<LocalRoomPoint>>`, allowing multiple trajectory overlays:
+1. **First track** (pink): Recorded movie trace (truth for visualization)
+2. **Second track** (purple, thinner): Predicted hop from physics plugin (HINT TRACK — NOT EMULATOR-LEGAL)
+
+Future uses: A/B testing, RL candidates, greenzone visualization.
+
+## Physics Plugin Slot & Residual Analysis
+
+The route editor includes a **swappable physics prediction plugin** that provides:
+1. **Hop overlays**: Short trajectory predictions (HINT TRACKS — NOT EMULATOR-LEGAL)
+2. **Residual analysis**: Frame-by-frame trust metrics comparing predicted vs **SuperMetroidEnv** harness observations
+
+### Plugin Design
+
+The `PhysicsPredictPlugin` interface mirrors `EmulatorBackend` design: a factory-swappable plugin that provides prediction without replacing the emulator as truth. This exists so a broken hydrate/load-state implementation (sm_rev_predict now, future Haskell port) can be replaced without ripping the timeline.
+
+**Available plugins**:
+- `NullPhysicsPlugin`: No-op default, all frames UNMEASURED
+- `SmRevPredictPlugin` (default): File-based plugin that loads `hop_short.tasmovie.json` as a HINT track
+
+**Auto-load**: If `routes/hop_short.tasmovie.json` exists, the editor automatically loads it on startup.
+
+**CRITICAL CONSTRAINT**: Desktop snes9x (SMEDIT's embedded emulator) is **UI playback only**. Do NOT compute residuals against its traces. Residual computation is **only valid against SuperMetroidEnv harness observations**. Without harness observations, residual is unmeasured (all fd_* null, all FrameTrust UNMEASURED).
+
+### Residual Profile: R(τ)
+
+The residual profile compares **predicted traces** (from plugin) against **SuperMetroidEnv harness observations** (NOT desktop snes9x):
+
+**R(τ) = (fd_σ+, fd_σ, fd_π, fd_†)**
+- **fd_σ+**: First frame with subpixel+pixel disagreement (nullable, "n.m." when unmeasured)
+- **fd_σ**: First frame with pixel-only disagreement (nullable, "n.m." when unmeasured)
+- **fd_π**: First frame with pose disagreement (nullable, "n.m." when unmeasured)
+- **fd_†**: First frame with roomId disagreement (nullable, "n.m." when unmeasured)
+
+The residual readout shows:
+- R(τ) tuple with frame indices (or "n.m." if no observation or unmeasured)
+- First differing field name (e.g., "roomId", "x/y", "subX/subY")
+- Human-readable cause (e.g., "$079B roomId mismatch" or "No SuperMetroidEnv harness observation available")
+
+### Frame Trust Coloring
+
+The timeline colors each frame by trust level:
+
+- **Default gray** (TRUSTWORTHY): Oσ/Oπ holding (pixel + pose match), safe to keep editing
+- **Light yellow** (SPOT_CHECK): Pure subpixel disagreement only (fd_σ set, fd_π None), mostly safe
+- **Light orange** (NEEDS_EMU): Oπ broke — pixel x/y mismatch and/or pose $0A1C mismatch (kinematics drift, not death)
+- **Light red** (DEAD): $079B roomId mismatch, O† energy/death, or lag desync — critical failure, drop back to emu
+- **Default gray** (UNMEASURED): No SuperMetroidEnv harness observation available (this is the default state)
+
+**When to trust residual colors**:
+- **TRUSTWORTHY (Oσ/Oπ)**: Keep editing, prediction matches SuperMetroidEnv (pixel + pose)
+- **SPOT_CHECK**: Minor subpixel drift only, unlikely to affect gameplay
+- **NEEDS_EMU**: Oπ kinematics drift (pixel position or pose mismatch) — not death, but needs emulator verification
+- **DEAD**: Critical failure ($079B roomId mismatch, O†, or lag desync) — stop editing immediately, drop back to emu
+- **UNMEASURED**: No harness observation; cannot verify prediction accuracy
+
+### Truth vs Hint
+
+**Desktop snes9x (SMEDIT's embedded emulator) is UI playback only.** Recorded snes9x traces are **truth for visualization**. Predicted / MiniStep / hop_short overlays are **HINT TRACKS ONLY — NOT EMULATOR-LEGAL**.
+
+The hop_short overlay is labeled "HINT TRACK ONLY — NOT EMULATOR-LEGAL" in predictHop results. Do not treat it as final or emulator-legal.
+
+### Legality Note
+
+Legality is **RetroRL stable-retro** (SuperMetroidEnv). BK2 import may exist; do not treat BizHawk sync as Mini-legal. The physics plugin provides hints for editing; only **SuperMetroidEnv observations** are used for residual validation.
+
+### Swapping Plugins
+
+To swap the physics plugin (for testing or advanced use):
+
+```kotlin
+routeEditorState.setPhysicsPlugin(NullPhysicsPluginFactory)  // or SmRevPredictPluginFactory
+```
+
+This is a one-liner factory swap, not a timeline rewrite.
+
+### Default State: Unmeasured
+
+The default state for residual is **UNMEASURED**. Without SuperMetroidEnv harness observations, all fd_* values are null ("n.m."), all FrameTrust values are UNMEASURED, and the cause is "No SuperMetroidEnv harness observation available". This is correct and expected until CLI --load-state ships and harness observations become available.
 
 ## Integration with Emulator
 
@@ -232,12 +313,32 @@ The route editor integrates seamlessly with the emulator:
 - If no trace points exist before the current frame, no cursor appears
 - Sparse traces will show the cursor "jumping" between trace points
 
+### Residual shows all DEAD frames
+- Residual computation requires SuperMetroidEnv harness observations
+- Desktop snes9x traces are NOT used for residual (UI playback only)
+- Without harness observations, residual will be unmeasured (all UNMEASURED)
+- Check that you're passing SuperMetroidEnv observations to computeResidual()
+
+### Residual shows all UNMEASURED frames
+- This is the correct default state without SuperMetroidEnv harness observations
+- Desktop snes9x is UI playback only; its traces are not used for residual
+- Unmeasured residual is expected until CLI --load-state ships and harness observations become available
+
+### hop_short.tasmovie.json not loading
+- Check that the file exists in `routes/hop_short.tasmovie.json`
+- Verify the file is valid JSON in `smedit-tas-1` format
+- Check the status message on startup for load errors
+- Remember: hop_short is a HINT TRACK ONLY — NOT EMULATOR-LEGAL
+
 ## Future Enhancements
 
 Planned features for future releases:
 - Frame insertion with automatic trace interpolation
 - BK2 format export (already supported by TasMovie, UI pending)
-- Multi-track A/B comparison (candidateTracks infrastructure ready)
 - Trace point editing (drag x/y on map)
 - Run-length compression for hold-runs
 - Automated route optimization via RetroRL agents
+- Full sm_rev_predict physics engine (currently stub)
+- Haskell MiniStep port for legality checking
+- Dashed line rendering for predicted hop overlay
+- Greenzone visualization (frame trust as timeline bar)
