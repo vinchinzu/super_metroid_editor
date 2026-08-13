@@ -205,10 +205,12 @@ The `PhysicsPredictPlugin` interface mirrors `EmulatorBackend` design: a factory
 The residual profile compares **predicted traces** (from plugin) against **SuperMetroidEnv harness observations** (NOT desktop snes9x):
 
 **R(τ) = (fd_σ+, fd_σ, fd_π, fd_†)**
-- **fd_σ+**: First frame with subpixel+pixel disagreement (nullable, "n.m." when unmeasured)
-- **fd_σ**: First frame with pixel-only disagreement (nullable, "n.m." when unmeasured)
-- **fd_π**: First frame with pose disagreement (nullable, "n.m." when unmeasured)
-- **fd_†**: First frame with roomId disagreement (nullable, "n.m." when unmeasured)
+- **fd_σ+**: Oσ plus optional enemy/i-frame ($0F8C/$18A8) (nullable, "n.m." when unmeasured)
+- **fd_σ**: Oπ plus subpixels (nullable, "n.m." when unmeasured)
+- **fd_π**: pixels/pose/room ($0AF6/$0AFA/$0A1C/$079B) — Oπ = pixels, pose, room (nullable, "n.m." when unmeasured)
+- **fd_†**: energy/death $09C2, not roomId (nullable, "n.m." when unmeasured)
+
+Note: `firstDifferingRoom` represents roomId $079B, which is a **component of fd_π** (Oπ), not fd_†.
 
 The residual readout shows:
 - R(τ) tuple with frame indices (or "n.m." if no observation or unmeasured)
