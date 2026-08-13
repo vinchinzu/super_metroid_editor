@@ -18,7 +18,9 @@ enum class RoutePlaybackState {
     PAUSED,
 }
 
-class RouteEditorState {
+class RouteEditorState(
+    private val physicsPluginFactory: PhysicsPluginFactory = SmRevPredictStubPluginFactory,
+) {
     var currentMovie by mutableStateOf<TasMovie?>(null)
 
     var playbackState by mutableStateOf(RoutePlaybackState.IDLE)
@@ -34,13 +36,34 @@ class RouteEditorState {
         private set
 
     var routeDirectory by mutableStateOf("routes")
-        private set
 
     var availableRoutes by mutableStateOf<List<String>>(emptyList())
         private set
 
+    var residualProfile by mutableStateOf<ResidualProfile?>(null)
+        private set
+
+    var predictedHopTrace by mutableStateOf<List<TasTracePoint>>(emptyList())
+        private set
+
     private val recordedFrames = mutableListOf<IntArray>()
     private val recordedTrace = mutableListOf<TasTracePoint>()
+    
+    private var physicsPlugin: PhysicsPredictPlugin = physicsPluginFactory.create()
+    
+    init {
+        tryLoadHopShort()
+    }
+    
+    private fun tryLoadHopShort() {
+        val hopShortFile = File(routeDirectory, "hop_short.tasmovie.json")
+        if (hopShortFile.exists()) {
+            val result = physicsPlugin.hydrate(null)
+            if (result.isSuccess) {
+                statusMessage = "Loaded hop_short.tasmovie.json for prediction"
+            }
+        }
+    }
 
     fun startRecording(stateName: String?, startFrame: Int = 0) {
         recordedFrames.clear()
@@ -66,6 +89,7 @@ class RouteEditorState {
         currentMovie = movie
         playbackState = RoutePlaybackState.IDLE
         statusMessage = "Recorded ${movie.frameCount} frames, ${movie.trace.size} trace points"
+        updatePrediction()
     }
 
     fun recordFrame(frame: Int, buttons: List<Int>, roomId: Int?, x: Int?, y: Int?) {
@@ -186,6 +210,7 @@ class RouteEditorState {
             currentFrame = 0
             playbackState = RoutePlaybackState.IDLE
             statusMessage = "Loaded movie: ${movieFile.nameWithoutExtension} (${movie.frameCount} frames)"
+            updatePrediction()
         } catch (e: Exception) {
             statusMessage = "Failed to load movie: ${e.message}"
         }
@@ -230,5 +255,41 @@ class RouteEditorState {
         newFrames[frame] = TasInput.sanitize(buttons.toList())
         currentMovie = TasMovie(movie.meta, newFrames, movie.trace)
         statusMessage = "Updated frame $frame"
+        updatePrediction()
+    }
+
+    /**
+     * Compute residual between predicted and observed traces.
+     */
+    fun computeResidual() {
+        val movie = currentMovie ?: return
+        residualProfile = physicsPlugin.residual(movie, movie.trace)
+    }
+
+    /**
+     * Update predicted hop overlay from current frame.
+     */
+    fun updatePrediction(fromFrame: Int = currentFrame) {
+        val movie = currentMovie ?: return
+        val hop = physicsPlugin.predictHop(movie, fromFrame)
+        predictedHopTrace = hop.trace
+        computeResidual()
+    }
+
+    /**
+     * Get frame trust level for timeline coloring.
+     */
+    fun getFrameTrust(frame: Int): FrameTrust? {
+        val profile = residualProfile ?: return null
+        return profile.frameTrust.getOrNull(frame)
+    }
+
+    /**
+     * Swap the physics plugin (for testing or switching backends).
+     */
+    fun setPhysicsPlugin(factory: PhysicsPluginFactory) {
+        physicsPlugin = factory.create()
+        tryLoadHopShort()
+        updatePrediction()
     }
 }

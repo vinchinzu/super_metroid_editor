@@ -160,7 +160,7 @@ private fun RouteTransportControls(
     val canRecord = emulatorState?.session?.active == true
     val hasMovie = movie != null
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (movie != null) {
             Text(
                 "Movie: ${movie.frameCount} frames  ·  ${movie.trace.size} trace points  ·  Start: ${movie.meta.startState ?: "none"}",
@@ -174,6 +174,27 @@ private fun RouteTransportControls(
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            
+            val residual = routeState.residualProfile
+            if (residual != null) {
+                Text(
+                    "Residual: R(τ) = (σ+=${residual.firstDifferingSubpixel ?: "—"}, " +
+                            "σ=${residual.firstDifferingPixel ?: "—"}, " +
+                            "π=${residual.firstDifferingPose ?: "—"}, " +
+                            "†=${residual.firstDifferingRoom ?: "—"})",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (residual.firstDifferingField != null) {
+                    Text(
+                        "First diff: ${residual.firstDifferingField} — ${residual.cause ?: "unknown"}",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -307,10 +328,12 @@ private fun RouteTimelinePanel(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             items(movie.frameCount) { frameIdx ->
+                val trust = routeState.getFrameTrust(frameIdx)
                 FrameInputRow(
                     frame = frameIdx,
                     input = movie.frameAt(frameIdx) ?: TasInput.noop(),
                     isSelected = frameIdx == routeState.currentFrame,
+                    frameTrust = trust,
                     onSelect = { routeState.seekToFrame(frameIdx) },
                     onUpdate = { newButtons -> routeState.updateFrame(frameIdx, newButtons) },
                 )
@@ -324,19 +347,30 @@ private fun FrameInputRow(
     frame: Int,
     input: IntArray,
     isSelected: Boolean,
+    frameTrust: FrameTrust? = null,
     onSelect: () -> Unit,
     onUpdate: (IntArray) -> Unit,
 ) {
+    val baseColor = when (frameTrust) {
+        FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.surfaceVariant
+        FrameTrust.SPOT_CHECK -> Color(0xFFFFF9C4)
+        FrameTrust.DEAD -> Color(0xFFFFCDD2)
+        null -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    
+    val selectedColor = when (frameTrust) {
+        FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.primaryContainer
+        FrameTrust.SPOT_CHECK -> Color(0xFFFFF59D)
+        FrameTrust.DEAD -> Color(0xFFEF9A9A)
+        null -> MaterialTheme.colorScheme.primaryContainer
+    }
+    
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(4.dp))
             .clickable { onSelect() },
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
+        color = if (isSelected) selectedColor else baseColor,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),

@@ -672,6 +672,14 @@ class EmulatorWorkspaceState(
             candidateTracks.add(roomFilteredTrace)
         }
         
+        val predictedHopTrace = routeEditorState?.predictedHopTrace
+            ?.filter { it.roomId == roomExport.roomId }
+            ?.map { LocalRoomPoint(x = it.x.toFloat(), y = it.y.toFloat()) }
+            .orEmpty()
+        if (predictedHopTrace.isNotEmpty()) {
+            candidateTracks.add(predictedHopTrace)
+        }
+        
         val playheadPosition = routeEditorState?.currentMovie?.trace
             ?.filter { it.roomId == roomExport.roomId && (it.frame ?: 0) <= (routeEditorState.currentFrame) }
             ?.lastOrNull()

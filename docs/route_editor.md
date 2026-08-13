@@ -158,12 +158,15 @@ Trace points are **sparse** - you don't need a point for every frame.
 
 ## Trace Visualization
 
-The route editor adds a **pink trajectory overlay** (`candidateTracks`) to the room map:
+The route editor adds trajectory overlays to the room map:
 
-- **Pink polyline**: Connects all trace points in the current movie for this room
+- **Pink polyline** (first candidateTrack): Recorded trace from the loaded movie (truth)
+- **Purple polyline** (second candidateTrack, thinner): Predicted hop overlay (hint, NOT emulator-legal)
 - **Gold circle**: Playhead cursor showing the most recent trace point at or before the current frame
 - **Green line**: Live trace from current emulator session
 - **Orange line**: Planned route from the planner
+
+**Truth vs Hint**: Desktop snes9x is UI playback only. Recorded snes9x traces are **truth**. Predicted / MiniStep / hop_short overlays are **hints**, never final. hop_short.tasmovie.json notes say "Overlay Y illustrative. Not emulator-legal."
 
 The overlay updates automatically when:
 - Recording a new movie
@@ -173,7 +176,69 @@ The overlay updates automatically when:
 
 ### candidateTracks: Multi-Track Support
 
-`candidateTracks` is a `List<List<LocalRoomPoint>>`, allowing multiple trajectory overlays in the future (e.g., A/B testing, RL candidates). Currently it shows one track: the loaded movie's trace filtered by current room.
+`candidateTracks` is a `List<List<LocalRoomPoint>>`, allowing multiple trajectory overlays:
+1. **First track** (pink): Recorded movie trace (truth)
+2. **Second track** (purple, thinner): Predicted hop from physics plugin (hint)
+
+Future uses: A/B testing, RL candidates, greenzone visualization.
+
+## Physics Plugin Slot & Residual Analysis
+
+The route editor includes a **swappable physics prediction plugin** that provides:
+1. **Hop overlays**: Short trajectory predictions (hints for editing)
+2. **Residual analysis**: Frame-by-frame trust metrics comparing predicted vs observed traces
+
+### Plugin Design
+
+The `PhysicsPredictPlugin` interface mirrors `EmulatorBackend` design: a factory-swappable plugin that provides prediction without replacing the emulator as truth. This exists so a broken hydrate/load-state implementation (sm_rev_predict now, future Haskell port) can be replaced without ripping the timeline.
+
+**Available plugins**:
+- `NullPhysicsPlugin`: No-op default, all frames TRUSTWORTHY
+- `SmRevPredictStubPlugin`: File-based stub that loads `hop_short.tasmovie.json` as a hint track
+
+**Auto-load**: If `routes/hop_short.tasmovie.json` exists, the editor automatically loads it on startup.
+
+### Residual Profile: R(τ)
+
+The residual profile compares predicted traces against observed (recorded) traces:
+
+**R(τ) = (fd_σ+, fd_σ, fd_π, fd_†)**
+- **fd_σ+**: First frame with subpixel+pixel disagreement (nullable)
+- **fd_σ**: First frame with pixel-only disagreement (nullable)
+- **fd_π**: First frame with pose disagreement (nullable)
+- **fd_†**: First frame with roomId disagreement (nullable)
+
+The residual readout shows:
+- R(τ) tuple with frame indices (or "—" if no divergence)
+- First differing field name (e.g., "roomId", "x/y", "subX/subY")
+- Human-readable cause (e.g., "$079B roomId mismatch")
+
+### Frame Trust Coloring
+
+The timeline colors each frame by trust level:
+
+- **Default gray** (TRUSTWORTHY): Prediction matches emulator, safe to keep editing
+- **Light yellow** (SPOT_CHECK): Pure subpixel disagreement, mostly safe
+- **Light red** (DEAD): $079B roomId mismatch, O†, or lag desync — drop back to emu
+
+**When to trust residual colors**:
+- **TRUSTWORTHY (Oσ/Oπ)**: Keep editing, the prediction is accurate
+- **SPOT_CHECK**: Minor subpixel drift, unlikely to affect gameplay
+- **DEAD**: Stop editing, load the state and re-record from this frame
+
+### Legality Note
+
+Legality is **RetroRL stable-retro**. BK2 import may exist; do not treat BizHawk sync as Mini-legal. The physics plugin provides hints for editing; only recorded emulator traces are final.
+
+### Swapping Plugins
+
+To swap the physics plugin (for testing or advanced use):
+
+```kotlin
+routeEditorState.setPhysicsPlugin(NullPhysicsPluginFactory)  // or SmRevPredictStubPluginFactory
+```
+
+This is a one-liner factory swap, not a timeline rewrite.
 
 ## Integration with Emulator
 
@@ -232,12 +297,26 @@ The route editor integrates seamlessly with the emulator:
 - If no trace points exist before the current frame, no cursor appears
 - Sparse traces will show the cursor "jumping" between trace points
 
+### Residual shows all DEAD frames
+- Ensure the movie's trace matches the emulator's recorded trace
+- Check that you're using the correct starting save state
+- Verify hop_short.tasmovie.json is compatible with the loaded movie
+- Try swapping to NullPhysicsPlugin if prediction is broken
+
+### hop_short.tasmovie.json not loading
+- Check that the file exists in `routes/hop_short.tasmovie.json`
+- Verify the file is valid JSON in `smedit-tas-1` format
+- Check the status message on startup for load errors
+
 ## Future Enhancements
 
 Planned features for future releases:
 - Frame insertion with automatic trace interpolation
 - BK2 format export (already supported by TasMovie, UI pending)
-- Multi-track A/B comparison (candidateTracks infrastructure ready)
 - Trace point editing (drag x/y on map)
 - Run-length compression for hold-runs
 - Automated route optimization via RetroRL agents
+- Full sm_rev_predict physics engine (currently stub)
+- Haskell MiniStep port for legality checking
+- Dashed line rendering for predicted hop overlay
+- Greenzone visualization (frame trust as timeline bar)
