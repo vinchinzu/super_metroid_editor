@@ -87,14 +87,16 @@ data class ResidualProfile(
 /**
  * Frame trust level for timeline coloring.
  *
- * - TRUSTWORTHY (Oσ/Oπ) — keep editing, prediction matches emulator
+ * - TRUSTWORTHY (Oσ/Oπ) — keep editing, prediction matches SuperMetroidEnv
  * - SPOT_CHECK — pure subpixel disagreement, mostly safe
  * - DEAD — $079B roomId mismatch, O†, or lag desync — drop back to emu
+ * - UNMEASURED — no SuperMetroidEnv harness observation available
  */
 enum class FrameTrust {
     TRUSTWORTHY,
     SPOT_CHECK,
     DEAD,
+    UNMEASURED,
 }
 
 /**
@@ -107,7 +109,7 @@ interface PhysicsPluginFactory {
 }
 
 /**
- * Null physics plugin: no-op, all frames TRUSTWORTHY.
+ * Null physics plugin: no-op, all frames UNMEASURED.
  *
  * Use as the default when no prediction backend is available.
  */
@@ -121,7 +123,8 @@ class NullPhysicsPlugin : PhysicsPredictPlugin {
 
     override fun residual(movie: TasMovie, observed: List<TasTracePoint>): ResidualProfile =
         ResidualProfile(
-            frameTrust = List(movie.frameCount) { FrameTrust.TRUSTWORTHY },
+            frameTrust = List(movie.frameCount) { FrameTrust.UNMEASURED },
+            cause = "No physics plugin configured",
         )
 }
 

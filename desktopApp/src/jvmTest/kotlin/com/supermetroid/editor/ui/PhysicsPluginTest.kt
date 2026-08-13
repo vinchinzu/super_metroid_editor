@@ -12,7 +12,7 @@ import kotlin.test.assertNull
 class PhysicsPluginTest {
 
     @Test
-    fun `NullPhysicsPlugin - all frames TRUSTWORTHY`() {
+    fun `NullPhysicsPlugin - all frames UNMEASURED`() {
         val plugin = NullPhysicsPlugin()
         val movie = TasMovie(
             meta = TasMovieMeta(),
@@ -26,9 +26,10 @@ class PhysicsPluginTest {
         val residual = plugin.residual(movie, emptyList())
 
         assertEquals(3, residual.frameTrust.size)
-        assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
-        assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[1])
-        assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[2])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[0])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[1])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[2])
+        assertEquals("No physics plugin configured", residual.cause)
     }
 
     @Test
@@ -47,8 +48,8 @@ class PhysicsPluginTest {
     }
 
     @Test
-    fun `SmRevPredictStubPlugin - residual detects roomId mismatch as DEAD`() {
-        val plugin = SmRevPredictStubPlugin()
+    fun `SmRevPredictPlugin - residual without observations is UNMEASURED`() {
+        val plugin = SmRevPredictPlugin()
         val movie = TasMovie(
             frames = List(10) { TasInput.noop() },
             trace = listOf(
@@ -57,12 +58,33 @@ class PhysicsPluginTest {
             ),
         )
 
-        val observed = listOf(
+        val residual = plugin.residual(movie, emptyList())
+
+        assertEquals(10, residual.frameTrust.size)
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[0])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[5])
+        assertNull(residual.firstDifferingRoom)
+        assertNull(residual.firstDifferingPixel)
+        assertEquals("No SuperMetroidEnv harness observation available", residual.cause)
+    }
+
+    @Test
+    fun `SmRevPredictPlugin - residual detects roomId mismatch as DEAD with SuperMetroidEnv obs`() {
+        val plugin = SmRevPredictPlugin()
+        val movie = TasMovie(
+            frames = List(10) { TasInput.noop() },
+            trace = listOf(
+                TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
+                TasTracePoint(frame = 5, x = 110, y = 210, roomId = 1000),
+            ),
+        )
+
+        val superMetroidEnvObservations = listOf(
             TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
             TasTracePoint(frame = 5, x = 110, y = 210, roomId = 2000),
         )
 
-        val residual = plugin.residual(movie, observed)
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
 
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
         assertEquals(FrameTrust.DEAD, residual.frameTrust[5])
@@ -73,8 +95,8 @@ class PhysicsPluginTest {
     }
 
     @Test
-    fun `SmRevPredictStubPlugin - residual detects pixel mismatch as DEAD`() {
-        val plugin = SmRevPredictStubPlugin()
+    fun `SmRevPredictPlugin - residual detects pixel mismatch as DEAD with SuperMetroidEnv obs`() {
+        val plugin = SmRevPredictPlugin()
         val movie = TasMovie(
             frames = List(10) { TasInput.noop() },
             trace = listOf(
@@ -83,12 +105,12 @@ class PhysicsPluginTest {
             ),
         )
 
-        val observed = listOf(
+        val superMetroidEnvObservations = listOf(
             TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
             TasTracePoint(frame = 3, x = 115, y = 215, roomId = 1000),
         )
 
-        val residual = plugin.residual(movie, observed)
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
 
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
         assertEquals(FrameTrust.DEAD, residual.frameTrust[3])
@@ -97,8 +119,8 @@ class PhysicsPluginTest {
     }
 
     @Test
-    fun `SmRevPredictStubPlugin - residual detects subpixel-only mismatch as SPOT_CHECK`() {
-        val plugin = SmRevPredictStubPlugin()
+    fun `SmRevPredictPlugin - residual detects subpixel-only mismatch as SPOT_CHECK with SuperMetroidEnv obs`() {
+        val plugin = SmRevPredictPlugin()
         val movie = TasMovie(
             frames = List(10) { TasInput.noop() },
             trace = listOf(
@@ -107,12 +129,12 @@ class PhysicsPluginTest {
             ),
         )
 
-        val observed = listOf(
+        val superMetroidEnvObservations = listOf(
             TasTracePoint(frame = 0, x = 100, y = 200, subX = 32768, subY = 16384, roomId = 1000),
             TasTracePoint(frame = 4, x = 110, y = 210, subX = 40000, subY = 20000, roomId = 1000),
         )
 
-        val residual = plugin.residual(movie, observed)
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
 
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
         assertEquals(FrameTrust.SPOT_CHECK, residual.frameTrust[4])
@@ -121,8 +143,8 @@ class PhysicsPluginTest {
     }
 
     @Test
-    fun `SmRevPredictStubPlugin - residual exact match is TRUSTWORTHY`() {
-        val plugin = SmRevPredictStubPlugin()
+    fun `SmRevPredictPlugin - residual exact match is TRUSTWORTHY with SuperMetroidEnv obs`() {
+        val plugin = SmRevPredictPlugin()
         val movie = TasMovie(
             frames = List(5) { TasInput.noop() },
             trace = listOf(
@@ -131,17 +153,39 @@ class PhysicsPluginTest {
             ),
         )
 
-        val observed = listOf(
+        val superMetroidEnvObservations = listOf(
             TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
             TasTracePoint(frame = 2, x = 110, y = 210, roomId = 1000),
         )
 
-        val residual = plugin.residual(movie, observed)
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
 
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
         assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[2])
         assertNull(residual.firstDifferingPixel)
         assertNull(residual.firstDifferingRoom)
+    }
+
+    @Test
+    fun `SmRevPredictPlugin - residual missing observation frames are UNMEASURED`() {
+        val plugin = SmRevPredictPlugin()
+        val movie = TasMovie(
+            frames = List(10) { TasInput.noop() },
+            trace = listOf(
+                TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
+                TasTracePoint(frame = 5, x = 110, y = 210, roomId = 1000),
+            ),
+        )
+
+        val superMetroidEnvObservations = listOf(
+            TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
+        )
+
+        val residual = plugin.residual(movie, superMetroidEnvObservations)
+
+        assertEquals(FrameTrust.TRUSTWORTHY, residual.frameTrust[0])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[1])
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[5])
     }
 
     @Test
@@ -159,9 +203,9 @@ class PhysicsPluginTest {
         val nullResidual = routeState.residualProfile
         assertNotNull(nullResidual)
         assertEquals(5, nullResidual.frameTrust.size)
-        assertEquals(FrameTrust.TRUSTWORTHY, nullResidual.frameTrust[0])
+        assertEquals(FrameTrust.UNMEASURED, nullResidual.frameTrust[0])
 
-        routeState.setPhysicsPlugin(SmRevPredictStubPluginFactory)
+        routeState.setPhysicsPlugin(SmRevPredictPluginFactory)
         val stubResidual = routeState.residualProfile
         assertNotNull(stubResidual)
     }
@@ -187,5 +231,24 @@ class PhysicsPluginTest {
         routeState.predictedHopTrace
         
         assert(movie.trace != predictedHop)
+    }
+
+    @Test
+    fun `RouteEditorState - computeResidual with no observations shows unmeasured`() {
+        val routeState = RouteEditorState(SmRevPredictPluginFactory)
+        val movie = TasMovie(
+            frames = List(5) { TasInput.noop() },
+            trace = listOf(
+                TasTracePoint(frame = 0, x = 100, y = 200, roomId = 1000),
+            ),
+        )
+        routeState.currentMovie = movie
+        routeState.computeResidual(emptyList())
+
+        val residual = routeState.residualProfile
+        assertNotNull(residual)
+        assertEquals(FrameTrust.UNMEASURED, residual.frameTrust[0])
+        assertNull(residual.firstDifferingPixel)
+        assertNull(residual.firstDifferingRoom)
     }
 }

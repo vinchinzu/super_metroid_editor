@@ -5,16 +5,17 @@ import com.supermetroid.editor.tas.TasTracePoint
 import java.io.File
 
 /**
- * File-based stub physics plugin for sm_rev_predict.
+ * File-based physics plugin for sm_rev_predict.
  *
- * Loads hop_short.tasmovie.json as a hint track if available. If the sidecar predict
- * JSON exists, uses it; otherwise falls back to hop_short as the HINT track.
+ * Loads hop_short.tasmovie.json as a HINT track (NOT emulator-legal). Residual
+ * computation requires SuperMetroidEnv harness observations; without them, residual
+ * is unmeasured and all FrameTrust values are UNMEASURED.
  *
- * This is labeled as HINT — not emulator-legal, not final. The interface allows
- * swapping in a full sm_rev_predict or Haskell implementation without timeline rewrites.
+ * The plugin exists so a broken hydrate/load-state implementation can be replaced
+ * without ripping the timeline. Stub the residual call until CLI --load-state ships.
  */
-class SmRevPredictStubPlugin(private val routeDirectory: File = File("routes")) : PhysicsPredictPlugin {
-    override val id: String = "sm_rev_predict_stub"
+class SmRevPredictPlugin(private val routeDirectory: File = File("routes")) : PhysicsPredictPlugin {
+    override val id: String = "sm_rev_predict"
 
     private var hopShortMovie: TasMovie? = null
 
@@ -44,14 +45,15 @@ class SmRevPredictStubPlugin(private val routeDirectory: File = File("routes")) 
         val traceSegment = hop.trace.filter { (it.frame ?: 0) >= fromFrame }
         return PredictedHop(
             traceSegment,
-            "Overlay Y illustrative. Not emulator-legal.",
+            "HINT TRACK ONLY — NOT EMULATOR-LEGAL",
         )
     }
 
     override fun residual(movie: TasMovie, observed: List<TasTracePoint>): ResidualProfile {
         if (observed.isEmpty()) {
             return ResidualProfile(
-                frameTrust = List(movie.frameCount) { FrameTrust.TRUSTWORTHY },
+                frameTrust = List(movie.frameCount) { FrameTrust.UNMEASURED },
+                cause = "No SuperMetroidEnv harness observation available",
             )
         }
 
@@ -64,36 +66,30 @@ class SmRevPredictStubPlugin(private val routeDirectory: File = File("routes")) 
         var cause: String? = null
 
         val observedByFrame = observed.associateBy { it.frame ?: 0 }
+        val predictedByFrame = movie.trace.associateBy { it.frame ?: 0 }
 
         for (frameIdx in 0 until movie.frameCount) {
             val obs = observedByFrame[frameIdx]
-            if (obs == null) {
-                frameTrust.add(FrameTrust.TRUSTWORTHY)
+            val pred = predictedByFrame[frameIdx]
+
+            if (obs == null || pred == null) {
+                frameTrust.add(FrameTrust.UNMEASURED)
                 continue
             }
 
-            if (obs.roomId != null) {
-                val expectedRoomId = movie.trace.lastOrNull { (it.frame ?: 0) <= frameIdx }?.roomId
-                if (expectedRoomId != null && obs.roomId != expectedRoomId) {
-                    frameTrust.add(FrameTrust.DEAD)
-                    if (firstDifferingRoom == null) {
-                        firstDifferingRoom = frameIdx
-                        firstDifferingField = "roomId"
-                        cause = "$079B roomId mismatch: expected $expectedRoomId, got ${obs.roomId}"
-                    }
-                    continue
+            if (obs.roomId != null && pred.roomId != null && obs.roomId != pred.roomId) {
+                frameTrust.add(FrameTrust.DEAD)
+                if (firstDifferingRoom == null) {
+                    firstDifferingRoom = frameIdx
+                    firstDifferingField = "roomId"
+                    cause = "$079B roomId mismatch: expected ${pred.roomId}, got ${obs.roomId}"
                 }
-            }
-
-            val expectedTrace = movie.trace.lastOrNull { (it.frame ?: 0) <= frameIdx }
-            if (expectedTrace == null) {
-                frameTrust.add(FrameTrust.TRUSTWORTHY)
                 continue
             }
 
-            val pixelMatch = obs.x == expectedTrace.x && obs.y == expectedTrace.y
-            val subpixelMatch = (obs.subX == expectedTrace.subX && obs.subY == expectedTrace.subY) ||
-                    (obs.subX == null || expectedTrace.subX == null)
+            val pixelMatch = obs.x == pred.x && obs.y == pred.y
+            val subpixelMatch = (obs.subX == pred.subX && obs.subY == pred.subY) ||
+                    (obs.subX == null || pred.subX == null)
 
             if (!pixelMatch) {
                 frameTrust.add(FrameTrust.DEAD)
@@ -128,6 +124,6 @@ class SmRevPredictStubPlugin(private val routeDirectory: File = File("routes")) 
     }
 }
 
-object SmRevPredictStubPluginFactory : PhysicsPluginFactory {
-    override fun create(): PhysicsPredictPlugin = SmRevPredictStubPlugin()
+object SmRevPredictPluginFactory : PhysicsPluginFactory {
+    override fun create(): PhysicsPredictPlugin = SmRevPredictPlugin()
 }

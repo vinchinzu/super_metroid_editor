@@ -19,7 +19,7 @@ enum class RoutePlaybackState {
 }
 
 class RouteEditorState(
-    private val physicsPluginFactory: PhysicsPluginFactory = SmRevPredictStubPluginFactory,
+    private val physicsPluginFactory: PhysicsPluginFactory = SmRevPredictPluginFactory,
 ) {
     var currentMovie by mutableStateOf<TasMovie?>(null)
 
@@ -259,11 +259,15 @@ class RouteEditorState(
     }
 
     /**
-     * Compute residual between predicted and observed traces.
+     * Compute residual between predicted and SuperMetroidEnv harness observations.
+     * 
+     * Do NOT call this with desktop snes9x traces — that emulator is UI playback only.
+     * Pass only SuperMetroidEnv observations. If no observations exist, residual will
+     * be unmeasured (all fd_* null, all FrameTrust UNMEASURED).
      */
-    fun computeResidual() {
+    fun computeResidual(superMetroidEnvObservations: List<TasTracePoint> = emptyList()) {
         val movie = currentMovie ?: return
-        residualProfile = physicsPlugin.residual(movie, movie.trace)
+        residualProfile = physicsPlugin.residual(movie, superMetroidEnvObservations)
     }
 
     /**

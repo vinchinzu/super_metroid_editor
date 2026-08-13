@@ -177,11 +177,13 @@ private fun RouteTransportControls(
             
             val residual = routeState.residualProfile
             if (residual != null) {
+                val fdSubpixel = residual.firstDifferingSubpixel?.toString() ?: "n.m."
+                val fdPixel = residual.firstDifferingPixel?.toString() ?: "n.m."
+                val fdPose = residual.firstDifferingPose?.toString() ?: "n.m."
+                val fdRoom = residual.firstDifferingRoom?.toString() ?: "n.m."
+                
                 Text(
-                    "Residual: R(τ) = (σ+=${residual.firstDifferingSubpixel ?: "—"}, " +
-                            "σ=${residual.firstDifferingPixel ?: "—"}, " +
-                            "π=${residual.firstDifferingPose ?: "—"}, " +
-                            "†=${residual.firstDifferingRoom ?: "—"})",
+                    "Residual: R(τ) = (σ+=$fdSubpixel, σ=$fdPixel, π=$fdPose, †=$fdRoom)",
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -192,6 +194,13 @@ private fun RouteTransportControls(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.error,
+                    )
+                } else if (residual.cause != null) {
+                    Text(
+                        residual.cause,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -355,6 +364,7 @@ private fun FrameInputRow(
         FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.surfaceVariant
         FrameTrust.SPOT_CHECK -> Color(0xFFFFF9C4)
         FrameTrust.DEAD -> Color(0xFFFFCDD2)
+        FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.surfaceVariant
         null -> MaterialTheme.colorScheme.surfaceVariant
     }
     
@@ -362,6 +372,7 @@ private fun FrameInputRow(
         FrameTrust.TRUSTWORTHY -> MaterialTheme.colorScheme.primaryContainer
         FrameTrust.SPOT_CHECK -> Color(0xFFFFF59D)
         FrameTrust.DEAD -> Color(0xFFEF9A9A)
+        FrameTrust.UNMEASURED -> MaterialTheme.colorScheme.primaryContainer
         null -> MaterialTheme.colorScheme.primaryContainer
     }
     
