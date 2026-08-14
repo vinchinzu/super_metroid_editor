@@ -38,6 +38,7 @@ object RomValidator {
         issues.addAll(checkEnemyGfxLimits(parser, rooms))
         issues.addAll(checkRoomDimensions(rooms))
         issues.addAll(checkPlmSets(parser, rooms))
+        issues.addAll(checkRoomGraph(parser, roomIds))
         if (project != null) {
             issues.addAll(checkProjectSaveStationSpawns(parser, project, rooms))
             issues.addAll(checkProjectGraphicsExportFit(parser, project))
@@ -210,6 +211,37 @@ object RomValidator {
                 ))
             }
         }
+        return issues
+    }
+
+    /**
+     * Check room graph for orphaned and disconnected rooms using the door graph index.
+     */
+    fun checkRoomGraph(parser: RomParser, roomIds: List<Int>): List<Issue> {
+        val issues = mutableListOf<Issue>()
+        val index = parser.doorGraphIndex
+        val summary = index.summary()
+
+        // Report orphaned rooms (exist but not reachable from any save station)
+        for (roomId in index.orphanedRooms) {
+            val room = parser.readRoomHeader(roomId)
+            issues.add(Issue(
+                Severity.WARNING, "Room Graph", roomId,
+                room?.name ?: "Room 0x${roomId.toString(16).uppercase()}",
+                "Room is not reachable from any save station. It may be unused or require special trigger."
+            ))
+        }
+
+        // Report disconnected rooms (no doors at all)
+        for (roomId in index.disconnectedRooms) {
+            val room = parser.readRoomHeader(roomId)
+            issues.add(Issue(
+                Severity.INFO, "Room Graph", roomId,
+                room?.name ?: "Room 0x${roomId.toString(16).uppercase()}",
+                "Room has no doors (disconnected). This is normal for intro/cutscene rooms."
+            ))
+        }
+
         return issues
     }
 
