@@ -84,17 +84,32 @@ class RoomExportTest {
         val es = createSyntheticEditorState(0x1234, 2, 2)
         val rp = createMinimalRomParser()
         
+        val beforeData = es.workingLevelData?.copyOf()
+        val beforeScrolls = es.workingScrolls.copyOf()
+        val beforeWidth = es.workingBlocksWide
+        val beforeHeight = es.workingBlocksTall
+        
         val invalidJson = "{ invalid json }"
         val result = es.importRoomFromJson(invalidJson, rp)
         
         assertTrue(result.contains("invalid JSON format"), "Should reject invalid JSON: $result")
         assertTrue(result.contains("Import failed"), "Should report import failure: $result")
+        
+        assertTrue(beforeData!!.contentEquals(es.workingLevelData!!), "workingLevelData should not be mutated on rejection")
+        assertTrue(beforeScrolls.contentEquals(es.workingScrolls), "workingScrolls should not be mutated on rejection")
+        assertEquals(beforeWidth, es.workingBlocksWide, "width should not be mutated on rejection")
+        assertEquals(beforeHeight, es.workingBlocksTall, "height should not be mutated on rejection")
     }
 
     @Test
     fun `import rejects bad version`() {
         val es = createSyntheticEditorState(0x1234, 2, 2)
         val rp = createMinimalRomParser()
+        
+        val beforeData = es.workingLevelData?.copyOf()
+        val beforeScrolls = es.workingScrolls.copyOf()
+        val beforeWidth = es.workingBlocksWide
+        val beforeHeight = es.workingBlocksTall
         
         val badVersion = RoomExportData(
             version = 99,
@@ -113,12 +128,22 @@ class RoomExportTest {
         assertTrue(result.contains("unsupported version"), "Should reject version 99: $result")
         assertTrue(result.contains("99"), "Error should mention version 99: $result")
         assertTrue(result.contains("Import failed"), "Should report import failure: $result")
+        
+        assertTrue(beforeData!!.contentEquals(es.workingLevelData!!), "workingLevelData should not be mutated on rejection")
+        assertTrue(beforeScrolls.contentEquals(es.workingScrolls), "workingScrolls should not be mutated on rejection")
+        assertEquals(beforeWidth, es.workingBlocksWide, "width should not be mutated on rejection")
+        assertEquals(beforeHeight, es.workingBlocksTall, "height should not be mutated on rejection")
     }
 
     @Test
     fun `import rejects scroll size mismatch`() {
         val es = createSyntheticEditorState(0x1234, 2, 2)
         val rp = createMinimalRomParser()
+        
+        val beforeData = es.workingLevelData?.copyOf()
+        val beforeScrolls = es.workingScrolls.copyOf()
+        val beforeWidth = es.workingBlocksWide
+        val beforeHeight = es.workingBlocksTall
         
         val badScrolls = RoomExportData(
             version = 1,
@@ -136,12 +161,22 @@ class RoomExportTest {
         
         assertTrue(result.contains("scroll data size"), "Should reject scroll size mismatch: $result")
         assertTrue(result.contains("Import failed"), "Should report import failure: $result")
+        
+        assertTrue(beforeData!!.contentEquals(es.workingLevelData!!), "workingLevelData should not be mutated on rejection")
+        assertTrue(beforeScrolls.contentEquals(es.workingScrolls), "workingScrolls should not be mutated on rejection")
+        assertEquals(beforeWidth, es.workingBlocksWide, "width should not be mutated on rejection")
+        assertEquals(beforeHeight, es.workingBlocksTall, "height should not be mutated on rejection")
     }
 
     @Test
     fun `import rejects invalid base64`() {
         val es = createSyntheticEditorState(0x1234, 2, 2)
         val rp = createMinimalRomParser()
+        
+        val beforeData = es.workingLevelData?.copyOf()
+        val beforeScrolls = es.workingScrolls.copyOf()
+        val beforeWidth = es.workingBlocksWide
+        val beforeHeight = es.workingBlocksTall
         
         val badBase64 = """
         {
@@ -165,6 +200,11 @@ class RoomExportTest {
         
         assertTrue(result.contains("invalid base64"), "Should reject invalid base64: $result")
         assertTrue(result.contains("Import failed"), "Should report import failure: $result")
+        
+        assertTrue(beforeData!!.contentEquals(es.workingLevelData!!), "workingLevelData should not be mutated on rejection")
+        assertTrue(beforeScrolls.contentEquals(es.workingScrolls), "workingScrolls should not be mutated on rejection")
+        assertEquals(beforeWidth, es.workingBlocksWide, "width should not be mutated on rejection")
+        assertEquals(beforeHeight, es.workingBlocksTall, "height should not be mutated on rejection")
     }
 
     @Test
@@ -173,6 +213,7 @@ class RoomExportTest {
         val rp = createMinimalRomParser()
         
         val originalLevelDataSnapshot = es.originalLevelData?.copyOf()
+        val originalScrollsSnapshot = es.workingScrolls.copyOf()
         
         val importData = RoomExportData(
             version = 1,
@@ -199,7 +240,8 @@ class RoomExportTest {
         assertEquals(0, es.workingScrolls[0], "First scroll should be 0 from import")
         assertEquals(2, es.workingScrolls[1], "Second scroll should be 2 from import")
         
-        assertTrue(originalLevelDataSnapshot!!.contentEquals(es.originalLevelData!!), "originalLevelData should be unchanged")
+        assertTrue(originalLevelDataSnapshot!!.contentEquals(es.originalLevelData!!), "originalLevelData (ROM baseline) should be unchanged")
+        assertFalse(originalScrollsSnapshot.contentEquals(es.workingScrolls), "workingScrolls should be updated")
     }
 
     private fun createSyntheticEditorState(roomId: Int, widthScreens: Int, heightScreens: Int): EditorState {
