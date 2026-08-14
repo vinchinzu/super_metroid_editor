@@ -214,7 +214,7 @@ class RoomCreator(
             height = height,
             upScroller = 0x70,
             downScroller = 0xA0,
-            creBitflag = 0xE0,
+            creBitflag = 0x00,
             doorOut = allocation.doorTablePtr,
             levelDataPtr = allocation.levelDataPtr,
             tileset = tileset,
