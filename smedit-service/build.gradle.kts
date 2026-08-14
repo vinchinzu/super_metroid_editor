@@ -8,7 +8,7 @@ val smeditServiceSystemProperties = listOf("smedit.service.host", "smedit.servic
 
 kotlin {
     jvm {
-        jvmToolchain(21)
+        jvmToolchain(17)
         withJava()
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()
