@@ -770,11 +770,12 @@ class MetatileTableTest {
                     pcToSnes = ::pcToSnes,
                     compress = { ByteArray(200) }, // Force relocation
                     decompress = ::decompress,
-                    allocate = { _, _, _ -> 0x81A000 }, // Allocate succeeds but writeU24 throws
+                    allocate = { _, _, _ -> 0x81A000 }, // Would allocate, but validation fails first
                 )
             }
             assertTrue(exception.message!!.contains("out of bounds"))
-            // ROM should be unchanged (writeU24 throws before completing the write)
+            // ROM unchanged because validation happens before allocation
+            assertArrayEquals(originalRom, rom)
         }
     }
 }

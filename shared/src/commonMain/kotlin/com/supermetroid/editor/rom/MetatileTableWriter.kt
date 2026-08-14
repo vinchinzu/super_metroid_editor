@@ -77,10 +77,7 @@ fun writeCreMetatileTable(
     // Re-validate each load-site pattern BEFORE allocating
     // (Refs are from original catalog scan; patches may have moved or destroyed them)
     for (patternStart in loadSiteRefs) {
-        if (!com.supermetroid.editor.rom.RomGraphicsCatalogDetector.CreGraphicsDetector.isValidLoadSitePattern(
-                romData, patternStart, creSnesPtr
-            )
-        ) {
+        if (!isValidCreLoadSitePattern(romData, patternStart, creSnesPtr)) {
             throw IllegalStateException(
                 "CRE load-site pattern at PC $patternStart is invalid or no longer points to \$${creSnesPtr.toString(16).uppercase()}. " +
                     "Patches may have moved or destroyed the decompression call. Abort export."
@@ -173,6 +170,13 @@ fun writeVarMetatileTable(
             val bankEnd = runCatching { snesToPc((bank shl 16) or 0xFFFF) + 1 }.getOrNull()
             bankStart != null && bankEnd != null && bankStart >= 0 && bankEnd <= romData.size
         }
+
+    // Validate tileset table entry offset is in-bounds BEFORE allocating
+    if (tilesetTableEntryOffset < 0 || tilesetTableEntryOffset + 2 >= romData.size) {
+        throw IndexOutOfBoundsException(
+            "Tileset table entry offset $tilesetTableEntryOffset is out of bounds for writeU24 (romData.size=${romData.size})"
+        )
+    }
 
     val newSnesAddress = allocate(compressed, banksToTry, "variable metatile table")
         ?: throw IllegalStateException(
