@@ -20,7 +20,7 @@ val appLoggingJvmArgs = listOf(
 
 kotlin {
     jvm {
-        jvmToolchain(17)
+        jvmToolchain(21)
         withJava()
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()
