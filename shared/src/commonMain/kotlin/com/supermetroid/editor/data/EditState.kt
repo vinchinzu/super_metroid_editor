@@ -1,6 +1,11 @@
 package com.supermetroid.editor.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 const val TILE_EDIT_LAYER_1 = 1
 const val TILE_EDIT_LAYER_2 = 2
@@ -209,12 +214,9 @@ data class RoomEdits(
      *  On export, each is written to free space in $8F and the PLM param is set to the address. */
     val customScrollCommands: MutableMap<String, MutableList<ScrollCommand>> = mutableMapOf(),
     val saveStationSpawns: MutableList<SaveStationSpawnChange> = mutableListOf(),
+    /** New room allocation data. Non-null indicates this is a newly created room that hasn't been written to ROM yet. */
+    var newRoomAllocation: NewRoomAllocation? = null,
 ) {
-    /** New room allocation data. Non-null indicates this is a newly created room that hasn't been written to ROM yet.
-     *  This is transient and not serialized - it only exists in memory during the editor session. */
-    @kotlinx.serialization.Transient
-    var newRoomAllocation: NewRoomAllocation? = null
-    
     val hasEdits: Boolean get() =
         operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
@@ -228,11 +230,13 @@ data class RoomEdits(
  * Allocation details for a newly created room.
  * Stored in RoomEdits until export writes the room to ROM.
  */
+@Serializable
 data class NewRoomAllocation(
     val headerPcOffset: Int,
     val doorTablePtr: Int,
     val levelDataPtr: Int,
     val levelDataPcOffset: Int,
+    @Serializable(with = ByteArrayBase64Serializer::class)
     val compressedLevelData: ByteArray,
     val plmSetPtr: Int,
     val enemyPopPtr: Int,
@@ -266,6 +270,55 @@ data class NewRoomAllocation(
         result = 31 * result + scrollPtr
         result = 31 * result + roomIndex
         return result
+    }
+}
+
+/**
+ * Serializer for ByteArray as base64 string.
+ */
+object ByteArrayBase64Serializer : KSerializer<ByteArray> {
+    override val descriptor = PrimitiveSerialDescriptor("ByteArrayBase64", PrimitiveKind.STRING)
+    
+    override fun serialize(encoder: Encoder, value: ByteArray) {
+        encoder.encodeString(value.encodeToBase64())
+    }
+    
+    override fun deserialize(decoder: Decoder): ByteArray {
+        return decoder.decodeString().decodeFromBase64()
+    }
+    
+    private fun ByteArray.encodeToBase64(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        val result = StringBuilder()
+        var i = 0
+        while (i < size) {
+            val b0 = this[i++].toInt() and 0xFF
+            val b1 = if (i < size) this[i++].toInt() and 0xFF else 0
+            val b2 = if (i < size) this[i++].toInt() and 0xFF else 0
+            
+            result.append(chars[b0 shr 2])
+            result.append(chars[((b0 and 0x03) shl 4) or (b1 shr 4)])
+            result.append(if (i > size + 1) '=' else chars[((b1 and 0x0F) shl 2) or (b2 shr 6)])
+            result.append(if (i > size) '=' else chars[b2 and 0x3F])
+        }
+        return result.toString()
+    }
+    
+    private fun String.decodeFromBase64(): ByteArray {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        val result = mutableListOf<Byte>()
+        var i = 0
+        while (i < length) {
+            val c0 = chars.indexOf(this[i++])
+            val c1 = chars.indexOf(this[i++])
+            val c2 = if (i < length && this[i] != '=') chars.indexOf(this[i++]) else -1
+            val c3 = if (i < length && this[i] != '=') chars.indexOf(this[i++]) else -1
+            
+            result.add(((c0 shl 2) or (c1 shr 4)).toByte())
+            if (c2 != -1) result.add(((c1 shl 4) or (c2 shr 2)).toByte())
+            if (c3 != -1) result.add(((c2 shl 6) or c3).toByte())
+        }
+        return result.toByteArray()
     }
 }
 

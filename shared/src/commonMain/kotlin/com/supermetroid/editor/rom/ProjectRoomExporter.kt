@@ -77,7 +77,7 @@ class ProjectRoomExporter(
                 val headerChange = roomEdits.roomHeaderChange!!
                 val stateChange = roomEdits.stateDataChange
                 
-                val roomCreator = RoomCreator(romData, romParser)
+                val roomCreator = RoomCreator(romData, romParser, emptyList())
                 roomCreator.writeAllocatedRoom(
                     roomId = roomId,
                     allocation = allocation,
@@ -94,7 +94,9 @@ class ProjectRoomExporter(
                 
                 // Clear the allocation flag so subsequent exports treat it as a normal room
                 roomEdits.newRoomAllocation = null
-                continue
+                
+                // Fall through to apply any tile/PLM/door/enemy/scroll edits made after creation
+                // (Don't continue - we need to process the rest of the room edits)
             }
             
             val room = romParser.readRoomHeader(roomId) ?: continue

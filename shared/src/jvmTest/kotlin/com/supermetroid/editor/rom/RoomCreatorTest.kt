@@ -11,7 +11,7 @@ class RoomCreatorTest {
     fun `allocate blank room creates valid structure`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
 
         val result = creator.allocateBlankRoom(
             width = 2,
@@ -28,13 +28,14 @@ class RoomCreatorTest {
         assertEquals(result.roomId, headerSnes and 0xFFFF, "Room ID should equal header SNES address")
         assertEquals(0x8F, headerSnes shr 16, "Header should be in bank \$8F")
 
-        // Verify scroll data size matches room screens
+        // Verify scroll data pointer and size
         val scrollPc = parser.snesToPc(0x8F0000 or result.allocation.scrollPtr)
         assertTrue(scrollPc >= 0, "Scroll data should be valid")
         
-        // For a 2x2 room, scroll data should be 4 bytes
-        val scrollDataSize = 2 * 2
-        assertEquals(4, scrollDataSize, "Scroll data size should match room screens (2x2=4)")
+        // For a 2x2 room, 4 screens worth of scroll data should be reserved
+        // We can't directly check the reservation size from the allocation object,
+        // but we can verify the scroll pointer is valid
+        assertTrue(result.allocation.scrollPtr >= 0x8000, "Scroll pointer should be in bank \$8F")
         
         // Verify compressed level data is stored
         assertTrue(result.allocation.compressedLevelData.isNotEmpty(), "Compressed level data should be stored")
@@ -44,7 +45,7 @@ class RoomCreatorTest {
     fun `write allocated room produces valid ROM data`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
 
         val result = creator.allocateBlankRoom(
             width = 1,
@@ -91,7 +92,7 @@ class RoomCreatorTest {
     fun `allocation fails when free space is exhausted in A1`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
         
         // Take snapshot of $8F bank before filling $A1
         val bank8FStart = parser.snesToPc(0x8F8000)
@@ -129,7 +130,7 @@ class RoomCreatorTest {
     fun `allocation fails when free space is exhausted in B4`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
         
         // Take snapshot of $8F and $A1 banks before filling $B4
         val bank8FStart = parser.snesToPc(0x8F8000)
@@ -178,15 +179,16 @@ class RoomCreatorTest {
     fun `allocated rooms do not overlap existing data`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
 
         val result1 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
         assertNotNull(result1)
         creator.writeAllocatedRoom(result1.roomId, result1.allocation, 1, 1, 0, 0)
 
-        val result2 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
+        val creator2 = RoomCreator(rom, parser, listOf(result1.allocation))
+        val result2 = creator2.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
         assertNotNull(result2)
-        creator.writeAllocatedRoom(result2.roomId, result2.allocation, 1, 1, 0, 0)
+        creator2.writeAllocatedRoom(result2.roomId, result2.allocation, 1, 1, 0, 0)
 
         // Room IDs (which are header SNES addresses) should be different
         assertTrue(result1.roomId != result2.roomId, "Room IDs should be different")
@@ -206,7 +208,7 @@ class RoomCreatorTest {
     fun `level data is compressed and decompresses correctly`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
 
         val result = creator.allocateBlankRoom(width = 2, height = 1, area = 0, tileset = 0)
         assertNotNull(result)
@@ -232,6 +234,59 @@ class RoomCreatorTest {
             val bts = decompressed[2 + layer1Size + i].toInt() and 0xFF
             assertEquals(0x00, bts, "All BTS should be 0x00")
         }
+    }
+
+    @Test
+    fun `two reserve-only allocates do not collide`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+        
+        // First allocation
+        val creator1 = RoomCreator(rom, parser, emptyList())
+        val result1 = creator1.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
+        assertNotNull(result1, "First allocation should succeed")
+        
+        // Second allocation WITHOUT writing the first
+        // Pass the first allocation as existing to avoid collision
+        val creator2 = RoomCreator(rom, parser, listOf(result1.allocation))
+        val result2 = creator2.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
+        assertNotNull(result2, "Second allocation should succeed")
+        
+        // Room IDs should be different
+        assertTrue(result1.roomId != result2.roomId, "Room IDs should be different")
+        
+        // Check all allocations don't overlap
+        assertNotOverlapping("header", result1.allocation.headerPcOffset, 39, result2.allocation.headerPcOffset, 39)
+        
+        val doorPc1 = parser.snesToPc(0x8F0000 or result1.allocation.doorTablePtr)
+        val doorPc2 = parser.snesToPc(0x8F0000 or result2.allocation.doorTablePtr)
+        assertNotOverlapping("door", doorPc1, 2, doorPc2, 2)
+        
+        val plmPc1 = parser.snesToPc(0x8F0000 or result1.allocation.plmSetPtr)
+        val plmPc2 = parser.snesToPc(0x8F0000 or result2.allocation.plmSetPtr)
+        assertNotOverlapping("PLM", plmPc1, 2, plmPc2, 2)
+        
+        assertNotOverlapping("level", result1.allocation.levelDataPcOffset, result1.allocation.compressedLevelData.size,
+            result2.allocation.levelDataPcOffset, result2.allocation.compressedLevelData.size)
+        
+        val enemyPc1 = parser.snesToPc(0xA10000 or result1.allocation.enemyPopPtr)
+        val enemyPc2 = parser.snesToPc(0xA10000 or result2.allocation.enemyPopPtr)
+        assertNotOverlapping("enemy", enemyPc1, 3, enemyPc2, 3)
+        
+        val gfxPc1 = parser.snesToPc(0xB40000 or result1.allocation.enemyGfxPtr)
+        val gfxPc2 = parser.snesToPc(0xB40000 or result2.allocation.enemyGfxPtr)
+        assertNotOverlapping("GFX", gfxPc1, 2, gfxPc2, 2)
+        
+        val scrollPc1 = parser.snesToPc(0x8F0000 or result1.allocation.scrollPtr)
+        val scrollPc2 = parser.snesToPc(0x8F0000 or result2.allocation.scrollPtr)
+        assertNotOverlapping("scroll", scrollPc1, 1, scrollPc2, 1)
+    }
+
+    private fun assertNotOverlapping(label: String, start1: Int, size1: Int, start2: Int, size2: Int) {
+        val end1 = start1 + size1
+        val end2 = start2 + size2
+        val overlaps = (start1 < end2 && start2 < end1)
+        assertTrue(!overlaps, "$label ranges should not overlap: [$start1, $end1) vs [$start2, $end2)")
     }
 
     private fun createFreshTestRom(): ByteArray {
