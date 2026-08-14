@@ -4088,6 +4088,10 @@ class EditorState {
             return "Import failed: invalid dimensions ${parsed.width}x${parsed.height} (must be 1-15 screens)"
         }
 
+        if (parsed.scrollData.size != parsed.width * parsed.height) {
+            return "Import failed: scroll data size ${parsed.scrollData.size} does not match dimensions ${parsed.width}x${parsed.height}"
+        }
+
         val levelData = try {
             java.util.Base64.getDecoder().decode(parsed.levelDataBase64)
         } catch (_: Exception) {
@@ -4098,36 +4102,58 @@ class EditorState {
         val currentWidth = workingBlocksWide / 16
         val currentHeight = workingBlocksTall / 16
 
+        val oldWorkingScrolls = _workingScrolls.copyOf()
+        val oldWorkingLevelData = workingLevelData?.copyOf()
+
         if (parsed.width != currentWidth || parsed.height != currentHeight) {
             resizeRoom(currentWidth, currentHeight, parsed.width, parsed.height)
         }
 
-        workingLevelData = levelData.copyOf()
-        originalLevelData = levelData.copyOf()
-        workingBlocksWide = parsed.width * 16
-        workingBlocksTall = parsed.height * 16
-
-        if (parsed.scrollData.size != parsed.width * parsed.height) {
-            return "Import failed: scroll data size ${parsed.scrollData.size} does not match dimensions ${parsed.width}x${parsed.height}"
-        }
-        _workingScrolls = parsed.scrollData.toIntArray()
-        _originalScrolls = _workingScrolls.copyOf()
-        scrollVersion++
-
         val tileEdits = mutableListOf<TileEdit>()
-        for (by in 0 until workingBlocksTall) {
-            for (bx in 0 until workingBlocksWide) {
+        val newBlocksWide = parsed.width * 16
+        val newBlocksTall = parsed.height * 16
+        
+        workingLevelData = levelData.copyOf()
+        workingBlocksWide = newBlocksWide
+        workingBlocksTall = newBlocksTall
+
+        for (by in 0 until newBlocksTall) {
+            for (bx in 0 until newBlocksWide) {
+                val oldWord = if (oldWorkingLevelData != null && bx < currentWidth * 16 && by < currentHeight * 16) {
+                    val idx = by * (currentWidth * 16) + bx
+                    val offset = 2 + idx * 2
+                    if (offset + 1 < oldWorkingLevelData.size) {
+                        ((oldWorkingLevelData[offset + 1].toInt() and 0xFF) shl 8) or (oldWorkingLevelData[offset].toInt() and 0xFF)
+                    } else 0
+                } else 0
+                
+                val oldBts = if (oldWorkingLevelData != null && bx < currentWidth * 16 && by < currentHeight * 16) {
+                    val layer1Size = if (oldWorkingLevelData.size >= 2) {
+                        (oldWorkingLevelData[0].toInt() and 0xFF) or ((oldWorkingLevelData[1].toInt() and 0xFF) shl 8)
+                    } else 0
+                    val idx = by * (currentWidth * 16) + bx
+                    val btsOffset = 2 + layer1Size + idx
+                    if (btsOffset < oldWorkingLevelData.size) oldWorkingLevelData[btsOffset].toInt() and 0xFF else 0
+                } else 0
+
                 val word = readBlockWord(bx, by)
                 val bts = readBts(bx, by)
-                tileEdits.add(TileEdit(bx, by, 0, word, 0, bts))
+                tileEdits.add(TileEdit(bx, by, oldWord, word, oldBts, bts))
             }
         }
 
         val scrollEdits = mutableListOf<ScrollChange>()
+        _workingScrolls = parsed.scrollData.toIntArray()
+        scrollVersion++
+        
         for (sy in 0 until parsed.height) {
             for (sx in 0 until parsed.width) {
                 val idx = sy * parsed.width + sx
-                scrollEdits.add(ScrollChange(sx, sy, 0, parsed.scrollData[idx]))
+                val oldScroll = if (sx < oldWorkingScrolls.size / currentHeight && sy < currentHeight) {
+                    val oldIdx = sy * currentWidth + sx
+                    if (oldIdx < oldWorkingScrolls.size) oldWorkingScrolls[oldIdx] else 0
+                } else 0
+                scrollEdits.add(ScrollChange(sx, sy, oldScroll, parsed.scrollData[idx]))
             }
         }
 
