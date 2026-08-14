@@ -13,51 +13,61 @@ class PlmIdAssignerTest {
     // ─── Assignment Tests (no parser needed) ────────────────────────
 
     @Test
-    fun `assigner gives distinct sequential bits to colliding items`() {
+    fun `assigner keeps first colliding item, only reassigns extras`() {
         val plms = listOf(
-            plmLoc(0x91F8, "Room A", 0, itemPlm(0xEED7, 0x0010)),
-            plmLoc(0x91F8, "Room A", 1, itemPlm(0xEED7, 0x0010)), // collision
-            plmLoc(0x91F8, "Room A", 2, itemPlm(0xEF83, 0x0010)), // collision
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 5, 10, 0x0010)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 8, 12, 0x0010)), // collision, extra
+            plmLoc(0x91F8, "Room A", itemPlm(0xEF83, 10, 14, 0x0010)), // collision, extra
         )
         val collisions = listOf(
             PlmIdAssigner.BitCollision(0x0010, PlmIdAssigner.PlmKind.ITEM, plms)
         )
 
-        val assignments = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x0000)
+        val assignments = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x51)
 
-        assertEquals(3, assignments.size, "All 3 items should get new assignments")
-        val bits = assignments.map { it.newParam }.toSet()
-        assertEquals(3, bits.size, "All assigned bits should be unique")
-        assertTrue(0x0000 in bits)
-        assertTrue(0x0001 in bits)
-        assertTrue(0x0002 in bits)
+        // Only 2 extras get reassigned, first keeps 0x0010
+        assertEquals(2, assignments.size, "Only extras should be reassigned")
+        
+        val newParams = assignments.map { it.newParam }.toSet()
+        assertEquals(2, newParams.size, "Assigned bits should be unique")
+        assertTrue(0x51 in newParams, "Should start at 0x51")
+        assertTrue(0x52 in newParams, "Should assign 0x52")
+        
+        // Verify keeper (x=5) is not in assignments
+        val assignedXs = assignments.map { it.x }
+        assertTrue(5 !in assignedXs, "First item (x=5) should keep original bit")
     }
 
     @Test
-    fun `assigner gives distinct sequential bits to colliding doors`() {
+    fun `assigner keeps first colliding door, only reassigns extras`() {
         val plms = listOf(
-            plmLoc(0x91F8, "Room A", 0, doorPlm(0xC842, 0x9005)),
-            plmLoc(0x91F8, "Room A", 1, doorPlm(0xC848, 0x9005)), // collision
+            plmLoc(0x91F8, "Room A", doorPlm(0xC842, 10, 20, 0x9005)),
+            plmLoc(0x91F8, "Room A", doorPlm(0xC848, 15, 20, 0x9005)), // collision, extra
         )
         val collisions = listOf(
             PlmIdAssigner.BitCollision(0x05, PlmIdAssigner.PlmKind.DOOR, plms)
         )
 
-        val assignments = PlmIdAssigner.assignDoorIds(plms, collisions, startBit = 0x00)
+        val assignments = PlmIdAssigner.assignDoorIds(plms, collisions)
 
-        assertEquals(2, assignments.size)
-        val lowBytes = assignments.map { it.newParam and 0xFF }
-        assertEquals(2, lowBytes.toSet().size, "Door bits should be unique")
-        val highBytes = assignments.map { (it.newParam shr 8) and 0xFF }
-        assertTrue(highBytes.all { it == 0x90 }, "High byte should be preserved")
+        // Only 1 extra gets reassigned, first keeps 0x05
+        assertEquals(1, assignments.size, "Only extra should be reassigned")
+        
+        val assignment = assignments.first()
+        assertEquals(0x9005, assignment.oldParam, "Old param should be 0x9005")
+        assertEquals(0x90, (assignment.newParam shr 8) and 0xFF, "High byte preserved")
+        assertTrue((assignment.newParam and 0xFF) != 0x05, "Should get different door bit")
+        
+        // Verify keeper (x=10) is not in assignments
+        assertEquals(15, assignment.x, "Assignment should be for x=15, not keeper x=10")
     }
 
     @Test
     fun `already unique bits produce no assignments`() {
         val plms = listOf(
-            plmLoc(0x91F8, "Room A", 0, itemPlm(0xEED7, 0x0010)),
-            plmLoc(0x91F8, "Room A", 1, itemPlm(0xEED7, 0x0020)),
-            plmLoc(0x91F8, "Room A", 2, itemPlm(0xEF83, 0x0030)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 5, 10, 0x0010)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 8, 12, 0x0020)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEF83, 10, 14, 0x0030)),
         )
         val collisions = emptyList<PlmIdAssigner.BitCollision>()
 
@@ -69,37 +79,57 @@ class PlmIdAssignerTest {
     @Test
     fun `assignment is deterministic`() {
         val plms = listOf(
-            plmLoc(0x91F8, "Room A", 0, itemPlm(0xEED7, 0x0010)),
-            plmLoc(0x91F8, "Room A", 1, itemPlm(0xEED7, 0x0010)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 5, 10, 0x0010)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 8, 12, 0x0010)),
         )
         val collisions = listOf(
             PlmIdAssigner.BitCollision(0x0010, PlmIdAssigner.PlmKind.ITEM, plms)
         )
 
-        val assignments1 = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x0000)
-        val assignments2 = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x0000)
+        val assignments1 = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x51)
+        val assignments2 = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x51)
 
         assertEquals(assignments1, assignments2, "Assignments should be deterministic")
     }
 
     @Test
-    fun `assignment fills gaps in used bit ranges`() {
+    fun `assignment skips used bits`() {
         val plms = listOf(
-            plmLoc(0x91F8, "Room A", 0, itemPlm(0xEED7, 0x0000)), // bit 0x0000 (used)
-            plmLoc(0x91F8, "Room A", 1, itemPlm(0xEED7, 0x0002)), // bit 0x0002 (gap at 0x0001)
-            plmLoc(0x91F8, "Room A", 2, itemPlm(0xEED7, 0x0005)), // collision with next
-            plmLoc(0x91F8, "Room A", 3, itemPlm(0xEF83, 0x0005)), // collision
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 5, 10, 0x51)), // 0x51 used
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 8, 12, 0x52)), // 0x52 used
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 10, 14, 0x0010)), // collision
+            plmLoc(0x91F8, "Room A", itemPlm(0xEF83, 12, 16, 0x0010)), // collision
         )
         val collisions = listOf(
-            PlmIdAssigner.BitCollision(0x0005, PlmIdAssigner.PlmKind.ITEM, plms.drop(2))
+            PlmIdAssigner.BitCollision(0x0010, PlmIdAssigner.PlmKind.ITEM, plms.drop(2))
         )
 
-        val assignments = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x0000)
+        val assignments = PlmIdAssigner.assignItemIds(plms, collisions, startBit = 0x51)
 
-        assertEquals(2, assignments.size)
-        val newBits = assignments.map { it.newParam }.toSet()
-        assertTrue(0x0001 in newBits, "Should fill gap at 0x0001")
-        assertTrue(0x0003 in newBits, "Should use next available at 0x0003")
+        assertEquals(1, assignments.size, "One extra needs assignment")
+        val newParam = assignments.first().newParam
+        assertTrue(newParam == 0x53, "Should skip 0x51, 0x52, use 0x53")
+    }
+
+    @Test
+    fun `assignment identity is by roomId plmId x y oldParam`() {
+        val plms = listOf(
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 5, 10, 0x0010)),
+            plmLoc(0x91F8, "Room A", itemPlm(0xEED7, 8, 12, 0x0010)),
+        )
+        val collisions = listOf(
+            PlmIdAssigner.BitCollision(0x0010, PlmIdAssigner.PlmKind.ITEM, plms)
+        )
+
+        val assignments = PlmIdAssigner.assignItemIds(plms, collisions)
+
+        val assignment = assignments.first()
+        assertEquals(0x91F8, assignment.roomId)
+        assertEquals(0xEED7, assignment.plmId)
+        assertEquals(8, assignment.x)
+        assertEquals(12, assignment.y)
+        assertEquals(0x0010, assignment.oldParam)
+        assertTrue(assignment.newParam != 0x0010)
     }
 
     // ─── Scanner Tests (need real ROM bytes) ────────────────────────
@@ -157,6 +187,22 @@ class PlmIdAssignerTest {
     }
 
     @Test
+    fun `scanner includes colored door with non-standard high byte`() {
+        val rom = buildSyntheticRom(mapOf(
+            0x91F8 to listOf(
+                SyntheticPlm(0xC842, 10, 20, 0x0005), // Grey door, param without high byte
+            )
+        ))
+        val parser = RomParser(rom)
+
+        val scan = PlmIdAssigner.scanRooms(parser, listOf(0x91F8))
+
+        assertEquals(1, scan.doorPlms.size, "Should find grey door even with param 0x0005")
+        assertEquals(0xC842, scan.doorPlms.first().plm.id)
+        assertEquals(0x05, scan.doorPlms.first().plm.param and 0xFF)
+    }
+
+    @Test
     fun `scanner handles rooms with no items or doors`() {
         val rom = buildSyntheticRom(mapOf(
             0x91F8 to listOf(
@@ -196,19 +242,20 @@ class PlmIdAssignerTest {
     private fun plmLoc(
         roomId: Int,
         roomName: String,
-        plmIndex: Int,
         plm: RomParser.PlmEntry,
     ) = PlmIdAssigner.PlmLocation(
         roomId = roomId,
         roomName = roomName,
-        plmIndex = plmIndex,
         plm = plm,
         kind = if (RomParser.isItemPlm(plm.id)) PlmIdAssigner.PlmKind.ITEM
                else PlmIdAssigner.PlmKind.DOOR
     )
 
-    private fun itemPlm(id: Int, param: Int) = RomParser.PlmEntry(id, 0, 0, param)
-    private fun doorPlm(id: Int, param: Int) = RomParser.PlmEntry(id, 0, 0, param)
+    private fun itemPlm(id: Int, x: Int, y: Int, param: Int) = 
+        RomParser.PlmEntry(id, x, y, param)
+    
+    private fun doorPlm(id: Int, x: Int, y: Int, param: Int) = 
+        RomParser.PlmEntry(id, x, y, param)
 
     private data class SyntheticPlm(
         val id: Int,

@@ -12,8 +12,7 @@ package com.supermetroid.editor.rom
  * 
  * Bit namespaces:
  * - Item collection bits: stored directly in PLM param (0x0000-0xFFFF)
- * - Door tracking bits: stored in PLM param with high byte 0x80-0x9F
- *   (0x80XX through 0x9FXX where XX is the door bit index)
+ * - Door tracking bits: low byte of param for colored doors
  */
 object PlmIdAssigner {
 
@@ -23,7 +22,6 @@ object PlmIdAssigner {
     data class PlmLocation(
         val roomId: Int,
         val roomName: String,
-        val plmIndex: Int,
         val plm: RomParser.PlmEntry,
         val kind: PlmKind,
     )
@@ -56,10 +54,13 @@ object PlmIdAssigner {
 
     /**
      * Proposed ID assignment for a PLM.
+     * Identity: (roomId, plmId, x, y, oldParam)
      */
     data class Assignment(
         val roomId: Int,
-        val plmIndex: Int,
+        val plmId: Int,
+        val x: Int,
+        val y: Int,
         val oldParam: Int,
         val newParam: Int,
     )
@@ -76,13 +77,12 @@ object PlmIdAssigner {
             val room = parser.readRoomHeader(roomId) ?: continue
             val plms = parser.getAllPlmEntriesForRoom(roomId)
             
-            plms.forEachIndexed { index, plm ->
+            for (plm in plms) {
                 when {
                     RomParser.isItemPlm(plm.id) -> {
                         itemPlms.add(PlmLocation(
                             roomId = roomId,
                             roomName = room.name,
-                            plmIndex = index,
                             plm = plm,
                             kind = PlmKind.ITEM,
                         ))
@@ -91,7 +91,6 @@ object PlmIdAssigner {
                         doorPlms.add(PlmLocation(
                             roomId = roomId,
                             roomName = room.name,
-                            plmIndex = index,
                             plm = plm,
                             kind = PlmKind.DOOR,
                         ))
@@ -118,19 +117,17 @@ object PlmIdAssigner {
 
     /**
      * Detect if a door PLM uses bit tracking.
-     * Grey/yellow/green/red doors with high byte 0x80-0x9F track open state.
-     * Blue doors (beam) don't track state, so param is just door index.
+     * Grey/yellow/green/red doors track open state using the low byte as the door bit.
+     * Blue doors (beam) don't track state.
      */
     private fun isDoorCapWithBitTracking(plm: RomParser.PlmEntry): Boolean {
         val color = RomParser.doorCapColor(plm.id) ?: return false
-        if (color == RomParser.DOOR_CAP_BLUE) return false
-        val highByte = (plm.param shr 8) and 0xFF
-        return highByte in 0x80..0x9F
+        return color != RomParser.DOOR_CAP_BLUE
     }
 
     /**
      * Extract the door bit index from a door PLM param.
-     * Format: 0xHHLL where HH is 0x80-0x9F and LL is the bit index.
+     * For colored doors (grey/yellow/green/red), the low byte is the bit index.
      */
     private fun extractDoorBit(param: Int): Int {
         return param and 0xFF
@@ -156,115 +153,104 @@ object PlmIdAssigner {
     /**
      * Assign sequential unique IDs to item PLMs.
      * 
-     * Policy: preserve already-unique bits, assign sequential IDs to duplicates
-     * starting from the lowest unused bit.
+     * Policy: Keep one occupant of a colliding bit (first by roomId, x, y),
+     * only reassign extras. Start at 0x51 by default (vanilla uses 0x00-0x50).
      * 
      * @param itemPlms All item PLMs from scan
      * @param collisions Detected item bit collisions
-     * @param startBit Starting bit for sequential assignment (default 0x0000)
+     * @param startBit Starting bit for sequential assignment (default 0x51)
      * @return List of assignments for PLMs that need new params
      */
     fun assignItemIds(
         itemPlms: List<PlmLocation>,
         collisions: List<BitCollision>,
-        startBit: Int = 0x0000,
+        startBit: Int = 0x51,
     ): List<Assignment> {
         val assignments = mutableListOf<Assignment>()
         val usedBits = itemPlms.map { it.plm.param }.toMutableSet()
-        val needsAssignment = mutableSetOf<PlmLocation>()
 
         for (collision in collisions.filter { it.kind == PlmKind.ITEM }) {
-            needsAssignment.addAll(collision.locations)
-        }
+            // Sort by (roomId, x, y), keep first, reassign rest
+            val sorted = collision.locations.sortedWith(
+                compareBy({ it.roomId }, { it.plm.x }, { it.plm.y })
+            )
+            val extras = sorted.drop(1)
 
-        if (needsAssignment.isEmpty()) {
-            return emptyList()
-        }
-
-        var nextBit = startBit
-        
-        val sortedForAssignment = needsAssignment.sortedWith(
-            compareBy({ it.roomId }, { it.plmIndex })
-        )
-
-        for (plmLoc in sortedForAssignment) {
-            while (nextBit in usedBits) {
-                nextBit++
-                if (nextBit > 0xFFFF) {
-                    throw IllegalStateException("Item bit space exhausted (exceeded 0xFFFF)")
+            for (plmLoc in extras) {
+                var nextBit = startBit
+                while (nextBit in usedBits) {
+                    nextBit++
+                    if (nextBit > 0xFFFF) {
+                        throw IllegalStateException("Item bit space exhausted")
+                    }
                 }
-            }
 
-            assignments.add(Assignment(
-                roomId = plmLoc.roomId,
-                plmIndex = plmLoc.plmIndex,
-                oldParam = plmLoc.plm.param,
-                newParam = nextBit,
-            ))
-            
-            usedBits.add(nextBit)
-            nextBit++
+                assignments.add(Assignment(
+                    roomId = plmLoc.roomId,
+                    plmId = plmLoc.plm.id,
+                    x = plmLoc.plm.x,
+                    y = plmLoc.plm.y,
+                    oldParam = plmLoc.plm.param,
+                    newParam = nextBit,
+                ))
+                
+                usedBits.add(nextBit)
+            }
         }
 
-        return assignments.sortedWith(compareBy({ it.roomId }, { it.plmIndex }))
+        return assignments.sortedWith(compareBy({ it.roomId }, { it.x }, { it.y }))
     }
 
     /**
      * Assign sequential unique IDs to door PLMs.
      * 
-     * Policy: preserve already-unique bits, assign sequential IDs to duplicates.
-     * Door params have format 0xHHLL where HH is 0x80-0x9F and LL is the bit index.
+     * Policy: Keep one occupant of a colliding bit (first by roomId, x, y),
+     * only reassign extras. Preserve the high byte, assign unused low bytes.
      * 
      * @param doorPlms All door PLMs from scan
      * @param collisions Detected door bit collisions
-     * @param startBit Starting bit for sequential assignment (default 0x00)
      * @return List of assignments for PLMs that need new params
      */
     fun assignDoorIds(
         doorPlms: List<PlmLocation>,
         collisions: List<BitCollision>,
-        startBit: Int = 0x00,
     ): List<Assignment> {
         val assignments = mutableListOf<Assignment>()
         val usedDoorBits = doorPlms.map { extractDoorBit(it.plm.param) }.toMutableSet()
-        val needsAssignment = mutableSetOf<PlmLocation>()
 
         for (collision in collisions.filter { it.kind == PlmKind.DOOR }) {
-            needsAssignment.addAll(collision.locations)
-        }
+            // Sort by (roomId, x, y), keep first, reassign rest
+            val sorted = collision.locations.sortedWith(
+                compareBy({ it.roomId }, { it.plm.x }, { it.plm.y })
+            )
+            val extras = sorted.drop(1)
 
-        if (needsAssignment.isEmpty()) {
-            return emptyList()
-        }
-
-        var nextBit = startBit
-        
-        val sortedForAssignment = needsAssignment.sortedWith(
-            compareBy({ it.roomId }, { it.plmIndex })
-        )
-
-        for (plmLoc in sortedForAssignment) {
-            while (nextBit in usedDoorBits) {
-                nextBit++
-                if (nextBit > 0xFF) {
-                    throw IllegalStateException("Door bit space exhausted (exceeded 0xFF)")
+            for (plmLoc in extras) {
+                // Find next unused door bit (skip used bits, don't hardcode 0x00 start)
+                var nextBit = 0
+                while (nextBit in usedDoorBits) {
+                    nextBit++
+                    if (nextBit > 0xFF) {
+                        throw IllegalStateException("Door bit space exhausted")
+                    }
                 }
+
+                val highByte = (plmLoc.plm.param shr 8) and 0xFF
+                val newParam = (highByte shl 8) or (nextBit and 0xFF)
+
+                assignments.add(Assignment(
+                    roomId = plmLoc.roomId,
+                    plmId = plmLoc.plm.id,
+                    x = plmLoc.plm.x,
+                    y = plmLoc.plm.y,
+                    oldParam = plmLoc.plm.param,
+                    newParam = newParam,
+                ))
+                
+                usedDoorBits.add(nextBit)
             }
-
-            val highByte = (plmLoc.plm.param shr 8) and 0xFF
-            val newParam = (highByte shl 8) or (nextBit and 0xFF)
-
-            assignments.add(Assignment(
-                roomId = plmLoc.roomId,
-                plmIndex = plmLoc.plmIndex,
-                oldParam = plmLoc.plm.param,
-                newParam = newParam,
-            ))
-            
-            usedDoorBits.add(nextBit)
-            nextBit++
         }
 
-        return assignments.sortedWith(compareBy({ it.roomId }, { it.plmIndex }))
+        return assignments.sortedWith(compareBy({ it.roomId }, { it.x }, { it.y }))
     }
 }
