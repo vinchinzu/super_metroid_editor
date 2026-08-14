@@ -3770,7 +3770,7 @@ class EditorState {
 
     /**
      * Create a new blank room with the specified dimensions.
-     * The room will be allocated and written to ROM immediately so export uses the same addresses.
+     * The room allocation is stored in RoomEdits.newRoomAllocation and will be written at export time.
      * Returns the allocated room ID if successful, null if free space is exhausted.
      */
     fun createNewRoom(
@@ -3787,9 +3787,9 @@ class EditorState {
         require(area in 0..6) { "area must be 0-6" }
         require(tileset in 0..28) { "tileset must be 0-28" }
 
-        val roomCreator = RoomCreator(romParser.romData, romParser)
+        val roomCreator = com.supermetroid.editor.rom.RoomCreator(romParser.romData, romParser)
 
-        val allocation = roomCreator.allocateBlankRoom(
+        val result = roomCreator.allocateBlankRoom(
             width = width,
             height = height,
             area = area,
@@ -3799,19 +3799,9 @@ class EditorState {
             return null
         }
 
-        // Write the room to ROM immediately so export sees it at this address
-        roomCreator.writeAllocatedRoom(
-            allocation = allocation,
-            width = width,
-            height = height,
-            area = area,
-            tileset = tileset,
-            mapX = mapX,
-            mapY = mapY,
-        )
-
         val roomEdits = roomCreator.createInitialRoomEdits(
-            allocation = allocation,
+            roomId = result.roomId,
+            allocation = result.allocation,
             width = width,
             height = height,
             area = area,
@@ -3820,18 +3810,31 @@ class EditorState {
             mapY = mapY,
         )
 
-        project.rooms[project.roomKey(allocation.roomId)] = roomEdits
-        _roomEditOrder[allocation.roomId] = System.currentTimeMillis()
+        project.rooms[project.roomKey(result.roomId)] = roomEdits
+        _roomEditOrder[result.roomId] = System.currentTimeMillis()
         _editVersionState.value++
         dirty = true
 
+        // Register a session RoomInfo so the editor can load the room
+        val roomInfo = RoomInfo(
+            name = "New Room 0x${result.roomId.toString(16).uppercase()}",
+            roomId = "0x${result.roomId.toString(16).uppercase()}",
+            area = area,
+        )
+        _sessionRoomInfos.add(roomInfo)
+
+        // Select the new room
+        selectRoom(result.roomId, romParser)
+
         editorLog(
-            "Created new room 0x${allocation.roomId.toString(16).uppercase()} " +
-                "(${width}x${height} screens, area $area, tileset $tileset)"
+            "Created new room 0x${result.roomId.toString(16).uppercase()} " +
+                "(${width}x${height} screens, area $area, tileset $tileset) - will be written at export"
         )
 
-        return allocation.roomId
+        return result.roomId
     }
+
+    private val _sessionRoomInfos = mutableListOf<RoomInfo>()
 
     /**
      * Apply a [BiomeTheme] to the loaded room: switch its tileset (persisted

@@ -70,6 +70,33 @@ class ProjectRoomExporter(
         for ((roomKey, roomEdits) in project.rooms) {
             if (!roomEdits.hasEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
+            
+            // Handle new room creation
+            if (roomEdits.isNewRoom && roomEdits.newRoomAllocation != null) {
+                val allocation = roomEdits.newRoomAllocation!!
+                val headerChange = roomEdits.roomHeaderChange!!
+                val stateChange = roomEdits.stateDataChange
+                
+                val roomCreator = RoomCreator(romData, romParser)
+                roomCreator.writeAllocatedRoom(
+                    roomId = roomId,
+                    allocation = allocation,
+                    width = headerChange.width ?: 1,
+                    height = headerChange.height ?: 1,
+                    area = headerChange.area ?: 0,
+                    tileset = stateChange?.tileset ?: 0,
+                    mapX = headerChange.mapX ?: 0,
+                    mapY = headerChange.mapY ?: 0,
+                    musicData = stateChange?.musicData ?: 0x05,
+                    musicTrack = stateChange?.musicTrack ?: 0x05,
+                )
+                roomsPatched.add(roomKey)
+                
+                // Clear the allocation flag so subsequent exports treat it as a normal room
+                roomEdits.newRoomAllocation = null
+                continue
+            }
+            
             val room = romParser.readRoomHeader(roomId) ?: continue
 
             val headerChange = roomEdits.roomHeaderChange

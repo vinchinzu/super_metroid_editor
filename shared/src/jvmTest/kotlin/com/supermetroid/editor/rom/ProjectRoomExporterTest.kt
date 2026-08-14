@@ -1,5 +1,6 @@
 package com.supermetroid.editor.rom
 
+import com.supermetroid.editor.data.NewRoomAllocation
 import com.supermetroid.editor.data.RoomEdits
 import com.supermetroid.editor.data.RoomHeaderChange
 import com.supermetroid.editor.data.RoomRepository
@@ -51,45 +52,39 @@ class ProjectRoomExporterTest {
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
 
-        // Allocate and write the room first (simulating EditorState.createNewRoom)
-        val allocation = creator.allocateBlankRoom(
+        // Allocate a new room
+        val result = creator.allocateBlankRoom(
             width = 1,
             height = 1,
             area = 0,
             tileset = 0,
         )
-        assertNotNull(allocation, "Allocation should succeed")
+        assertNotNull(result, "Allocation should succeed")
 
-        creator.writeAllocatedRoom(
-            allocation = allocation,
-            width = 1,
-            height = 1,
-            area = 0,
-            tileset = 0,
-        )
-
-        // Now create the project with edits for this room
-        val project = SmEditProject(romPath = "base.smc")
+        // Create RoomEdits with the allocation
         val roomEdits = creator.createInitialRoomEdits(
-            allocation = allocation,
+            roomId = result.roomId,
+            allocation = result.allocation,
             width = 1,
             height = 1,
             area = 0,
             tileset = 0,
         )
-        project.rooms[allocation.roomId.toString(16).uppercase()] = roomEdits
 
-        // Export should succeed without re-allocating
+        val project = SmEditProject(romPath = "base.smc")
+        project.rooms[result.roomId.toString(16).uppercase()] = roomEdits
+
+        // Export should write the room
         val exporter = ProjectRoomExporter(
             project = project,
             romParser = RomParser(rom),
             romData = rom,
         )
 
-        val result = exporter.exportRooms()
+        exporter.exportRooms()
         
         // Verify room is readable
-        val allocatedRoom = RomParser(rom).readRoomHeader(allocation.roomId)
+        val allocatedRoom = RomParser(rom).readRoomHeader(result.roomId)
         assertNotNull(allocatedRoom, "New room should be readable after export")
         assertEquals(1, allocatedRoom.width, "Width should match")
         assertEquals(1, allocatedRoom.height, "Height should match")
@@ -101,19 +96,38 @@ class ProjectRoomExporterTest {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
+        
+        // Take snapshot before filling
+        val romSnapshot = rom.copyOf()
 
-        // Fill bank $8F free space
-        fillTrailingBank8FFreeSpace(rom, parser)
+        // Fill $A1 bank to cause allocation failure
+        val bankA1Start = parser.snesToPc(0xA18000)
+        val bankA1End = parser.snesToPc(0xA1FFFF)
+        for (offset in bankA1Start..bankA1End) {
+            rom[offset] = 0x00.toByte()
+        }
 
-        // Try to allocate a new room - should fail
-        val allocation = creator.allocateBlankRoom(
+        // Try to allocate - should fail
+        val result = creator.allocateBlankRoom(
             width = 1,
             height = 1,
             area = 0,
             tileset = 0,
         )
 
-        assertNull(allocation, "Allocation should fail when free space is exhausted")
+        assertNull(result, "Allocation should fail when free space is exhausted")
+        
+        // ROM should be unchanged except for the $A1 bank we filled
+        // Check that $8F and other banks are unchanged
+        val bank8FStart = parser.snesToPc(0x8F8000)
+        val bank8FEnd = parser.snesToPc(0x8FFFFF)
+        for (offset in bank8FStart..bank8FEnd) {
+            assertEquals(
+                romSnapshot[offset],
+                rom[offset],
+                "Bank \$8F should be unchanged at offset $offset"
+            )
+        }
     }
 
     @Test
@@ -128,16 +142,17 @@ class ProjectRoomExporterTest {
         rom[sentinelAddress] = sentinelValue
 
         // Allocate and write a new room
-        val allocation = creator.allocateBlankRoom(
+        val result = creator.allocateBlankRoom(
             width = 1,
             height = 1,
             area = 0,
             tileset = 0,
         )
-        assertNotNull(allocation, "Allocation should succeed")
+        assertNotNull(result, "Allocation should succeed")
 
         creator.writeAllocatedRoom(
-            allocation = allocation,
+            roomId = result.roomId,
+            allocation = result.allocation,
             width = 1,
             height = 1,
             area = 0,

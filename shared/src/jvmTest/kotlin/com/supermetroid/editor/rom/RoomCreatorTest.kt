@@ -13,28 +13,31 @@ class RoomCreatorTest {
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
 
-        val allocation = creator.allocateBlankRoom(
+        val result = creator.allocateBlankRoom(
             width = 2,
             height = 2,
             area = 0,
             tileset = 0,
         )
 
-        assertNotNull(allocation, "Allocation should succeed with fresh ROM")
-        assertTrue(allocation.roomId >= 0x8000, "Room ID should be valid SNES address")
+        assertNotNull(result, "Allocation should succeed with fresh ROM")
+        assertTrue(result.roomId >= 0x8000, "Room ID should be valid SNES address")
 
         // Verify room ID corresponds to header location in bank $8F
-        val headerSnes = parser.pcToSnes(allocation.headerPcOffset)
-        assertEquals(allocation.roomId, headerSnes and 0xFFFF, "Room ID should equal header SNES address")
+        val headerSnes = parser.pcToSnes(result.allocation.headerPcOffset)
+        assertEquals(result.roomId, headerSnes and 0xFFFF, "Room ID should equal header SNES address")
         assertEquals(0x8F, headerSnes shr 16, "Header should be in bank \$8F")
 
         // Verify scroll data size matches room screens
-        val scrollPc = parser.snesToPc(0x8F0000 or allocation.scrollPtr)
+        val scrollPc = parser.snesToPc(0x8F0000 or result.allocation.scrollPtr)
         assertTrue(scrollPc >= 0, "Scroll data should be valid")
         
         // For a 2x2 room, scroll data should be 4 bytes
         val scrollDataSize = 2 * 2
         assertEquals(4, scrollDataSize, "Scroll data size should match room screens (2x2=4)")
+        
+        // Verify compressed level data is stored
+        assertTrue(result.allocation.compressedLevelData.isNotEmpty(), "Compressed level data should be stored")
     }
 
     @Test
@@ -43,62 +46,132 @@ class RoomCreatorTest {
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
 
-        val allocation = creator.allocateBlankRoom(
+        val result = creator.allocateBlankRoom(
             width = 1,
             height = 1,
             area = 1,
             tileset = 5,
         )
-        assertNotNull(allocation)
+        assertNotNull(result)
 
         creator.writeAllocatedRoom(
-            allocation = allocation,
+            roomId = result.roomId,
+            allocation = result.allocation,
             width = 1,
             height = 1,
             area = 1,
             tileset = 5,
         )
 
-        val room = parser.readRoomHeader(allocation.roomId)
+        val room = parser.readRoomHeader(result.roomId)
         assertNotNull(room, "Room should be readable after writing")
         assertEquals(1, room.area, "Area should match")
         assertEquals(1, room.width, "Width should match")
         assertEquals(1, room.height, "Height should match")
         assertEquals(5, room.tileset, "Tileset should match")
 
-        val doorTablePc = parser.snesToPc(0x8F0000 or allocation.doorTablePtr)
+        val doorTablePc = parser.snesToPc(0x8F0000 or result.allocation.doorTablePtr)
         val doorTableValue = readU16(rom, doorTablePc)
         assertEquals(0x0000, doorTableValue, "Door table should be empty (0x0000 terminator)")
 
-        val plmSetPc = parser.snesToPc(0x8F0000 or allocation.plmSetPtr)
+        val plmSetPc = parser.snesToPc(0x8F0000 or result.allocation.plmSetPtr)
         val plmSetValue = readU16(rom, plmSetPc)
         assertEquals(0x0000, plmSetValue, "PLM set should be empty (0x0000 terminator)")
 
-        val enemyPopPc = parser.snesToPc(0xA10000 or allocation.enemyPopPtr)
+        val enemyPopPc = parser.snesToPc(0xA10000 or result.allocation.enemyPopPtr)
         val enemyPopValue = readU16(rom, enemyPopPc)
         assertEquals(0xFFFF, enemyPopValue, "Enemy population should be empty (0xFFFF terminator)")
 
-        val scrollDataPc = parser.snesToPc(0x8F0000 or allocation.scrollPtr)
+        val scrollDataPc = parser.snesToPc(0x8F0000 or result.allocation.scrollPtr)
         val scrollValue = rom[scrollDataPc].toInt() and 0xFF
         assertEquals(0x01, scrollValue, "Scroll data should be blue (0x01)")
     }
 
     @Test
-    fun `allocation fails when free space is exhausted`() {
+    fun `allocation fails when free space is exhausted in A1`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
+        
+        // Take snapshot of $8F bank before filling $A1
+        val bank8FStart = parser.snesToPc(0x8F8000)
+        val bank8FEnd = parser.snesToPc(0x8FFFFF)
+        val bank8FSnapshot = rom.copyOfRange(bank8FStart, bank8FEnd + 1)
 
-        fillBank8FFreeSpace(rom, parser)
+        // Fill $A1 bank (enemy population) but leave $8F free
+        val bankA1Start = parser.snesToPc(0xA18000)
+        val bankA1End = parser.snesToPc(0xA1FFFF)
+        for (offset in bankA1Start..bankA1End) {
+            rom[offset] = 0x00.toByte()
+        }
 
-        val allocation = creator.allocateBlankRoom(
+        val result = creator.allocateBlankRoom(
             width = 1,
             height = 1,
             area = 0,
             tileset = 0,
         )
 
-        assertNull(allocation, "Allocation should fail when bank \$8F has no free space")
+        // Allocation should fail
+        assertNull(result, "Allocation should fail when bank \$A1 has no free space")
+        
+        // Bank $8F should be unchanged (two-phase allocation writes nothing until all reserves succeed)
+        for (i in bank8FSnapshot.indices) {
+            assertEquals(
+                bank8FSnapshot[i],
+                rom[bank8FStart + i],
+                "Bank \$8F should be unchanged at offset ${bank8FStart + i}"
+            )
+        }
+    }
+
+    @Test
+    fun `allocation fails when free space is exhausted in B4`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+        val creator = RoomCreator(rom, parser)
+        
+        // Take snapshot of $8F and $A1 banks before filling $B4
+        val bank8FStart = parser.snesToPc(0x8F8000)
+        val bank8FEnd = parser.snesToPc(0x8FFFFF)
+        val bank8FSnapshot = rom.copyOfRange(bank8FStart, bank8FEnd + 1)
+        
+        val bankA1Start = parser.snesToPc(0xA18000)
+        val bankA1End = parser.snesToPc(0xA1FFFF)
+        val bankA1Snapshot = rom.copyOfRange(bankA1Start, bankA1End + 1)
+
+        // Fill $B4 bank (enemy GFX) but leave $8F and $A1 free
+        val bankB4Start = parser.snesToPc(0xB48000)
+        val bankB4End = parser.snesToPc(0xB4FFFF)
+        for (offset in bankB4Start..bankB4End) {
+            rom[offset] = 0x00.toByte()
+        }
+
+        val result = creator.allocateBlankRoom(
+            width = 1,
+            height = 1,
+            area = 0,
+            tileset = 0,
+        )
+
+        // Allocation should fail
+        assertNull(result, "Allocation should fail when bank \$B4 has no free space")
+        
+        // Banks $8F and $A1 should be unchanged (two-phase allocation writes nothing until all reserves succeed)
+        for (i in bank8FSnapshot.indices) {
+            assertEquals(
+                bank8FSnapshot[i],
+                rom[bank8FStart + i],
+                "Bank \$8F should be unchanged at offset ${bank8FStart + i}"
+            )
+        }
+        for (i in bankA1Snapshot.indices) {
+            assertEquals(
+                bankA1Snapshot[i],
+                rom[bankA1Start + i],
+                "Bank \$A1 should be unchanged at offset ${bankA1Start + i}"
+            )
+        }
     }
 
     @Test
@@ -107,23 +180,23 @@ class RoomCreatorTest {
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
 
-        val allocation1 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
-        assertNotNull(allocation1)
-        creator.writeAllocatedRoom(allocation1, 1, 1, 0, 0)
+        val result1 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
+        assertNotNull(result1)
+        creator.writeAllocatedRoom(result1.roomId, result1.allocation, 1, 1, 0, 0)
 
-        val allocation2 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
-        assertNotNull(allocation2)
-        creator.writeAllocatedRoom(allocation2, 1, 1, 0, 0)
+        val result2 = creator.allocateBlankRoom(width = 1, height = 1, area = 0, tileset = 0)
+        assertNotNull(result2)
+        creator.writeAllocatedRoom(result2.roomId, result2.allocation, 1, 1, 0, 0)
 
         // Room IDs (which are header SNES addresses) should be different
-        assertTrue(allocation1.roomId != allocation2.roomId, "Room IDs should be different")
+        assertTrue(result1.roomId != result2.roomId, "Room IDs should be different")
 
         // Check that header regions don't overlap (each header+state is 39 bytes)
-        val header1Start = allocation1.headerPcOffset
-        val header1End = allocation1.headerPcOffset + 39
+        val header1Start = result1.allocation.headerPcOffset
+        val header1End = result1.allocation.headerPcOffset + 39
 
-        val header2Start = allocation2.headerPcOffset
-        val header2End = allocation2.headerPcOffset + 39
+        val header2Start = result2.allocation.headerPcOffset
+        val header2End = result2.allocation.headerPcOffset + 39
 
         val overlaps = (header1Start < header2End && header2Start < header1End)
         assertTrue(!overlaps, "Header regions should not overlap")
@@ -135,11 +208,11 @@ class RoomCreatorTest {
         val parser = RomParser(rom)
         val creator = RoomCreator(rom, parser)
 
-        val allocation = creator.allocateBlankRoom(width = 2, height = 1, area = 0, tileset = 0)
-        assertNotNull(allocation)
-        creator.writeAllocatedRoom(allocation, 2, 1, 0, 0)
+        val result = creator.allocateBlankRoom(width = 2, height = 1, area = 0, tileset = 0)
+        assertNotNull(result)
+        creator.writeAllocatedRoom(result.roomId, result.allocation, 2, 1, 0, 0)
 
-        val levelPtr = allocation.levelDataPtr
+        val levelPtr = result.allocation.levelDataPtr
         val decompressed = parser.decompressLZ2(levelPtr)
 
         val expectedBlocks = 2 * 1 * 16 * 16
@@ -196,18 +269,6 @@ class RoomCreatorTest {
             for (i in 0 until 20) {
                 rom[statePc + 6 + i] = 0x00.toByte()
             }
-        }
-    }
-
-    private fun fillBank8FFreeSpace(rom: ByteArray, parser: RomParser) {
-        val bankStart = parser.snesToPc(0x8F8000)
-        val bankEnd = parser.snesToPc(0x8FFFFF)
-        var firstFree = bankEnd
-        while (firstFree > bankStart && (rom[firstFree - 1].toInt() and 0xFF) == 0xFF) {
-            firstFree--
-        }
-        for (offset in firstFree until bankEnd) {
-            rom[offset] = 0x00.toByte()
         }
     }
 
