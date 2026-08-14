@@ -9,44 +9,120 @@ import org.junit.jupiter.api.Nested
 
 /**
  * Synthetic tests for metatile word undo/redo (no ROM required).
- * Tests the integration of CRE/VAR apply isolation and EditorState undo.
+ * Uses a synthetic ByteArray ROM that RomParser + TileGraphics can load.
  */
 class MetatileUndoTest {
 
     private lateinit var state: EditorState
-    private lateinit var mockRomParser: RomParser
-
-    private class MockRomParser : RomParser(ByteArray(0x400000) { 0xFF.toByte() }) {
-        private val mockGraphicsCatalog = object : com.supermetroid.editor.rom.RomGraphicsCatalog {
-            override fun entry(tilesetId: Int) = null
-            override val creGfxPtr = 0xB98000
-            override val creTileTablePtr = 0xB9A09D
-        }
-
-        override val graphicsCatalog: com.supermetroid.editor.rom.RomGraphicsCatalog
-            get() = mockGraphicsCatalog
-
-        override fun decompressLZ2(snesPtr: Int): ByteArray {
-            return when (snesPtr) {
-                0xB9A09D -> ByteArray(256 * 8) { i -> (0xCC + (i % 16)).toByte() }
-                0xB98000 -> ByteArray(384 * 32) { 0 }
-                else -> ByteArray(768 * 8) { i -> (0xAA + (i % 16)).toByte() }
-            }
-        }
-    }
+    private lateinit var romParser: RomParser
 
     @BeforeEach
     fun setUp() {
+        val rom = syntheticRom(0x400000)
+        writeLoRomHeader(rom)
+        writeMinimalTilesetData(rom)
+        romParser = RomParser(rom)
+        
         state = EditorState()
         state.testMode = true
         state.initTestLevel(blocksWide = 4, blocksTall = 4)
-        
-        mockRomParser = MockRomParser()
-        val tg = TileGraphics(mockRomParser)
-        tg.loadTileset(0)
-        state.editorTileGraphics = tg
-        state.editorTilesetId = 0
-        state.editorSelectedMetatile = 100
+        state.loadEditorTileset(0, romParser)
+    }
+
+    private fun syntheticRom(size: Int): ByteArray =
+        ByteArray(size) { 0xFF.toByte() }
+
+    private fun writeLoRomHeader(rom: ByteArray) {
+        val offset = 0x7FC0
+        "Super Metroid        ".encodeToByteArray().copyInto(rom, offset)
+        rom[offset + 0x15] = 0x30
+        rom[offset + 0x16] = 0x02
+        rom[offset + 0x17] = 0x0C
+        rom[offset + 0x18] = 0x03
+        rom[offset + 0x19] = 0x00
+        rom[offset + 0x1A] = 0x01
+        rom[offset + 0x1B] = 0x00
+        write16(rom, offset + 0x1C, 0x353B)
+        write16(rom, offset + 0x1E, 0xCAC4)
+    }
+
+    private fun writeMinimalTilesetData(rom: ByteArray) {
+        // Write vanilla-style tileset table at $8F:E6A2
+        val tablePc = 0x7E6A2
+        val tileTableSnes = 0xE18020
+        val gfxSnes = 0xE18080
+        val paletteSnes = 0xE18120
+        write24(rom, tablePc, tileTableSnes)
+        write24(rom, tablePc + 3, gfxSnes)
+        write24(rom, tablePc + 6, paletteSnes)
+
+        // Write VAR tile table (1 metatile for simplicity)
+        val varTileTable = ByteArray(8)
+        write16(varTileTable, 0, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        write16(varTileTable, 2, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        write16(varTileTable, 4, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        write16(varTileTable, 6, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        writeBytesAtSnes(rom, tileTableSnes, lz5Direct(varTileTable))
+
+        // Write VAR graphics (1 tile)
+        val varGfx = ByteArray(TileGraphics.BYTES_PER_TILE)
+        for (row in 0 until 8) {
+            varGfx[row * 2] = 0xFF.toByte()
+        }
+        writeBytesAtSnes(rom, gfxSnes, lz5Direct(varGfx))
+
+        // Write palette
+        val palette = ByteArray(256)
+        write16(palette, (1 * 16 + 1) * 2, 0x001F)
+        writeBytesAtSnes(rom, paletteSnes, lz5Direct(palette))
+
+        // Write CRE tile table at vanilla location $B9:A09D
+        val creTileTablePc = 0x1CA09D
+        val creTileTable = ByteArray(TileGraphics.CRE_METATILE_COUNT * 8)
+        for (wordIndex in 0 until TileGraphics.CRE_METATILE_COUNT * 4) {
+            val tileNum = TileGraphics.CRE_TILE_START + (wordIndex % 4)
+            write16(creTileTable, wordIndex * 2, TileGraphics.encodeMetatileWord(tileNum = tileNum, palette = 2))
+        }
+        writeLz5Compressed(rom, creTileTablePc, creTileTable)
+
+        // Write CRE graphics at vanilla location $B9:8000
+        val creGfxPc = 0x1C8000
+        val creGfx = ByteArray((TileGraphics.TOTAL_TILES - TileGraphics.CRE_TILE_START) * TileGraphics.BYTES_PER_TILE)
+        for (i in creGfx.indices step TileGraphics.BYTES_PER_TILE) {
+            for (row in 0 until 8) {
+                creGfx[i + row * 2] = 0xAA.toByte()
+            }
+        }
+        writeLz5Compressed(rom, creGfxPc, creGfx)
+    }
+
+    private fun writeBytesAtSnes(rom: ByteArray, snesAddress: Int, bytes: ByteArray) {
+        val pc = ((snesAddress and 0x7F0000) shr 1) or (snesAddress and 0x7FFF)
+        bytes.copyInto(rom, pc)
+    }
+
+    private fun lz5Direct(data: ByteArray): ByteArray {
+        val out = ByteArray(data.size + 2)
+        out[0] = 0
+        out[1] = 0xFF.toByte()
+        data.copyInto(out, 2)
+        return out
+    }
+
+    private fun writeLz5Compressed(rom: ByteArray, pc: Int, data: ByteArray) {
+        val compressed = lz5Direct(data)
+        compressed.copyInto(rom, pc)
+    }
+
+    private fun write16(rom: ByteArray, offset: Int, value: Int) {
+        rom[offset] = (value and 0xFF).toByte()
+        rom[offset + 1] = ((value shr 8) and 0xFF).toByte()
+    }
+
+    private fun write24(rom: ByteArray, offset: Int, value: Int) {
+        rom[offset] = (value and 0xFF).toByte()
+        rom[offset + 1] = ((value shr 8) and 0xFF).toByte()
+        rom[offset + 2] = ((value shr 16) and 0xFF).toByte()
     }
 
     @Nested
@@ -57,7 +133,7 @@ class MetatileUndoTest {
             val creIndex = 100
             assertTrue(tg.isCreMetatileIndex(creIndex))
             
-            state.editorSelectedMetatile = creIndex
+            state.selectEditorMetatile(creIndex)
             val originalWords = tg.getMetatileWords(creIndex)!!
             val originalBlob = state.project.customGfx.creTileTable
             
@@ -77,7 +153,7 @@ class MetatileUndoTest {
         fun `redo restores CRE metatile words and project override`() {
             val tg = state.editorTileGraphics!!
             val creIndex = 50
-            state.editorSelectedMetatile = creIndex
+            state.selectEditorMetatile(creIndex)
             
             val newWords = intArrayOf(0x5555, 0x6666, 0x7777, 0x8888)
             state.setCurrentMetatileWords(newWords)
@@ -95,7 +171,7 @@ class MetatileUndoTest {
         fun `CRE edit does not modify VAR blob`() {
             val tg = state.editorTileGraphics!!
             val creIndex = 100
-            state.editorSelectedMetatile = creIndex
+            state.selectEditorMetatile(creIndex)
             
             val varBlob = state.project.customGfx.tileTables["0"]
             
@@ -111,10 +187,10 @@ class MetatileUndoTest {
         @Test
         fun `undo restores VAR metatile words and project override`() {
             val tg = state.editorTileGraphics!!
-            val varIndex = 400
+            val varIndex = 256
             assertTrue(tg.isVariableMetatileIndex(varIndex))
             
-            state.editorSelectedMetatile = varIndex
+            state.selectEditorMetatile(varIndex)
             val originalWords = tg.getMetatileWords(varIndex)!!
             val originalBlob = state.project.customGfx.tileTables["0"]
             
@@ -133,8 +209,8 @@ class MetatileUndoTest {
         @Test
         fun `redo restores VAR metatile words and project override`() {
             val tg = state.editorTileGraphics!!
-            val varIndex = 500
-            state.editorSelectedMetatile = varIndex
+            val varIndex = 300
+            state.selectEditorMetatile(varIndex)
             
             val newWords = intArrayOf(0x1111, 0x2222, 0x3333, 0x4444)
             state.setCurrentMetatileWords(newWords)
@@ -151,8 +227,8 @@ class MetatileUndoTest {
         @Test
         fun `VAR edit does not modify CRE blob`() {
             val tg = state.editorTileGraphics!!
-            val varIndex = 400
-            state.editorSelectedMetatile = varIndex
+            val varIndex = 256
+            state.selectEditorMetatile(varIndex)
             
             val creBlob = state.project.customGfx.creTileTable
             
@@ -169,13 +245,13 @@ class MetatileUndoTest {
         fun `multiple edits maintain undo history`() {
             val tg = state.editorTileGraphics!!
             val index1 = 100
-            val index2 = 400
+            val index2 = 256
             
-            state.editorSelectedMetatile = index1
+            state.selectEditorMetatile(index1)
             val words1 = tg.getMetatileWords(index1)!!
             state.setCurrentMetatileWords(intArrayOf(0x1111, 0x1111, 0x1111, 0x1111))
             
-            state.editorSelectedMetatile = index2
+            state.selectEditorMetatile(index2)
             val words2 = tg.getMetatileWords(index2)!!
             state.setCurrentMetatileWords(intArrayOf(0x2222, 0x2222, 0x2222, 0x2222))
             
@@ -189,8 +265,8 @@ class MetatileUndoTest {
         @Test
         fun `undo restores null override when original had none`() {
             val tg = state.editorTileGraphics!!
-            val varIndex = 300
-            state.editorSelectedMetatile = varIndex
+            val varIndex = 256
+            state.selectEditorMetatile(varIndex)
             
             assertNull(state.project.customGfx.tileTables["0"])
             
