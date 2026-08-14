@@ -2066,6 +2066,20 @@ class EditorState {
             _roomEditOrder[rid] = ++_editCounter
         }
 
+        // Rebuild session rooms from saved allocations
+        _sessionRooms.clear()
+        for ((key, edits) in project.rooms) {
+            if (edits.newRoomAllocation != null) {
+                val rid = key.toIntOrNull(16) ?: continue
+                val roomInfo = com.supermetroid.editor.data.RoomInfo(
+                    id = "0x${rid.toString(16).uppercase()}",
+                    handle = "new_room_${rid.toString(16).lowercase()}",
+                    name = "New Room 0x${rid.toString(16).uppercase()}",
+                )
+                _sessionRooms.add(roomInfo)
+            }
+        }
+
         romVersion++
         paletteVersion++
 

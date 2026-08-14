@@ -89,11 +89,17 @@ fun RoomListView(
     var showNewRoomDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    val roomAreas = remember(romParser, rooms) {
+    val roomAreas = remember(romParser, rooms, editorState?.project) {
         if (romParser == null) return@remember emptyMap<String, Int>()
         rooms.associate { room ->
-            val header = try { romParser.readRoomHeader(room.getRoomIdAsInt()) } catch (_: Exception) { null }
-            room.handle to (header?.area ?: -1)
+            val roomId = room.getRoomIdAsInt()
+            val header = try { romParser.readRoomHeader(roomId) } catch (_: Exception) { null }
+            val area = header?.area ?: run {
+                // New rooms: use area from RoomEdits
+                val key = editorState?.project?.roomKey(roomId)
+                key?.let { editorState?.project?.rooms?.get(it)?.roomHeaderChange?.area } ?: -1
+            }
+            room.handle to area
         }
     }
 
