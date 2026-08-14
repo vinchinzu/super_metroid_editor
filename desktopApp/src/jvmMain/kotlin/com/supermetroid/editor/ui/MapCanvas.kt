@@ -449,51 +449,54 @@ fun MapCanvas(
                     renderData = null
                     try {
                         val roomId = room.getRoomIdAsInt()
-                        // Check if room is already loaded in EditorState (e.g., newly created)
-                        val alreadyLoaded = editorState?.currentRoomId == roomId
+                        val roomKey = editorState?.project?.roomKey(roomId)
+                        val romHeader = romParser.readRoomHeader(roomId)
                         
-                        val romHeader = if (!alreadyLoaded) {
-                            romParser.readRoomHeader(roomId)
-                        } else null
+                        val roomHeader = if (romHeader != null) {
+                            // Existing ROM room: apply any project header changes (e.g. resize)
+                            editorState?.applyHeaderChanges(romHeader) ?: romHeader
+                        } else if (roomKey != null) {
+                            // Check if this is a new room not yet written to ROM
+                            val roomEdits = editorState?.project?.rooms?.get(roomKey)
+                            val allocation = roomEdits?.newRoomAllocation
+                            if (allocation != null && roomEdits.roomHeaderChange != null && roomEdits.stateDataChange != null) {
+                                // Build synthetic Room from allocation + RoomEdits
+                                val headerChange = roomEdits.roomHeaderChange!!
+                                val stateChange = roomEdits.stateDataChange!!
+                                val roomCreator = com.supermetroid.editor.rom.RoomCreator(
+                                    romParser.getRomData(),
+                                    romParser,
+                                    emptyList()
+                                )
+                                roomCreator.buildSyntheticRoom(
+                                    roomId = roomId,
+                                    allocation = allocation,
+                                    width = headerChange.width ?: 1,
+                                    height = headerChange.height ?: 1,
+                                    area = headerChange.area ?: 0,
+                                    tileset = stateChange.tileset ?: 0,
+                                    mapX = headerChange.mapX ?: 0,
+                                    mapY = headerChange.mapY ?: 0,
+                                    musicData = stateChange.musicData ?: 0x05,
+                                    musicTrack = stateChange.musicTrack ?: 0x05,
+                                )
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
                         
-                        if (romHeader != null) {
-                            // Apply any project header changes (e.g. resize) before loading/rendering
-                            val roomHeader = editorState?.applyHeaderChanges(romHeader) ?: romHeader
+                        if (roomHeader != null) {
                             // Load working level data for editing
-                            editorState?.loadRoom(roomId, romParser, romHeader)
+                            editorState?.loadRoom(roomId, romParser, roomHeader!!)
                             // Render using effective dimensions and resized level data
                             val es = editorState
                             renderData = if (es?.workingLevelData != null) {
                                 MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(
-                                    roomHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
+                                    roomHeader!!, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                             } else {
-                                MapRenderer(romParser).renderRoom(roomHeader)
-                            }
-                            if (renderData == null) errorMessage = "Failed to render"
-                        } else if (alreadyLoaded) {
-                            // Room is already loaded (e.g., from createNewRoom), just render
-                            val es = editorState
-                            if (es?.workingLevelData != null) {
-                                // Build minimal room header for rendering from EditorState
-                                val renderHeader = com.supermetroid.editor.data.Room(
-                                    roomId = roomId,
-                                    name = "New Room",
-                                    handle = "new_room",
-                                    width = es.workingBlocksWide / 16,
-                                    height = es.workingBlocksTall / 16,
-                                    area = es.currentArea,
-                                    mapX = 0, mapY = 0, index = 0,
-                                    upScroller = 0, downScroller = 0, creBitflag = 0,
-                                    tileset = es.currentTilesetId,
-                                    musicTrack = 0x05, musicData = 0x05,
-                                    fxPtr = 0, enemySetPtr = 0, enemyGfxPtr = 0,
-                                    bgScrolling = es.currentBgScrolling,
-                                    plmSetPtr = 0, bgDataPtr = 0,
-                                    setupAsmPtr = 0, mainAsmPtr = 0,
-                                    doorOut = 0, roomScrollsPtr = 0, levelDataPtr = 0,
-                                )
-                                renderData = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(
-                                    renderHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
+                                MapRenderer(romParser).renderRoom(roomHeader!!)
                             }
                             if (renderData == null) errorMessage = "Failed to render"
                         } else {

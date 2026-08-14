@@ -2141,8 +2141,13 @@ class EditorState {
         val isNewRoom = project.rooms[roomKey]?.newRoomAllocation != null
         
         var levelData = if (isNewRoom) {
-            // Use pre-hydrated level data from createNewRoom
-            workingLevelData ?: romParser.decompressLZ2(room.levelDataPtr)
+            // New room: decompress from allocation (not stale workingLevelData)
+            val allocation = project.rooms[roomKey]?.newRoomAllocation
+            if (allocation != null) {
+                com.supermetroid.editor.rom.LZ5Compressor.decompress(allocation.compressedLevelData)
+            } else {
+                romParser.decompressLZ2(room.levelDataPtr)
+            }
         } else {
             romParser.decompressLZ2(room.levelDataPtr)
         }
