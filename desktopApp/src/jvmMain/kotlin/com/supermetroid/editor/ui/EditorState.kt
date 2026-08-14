@@ -664,8 +664,44 @@ class EditorState {
         val tg = editorTileGraphics ?: return false
         val selected = editorSelectedMetatile
         if (!tg.isCreMetatileIndex(selected) && !tg.isVariableMetatileIndex(selected)) return false
+        
+        val oldWords = tg.getMetatileWords(selected) ?: return false
+        val isCre = tg.isCreMetatileIndex(selected)
+        val oldTableBlob = if (isCre) {
+            project.customGfx.creTileTable
+        } else {
+            project.customGfx.tileTables[editorTilesetId.toString()]
+        }
+        
         if (!tg.setMetatileWords(selected, words)) return false
-        return saveCurrentMetatileTableOverride()
+        if (!saveCurrentMetatileTableOverride()) return false
+        
+        val newTableBlob = if (isCre) {
+            project.customGfx.creTileTable
+        } else {
+            project.customGfx.tileTables[editorTilesetId.toString()]
+        }
+        
+        val metatileChange = com.supermetroid.editor.data.MetatileWordChange(
+            metatileIndex = selected,
+            isCre = isCre,
+            tilesetId = editorTilesetId,
+            oldWords = oldWords.toList(),
+            newWords = words.toList(),
+            oldTableBlob = oldTableBlob,
+            newTableBlob = newTableBlob,
+        )
+        
+        val op = EditOperation(
+            description = "Edit metatile $selected",
+            metatileWordChange = metatileChange,
+        )
+        undoStack.add(op)
+        redoStack.clear()
+        undoVersion++
+        dirty = true
+        
+        return true
     }
 
     // ── Enemy / Boss sprite graphics ──────────────────────────────────────────
@@ -3903,6 +3939,23 @@ class EditorState {
             }
         }
 
+        // Undo metatile word change
+        op.metatileWordChange?.let { mtc ->
+            val tg = editorTileGraphics
+            if (tg != null) {
+                tg.setMetatileWords(mtc.metatileIndex, mtc.oldWords.toIntArray())
+                if (mtc.isCre) {
+                    project.customGfx.creTileTable = mtc.oldTableBlob
+                } else {
+                    if (mtc.oldTableBlob != null) {
+                        project.customGfx.tileTables[mtc.tilesetId.toString()] = mtc.oldTableBlob
+                    } else {
+                        project.customGfx.tileTables.remove(mtc.tilesetId.toString())
+                    }
+                }
+            }
+        }
+
         redoStack.add(op)
         undoVersion++
         dirty = true
@@ -3969,6 +4022,23 @@ class EditorState {
                     roomEdits.scrollChanges.add(ScrollChange(sc.screenX, sc.screenY, _originalScrolls[scrollIdx], sc.newValue))
                 }
                 scrollVersion++
+            }
+        }
+
+        // Redo metatile word change
+        op.metatileWordChange?.let { mtc ->
+            val tg = editorTileGraphics
+            if (tg != null) {
+                tg.setMetatileWords(mtc.metatileIndex, mtc.newWords.toIntArray())
+                if (mtc.isCre) {
+                    project.customGfx.creTileTable = mtc.newTableBlob
+                } else {
+                    if (mtc.newTableBlob != null) {
+                        project.customGfx.tileTables[mtc.tilesetId.toString()] = mtc.newTableBlob
+                    } else {
+                        project.customGfx.tileTables.remove(mtc.tilesetId.toString())
+                    }
+                }
             }
         }
 

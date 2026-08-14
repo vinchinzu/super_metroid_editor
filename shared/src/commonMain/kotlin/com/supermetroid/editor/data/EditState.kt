@@ -40,12 +40,28 @@ data class EditOperation(
     val stateDataAfter: StateDataChange? = null,
     val fxBefore: FxChange? = null,
     val fxAfter: FxChange? = null,
+    val metatileWordChange: MetatileWordChange? = null,
 )
 
 @Serializable
 data class EnemyUpdate(
     val old: EnemyChange,
     val new: EnemyChange
+)
+
+/**
+ * A metatile word change: captures before/after state of a metatile definition
+ * and its project override blob.
+ */
+@Serializable
+data class MetatileWordChange(
+    val metatileIndex: Int,
+    val isCre: Boolean,
+    val tilesetId: Int,
+    val oldWords: List<Int>,
+    val newWords: List<Int>,
+    val oldTableBlob: String?,
+    val newTableBlob: String?,
 )
 
 /**

@@ -340,6 +340,78 @@ class MetatileTableTest {
     }
 
     @Nested
+    inner class IsolationTests {
+        @Test
+        fun `applying CRE range leaves VAR range unchanged`() {
+            val creTable = ByteArray(256 * 8) { i -> (0xCC + (i % 16)).toByte() }
+            val varTable = ByteArray(768 * 8) { i -> (0xAA + (i % 16)).toByte() }
+
+            val target = Array(1024) { IntArray(4) }
+            applyMetatileTable(creTable, target, targetStart = 0, maxMetatiles = 256)
+            applyMetatileTable(varTable, target, targetStart = 256, maxMetatiles = 768)
+
+            val varSnapshot = Array(768) { target[256 + it].copyOf() }
+
+            val newCreTable = ByteArray(256 * 8) { i -> (0xDD + (i % 16)).toByte() }
+            applyMetatileTable(newCreTable, target, targetStart = 0, maxMetatiles = 256)
+
+            for (i in 0 until 768) {
+                assertArrayEquals(varSnapshot[i], target[256 + i],
+                    "VAR metatile at index ${256 + i} was modified by CRE apply")
+            }
+        }
+
+        @Test
+        fun `applying VAR range leaves CRE range unchanged`() {
+            val creTable = ByteArray(256 * 8) { i -> (0xCC + (i % 16)).toByte() }
+            val varTable = ByteArray(768 * 8) { i -> (0xAA + (i % 16)).toByte() }
+
+            val target = Array(1024) { IntArray(4) }
+            applyMetatileTable(creTable, target, targetStart = 0, maxMetatiles = 256)
+            applyMetatileTable(varTable, target, targetStart = 256, maxMetatiles = 768)
+
+            val creSnapshot = Array(256) { target[it].copyOf() }
+
+            val newVarTable = ByteArray(768 * 8) { i -> (0xBB + (i % 16)).toByte() }
+            applyMetatileTable(newVarTable, target, targetStart = 256, maxMetatiles = 768)
+
+            for (i in 0 until 256) {
+                assertArrayEquals(creSnapshot[i], target[i],
+                    "CRE metatile at index $i was modified by VAR apply")
+            }
+        }
+
+        @Test
+        fun `getRaw and apply round-trip preserves other range`() {
+            val creTable = ByteArray(256 * 8) { i -> (0xCC + (i % 16)).toByte() }
+            val varTable = ByteArray(768 * 8) { i -> (0xAA + (i % 16)).toByte() }
+
+            val target = Array(1024) { IntArray(4) }
+            applyMetatileTable(creTable, target, targetStart = 0, maxMetatiles = 256)
+            applyMetatileTable(varTable, target, targetStart = 256, maxMetatiles = 768)
+
+            val creSnapshot = Array(256) { target[it].copyOf() }
+            val varSnapshot = Array(768) { target[256 + it].copyOf() }
+
+            val extractedVar = serializeMetatileTable(target, startIndex = 256, count = 768)
+            applyMetatileTable(extractedVar, target, targetStart = 256, maxMetatiles = 768)
+
+            for (i in 0 until 256) {
+                assertArrayEquals(creSnapshot[i], target[i],
+                    "CRE range was modified during VAR round-trip")
+            }
+
+            val extractedCre = serializeMetatileTable(target, startIndex = 0, count = 256)
+            applyMetatileTable(extractedCre, target, targetStart = 0, maxMetatiles = 256)
+
+            for (i in 0 until 768) {
+                assertArrayEquals(varSnapshot[i], target[256 + it].copyOf(),
+                    "VAR range was modified during CRE round-trip")
+            }
+        }
+    }
+
+    @Nested
     inner class ExportTests {
         private fun makeSyntheticRom(size: Int = 0x10000): ByteArray {
             val rom = ByteArray(size) { 0xFF.toByte() }
