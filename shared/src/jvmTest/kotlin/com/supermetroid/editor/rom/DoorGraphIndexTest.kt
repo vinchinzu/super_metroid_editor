@@ -12,21 +12,54 @@ class DoorGraphIndexTest {
     /**
      * Build a minimal synthetic ROM with a room list and door connections.
      * This creates a fake ROM with room headers and door data.
+     * 
+     * Address allocation:
+     * - Room headers: 0x79000+ (bank $8F)
+     * - Door lists: 0x7A000+ (bank $8F)  
+     * - Door entries: 0x18200+ (bank $83)
+     * - PLM sets: 0x7B000+ (bank $8F)
      */
     private fun buildSyntheticRom(rooms: List<SyntheticRoom>): RomParser {
-        // Synthetic ROM: 512-byte header + minimal data
+        // Synthetic ROM: 512-byte header + 3MB data
         val romSize = 0x300200
         val romData = ByteArray(romSize)
 
         // Mark as having SMC header (512 bytes)
         val headerSize = 0x200
 
-        // Write each room header and door data
+        // Allocate address spaces to avoid conflicts
+        var nextDoorListAddr = 0xA000      // Door list pointers in bank $8F (avoid room IDs)
+        var nextDoorEntryAddr = 0x8000     // Door entries in bank $83
+
+        // First pass: allocate addresses for door lists and entries
+        val roomDoorListAddrs = mutableMapOf<Int, Int>()
+        val doorEntryAddrs = mutableMapOf<Pair<Int, Int>, Int>() // (roomId, doorIndex) -> entryAddr
+
+        for (room in rooms) {
+            if (room.doors.isNotEmpty()) {
+                roomDoorListAddrs[room.roomId] = nextDoorListAddr
+                nextDoorListAddr += room.doors.size * 2 + 2 // 2 bytes per pointer + safety margin
+                
+                for (doorIdx in room.doors.indices) {
+                    doorEntryAddrs[room.roomId to doorIdx] = nextDoorEntryAddr
+                    nextDoorEntryAddr += 12 // Each door entry is 12 bytes
+                }
+            }
+        }
+
+        // Write each room header and associated data
         for (room in rooms) {
             val roomPc = headerSize + room.roomPcOffset
             if (roomPc + 11 > romData.size) continue
 
-            // Write room header (11 bytes: index, area, mapX, mapY, width, height, upScroll, downScroll, cre, doorOut)
+            // Determine actual door-out pointer (use allocated or original if no doors)
+            val actualDoorOutPtr = if (room.doors.isNotEmpty()) {
+                roomDoorListAddrs[room.roomId] ?: room.doorOutPtr
+            } else {
+                room.doorOutPtr
+            }
+
+            // Write room header (11 bytes)
             romData[roomPc] = room.index.toByte()
             romData[roomPc + 1] = room.area.toByte()
             romData[roomPc + 2] = room.mapX.toByte()
@@ -36,7 +69,7 @@ class DoorGraphIndexTest {
             romData[roomPc + 6] = 0x00 // upScroller
             romData[roomPc + 7] = 0x00 // downScroller
             romData[roomPc + 8] = 0x00 // creBitflag
-            writeU16(romData, roomPc + 9, room.doorOutPtr)
+            writeU16(romData, roomPc + 9, actualDoorOutPtr)
 
             // Write default state data (E5E6 marker + 26 bytes of state data)
             val stateOffset = roomPc + 11
@@ -59,16 +92,17 @@ class DoorGraphIndexTest {
             }
 
             // Write door list if present
-            if (room.doorOutPtr != 0 && room.doors.isNotEmpty()) {
-                val doorListPc = snesToPcForSynthetic(0x8F0000 or room.doorOutPtr)
-                for ((idx, door) in room.doors.withIndex()) {
-                    val doorPtrPc = doorListPc + idx * 2
+            if (room.doors.isNotEmpty() && actualDoorOutPtr != 0) {
+                val doorListPc = snesToPcForSynthetic(0x8F0000 or actualDoorOutPtr)
+                for ((doorIdx, door) in room.doors.withIndex()) {
+                    val doorEntryPtr = doorEntryAddrs[room.roomId to doorIdx] ?: 0x8000
+                    val doorPtrPc = doorListPc + doorIdx * 2
                     if (doorPtrPc + 1 < romData.size) {
-                        writeU16(romData, doorPtrPc, door.doorDefPtr)
+                        writeU16(romData, doorPtrPc, doorEntryPtr)
                     }
 
                     // Write door entry (12 bytes) at bank $83
-                    val doorEntryPc = snesToPcForSynthetic(0x830000 or door.doorDefPtr)
+                    val doorEntryPc = snesToPcForSynthetic(0x830000 or doorEntryPtr)
                     if (doorEntryPc + 11 < romData.size) {
                         writeU16(romData, doorEntryPc, door.destRoomPtr)
                         writeU16(romData, doorEntryPc + 2, door.bitflag)
@@ -139,7 +173,6 @@ class DoorGraphIndexTest {
     )
 
     data class SyntheticDoor(
-        val doorDefPtr: Int,
         val destRoomPtr: Int,
         val bitflag: Int,
         val screenX: Int,
@@ -211,7 +244,7 @@ class DoorGraphIndexTest {
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000)) // Save station
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
                 doorOutPtr = 0x0000,
@@ -233,7 +266,7 @@ class DoorGraphIndexTest {
         // Room with save station is reachable (even with no doors)
         assertTrue(index.isReachable(0x9000))
         // Room without save station and no doors is not reachable
-        assertFalse(index.isReachable(0x9001))
+        assertFalse(index.isReachable(0x9100))
     }
 
     @Test
@@ -250,7 +283,7 @@ class DoorGraphIndexTest {
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
                 doorOutPtr = 0x0000,
@@ -269,7 +302,7 @@ class DoorGraphIndexTest {
         assertEquals(2, summary.disconnectedRooms)
         
         assertTrue(index.isDisconnected(0x9000))
-        assertTrue(index.isDisconnected(0x9001))
+        assertTrue(index.isDisconnected(0x9100))
     }
 
     @Test
@@ -296,7 +329,6 @@ class DoorGraphIndexTest {
         assertTrue(doorsToLandingSite.isNotEmpty(), "Should find doors leading to Landing Site")
     }
 
-    /* Commented out complex door connection tests until synthetic ROM building is fully robust
     @Test
     fun `test connected graph - all rooms reachable from save station`() {
         // Room layout:
@@ -304,33 +336,33 @@ class DoorGraphIndexTest {
         //   All rooms should be reachable
         val rooms = listOf(
             SyntheticRoom(
-                roomId = 0x9000,
+                roomId = 0x9000, // Maps to PC 0x79000
                 roomPcOffset = 0x79000,
                 index = 0, area = 0, mapX = 0, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9100,
-                plmSetPtr = 0x9200,
-                doors = listOf(SyntheticDoor(0x8300, 0x9001, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000, // Will be assigned by allocator
+                plmSetPtr = 0x9800,
+                doors = listOf(SyntheticDoor(0x9100, 0x0000, 0, 0)), // To room 0x9100
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000)) // Save station
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100, // Maps to PC 0x79100
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9110,
+                doorOutPtr = 0x0000, // Will be assigned by allocator
                 plmSetPtr = 0x0000,
                 doors = listOf(
-                    SyntheticDoor(0x8310, 0x9000, 0x0100, 0, 0), // Back to room1
-                    SyntheticDoor(0x8320, 0x9002, 0x0000, 0, 0)  // To room3
+                    SyntheticDoor(0x9000, 0x0100, 0, 0), // Back to room1
+                    SyntheticDoor(0x9200, 0x0000, 0, 0)  // To room3
                 ),
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9002,
+                roomId = 0x9200, // Maps to PC 0x79200
                 roomPcOffset = 0x79200,
                 index = 2, area = 0, mapX = 2, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9120,
+                doorOutPtr = 0x0000, // Will be assigned by allocator
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8330, 0x9001, 0x0100, 0, 0)),
+                doors = listOf(SyntheticDoor(0x9100, 0x0100, 0, 0)),
                 plms = emptyList()
             )
         )
@@ -340,19 +372,19 @@ class DoorGraphIndexTest {
         val index = DoorGraphIndex.build(parser, roomIds)
 
         val summary = index.summary()
-        assertEquals(3, summary.totalRooms)
-        assertEquals(3, summary.reachableRooms)
+        assertEquals(3, summary.totalRooms, "Should have 3 total rooms")
+        assertEquals(3, summary.reachableRooms, "All 3 rooms should be reachable")
         assertEquals(0, summary.orphanedRooms)
         assertEquals(0, summary.disconnectedRooms)
         assertEquals(1, summary.saveStationCount)
-        assertEquals(4, summary.totalDoors)
+        assertEquals(4, summary.totalDoors, "Should have 4 total doors")
 
         assertTrue(index.isReachable(0x9000))
-        assertTrue(index.isReachable(0x9001))
-        assertTrue(index.isReachable(0x9002))
+        assertTrue(index.isReachable(0x9100))
+        assertTrue(index.isReachable(0x9200))
         assertFalse(index.isOrphaned(0x9000))
-        assertFalse(index.isOrphaned(0x9001))
-        assertFalse(index.isOrphaned(0x9002))
+        assertFalse(index.isOrphaned(0x9100))
+        assertFalse(index.isOrphaned(0x9200))
     }
 
     @Test
@@ -365,27 +397,27 @@ class DoorGraphIndexTest {
                 roomId = 0x9000,
                 roomPcOffset = 0x79000,
                 index = 0, area = 0, mapX = 0, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9100,
-                plmSetPtr = 0x9200,
-                doors = listOf(SyntheticDoor(0x8300, 0x9001, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000,
+                plmSetPtr = 0x9800,
+                doors = listOf(SyntheticDoor(0x9100, 0x0000, 0, 0)),
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9110,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8310, 0x9000, 0x0100, 0, 0)),
+                doors = listOf(SyntheticDoor(0x9000, 0x0100, 0, 0)),
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9002,
+                roomId = 0x9200,
                 roomPcOffset = 0x79200,
                 index = 2, area = 0, mapX = 2, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9120,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8320, 0x9003, 0x0000, 0, 0)), // Points to non-existent room
+                doors = listOf(SyntheticDoor(0x9300, 0x0000, 0, 0)), // Points to non-existent room
                 plms = emptyList()
             )
         )
@@ -401,9 +433,9 @@ class DoorGraphIndexTest {
         assertEquals(0, summary.disconnectedRooms)
 
         assertTrue(index.isReachable(0x9000))
-        assertTrue(index.isReachable(0x9001))
-        assertFalse(index.isReachable(0x9002))
-        assertTrue(index.isOrphaned(0x9002))
+        assertTrue(index.isReachable(0x9100))
+        assertFalse(index.isReachable(0x9200))
+        assertTrue(index.isOrphaned(0x9200))
     }
 
     @Test
@@ -422,7 +454,7 @@ class DoorGraphIndexTest {
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
                 doorOutPtr = 0x0000, // No doors
@@ -443,9 +475,9 @@ class DoorGraphIndexTest {
         assertEquals(2, summary.disconnectedRooms) // Both rooms have no doors
 
         assertTrue(index.isDisconnected(0x9000))
-        assertTrue(index.isDisconnected(0x9001))
+        assertTrue(index.isDisconnected(0x9100))
         assertTrue(index.isReachable(0x9000)) // Reachable because it has save station
-        assertFalse(index.isReachable(0x9001))
+        assertFalse(index.isReachable(0x9100))
     }
 
     @Test
@@ -458,25 +490,25 @@ class DoorGraphIndexTest {
                 roomId = 0x9000,
                 roomPcOffset = 0x79000,
                 index = 0, area = 0, mapX = 0, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9100,
-                plmSetPtr = 0x9200,
-                doors = listOf(SyntheticDoor(0x8300, 0x9001, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000,
+                plmSetPtr = 0x9800,
+                doors = listOf(SyntheticDoor(0x9100, 0x0000, 0, 0)),
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9110,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
                 doors = listOf(
-                    SyntheticDoor(0x8310, 0x9000, 0x0100, 0, 0),  // Back to room1 (bidirectional)
-                    SyntheticDoor(0x8320, 0x9002, 0x0000, 0, 0)   // To room3 (one-way)
+                    SyntheticDoor(0x9000, 0x0100, 0, 0),  // Back to room1 (bidirectional)
+                    SyntheticDoor(0x9200, 0x0000, 0, 0)   // To room3 (one-way)
                 ),
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9002,
+                roomId = 0x9200,
                 roomPcOffset = 0x79200,
                 index = 2, area = 0, mapX = 2, mapY = 0, width = 1, height = 1,
                 doorOutPtr = 0x0000, // No doors out (one-way entrance)
@@ -492,18 +524,18 @@ class DoorGraphIndexTest {
 
         // All rooms should be reachable (BFS follows outgoing doors)
         assertTrue(index.isReachable(0x9000))
-        assertTrue(index.isReachable(0x9001))
-        assertTrue(index.isReachable(0x9002))
+        assertTrue(index.isReachable(0x9100))
+        assertTrue(index.isReachable(0x9200))
 
         // Room3 has incoming but no outgoing doors
-        assertEquals(1, index.incomingDoors[0x9002]?.size)
-        assertEquals(0, index.outgoingDoors[0x9002]?.size ?: 0)
+        assertEquals(1, index.incomingDoors[0x9200]?.size)
+        assertEquals(0, index.outgoingDoors[0x9200]?.size ?: 0)
 
         // Room1 and Room2 have bidirectional connection
         assertEquals(1, index.outgoingDoors[0x9000]?.size)
         assertEquals(1, index.incomingDoors[0x9000]?.size)
-        assertEquals(2, index.outgoingDoors[0x9001]?.size)
-        assertEquals(1, index.incomingDoors[0x9001]?.size)
+        assertEquals(2, index.outgoingDoors[0x9100]?.size)
+        assertEquals(1, index.incomingDoors[0x9100]?.size)
     }
 
     @Test
@@ -517,36 +549,36 @@ class DoorGraphIndexTest {
                 roomId = 0x9000,
                 roomPcOffset = 0x79000,
                 index = 0, area = 0, mapX = 0, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9100,
-                plmSetPtr = 0x9200,
-                doors = listOf(SyntheticDoor(0x8300, 0x9001, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000,
+                plmSetPtr = 0x9800,
+                doors = listOf(SyntheticDoor(0x9100, 0x0000, 0, 0)),
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9110,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8310, 0x9000, 0x0100, 0, 0)),
+                doors = listOf(SyntheticDoor(0x9000, 0x0100, 0, 0)),
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9002,
+                roomId = 0x9200,
                 roomPcOffset = 0x79200,
                 index = 2, area = 0, mapX = 2, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9120,
-                plmSetPtr = 0x9210,
-                doors = listOf(SyntheticDoor(0x8320, 0x9003, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000,
+                plmSetPtr = 0x9810,
+                doors = listOf(SyntheticDoor(0x9300, 0x0000, 0, 0)),
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9003,
+                roomId = 0x9300,
                 roomPcOffset = 0x79300,
                 index = 3, area = 0, mapX = 3, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9130,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8330, 0x9002, 0x0100, 0, 0)),
+                doors = listOf(SyntheticDoor(0x9200, 0x0100, 0, 0)),
                 plms = emptyList()
             )
         )
@@ -561,7 +593,7 @@ class DoorGraphIndexTest {
         assertEquals(0, summary.orphanedRooms)
         assertEquals(2, summary.saveStationCount)
 
-        assertEquals(setOf(0x9000, 0x9002), index.saveStationRooms)
+        assertEquals(setOf(0x9000, 0x9200), index.saveStationRooms)
     }
 
     @Test
@@ -571,30 +603,30 @@ class DoorGraphIndexTest {
                 roomId = 0x9000,
                 roomPcOffset = 0x79000,
                 index = 0, area = 0, mapX = 0, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9100,
-                plmSetPtr = 0x9200,
-                doors = listOf(SyntheticDoor(0x8300, 0x9001, 0x0000, 0, 0)),
+                doorOutPtr = 0x0000,
+                plmSetPtr = 0x9800,
+                doors = listOf(SyntheticDoor(0x9100, 0x0000, 0, 0)),
                 plms = listOf(SyntheticPlm(0xB76F, 8, 8, 0x8000))
             ),
             SyntheticRoom(
-                roomId = 0x9001,
+                roomId = 0x9100,
                 roomPcOffset = 0x79100,
                 index = 1, area = 0, mapX = 1, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9110,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
                 doors = listOf(
-                    SyntheticDoor(0x8310, 0x9001, 0x0100, 0, 0), // Self-loop
-                    SyntheticDoor(0x8320, 0x9002, 0x0000, 0, 0)
+                    SyntheticDoor(0x9100, 0x0100, 0, 0), // Self-loop
+                    SyntheticDoor(0x9200, 0x0000, 0, 0)
                 ),
                 plms = emptyList()
             ),
             SyntheticRoom(
-                roomId = 0x9002,
+                roomId = 0x9200,
                 roomPcOffset = 0x79200,
                 index = 2, area = 0, mapX = 2, mapY = 0, width = 1, height = 1,
-                doorOutPtr = 0x9120,
+                doorOutPtr = 0x0000,
                 plmSetPtr = 0x0000,
-                doors = listOf(SyntheticDoor(0x8330, 0x9001, 0x0100, 0, 0)),
+                doors = listOf(SyntheticDoor(0x9100, 0x0100, 0, 0)),
                 plms = emptyList()
             )
         )
@@ -603,14 +635,13 @@ class DoorGraphIndexTest {
         val roomIds = rooms.map { it.roomId }
         val index = DoorGraphIndex.build(parser, roomIds)
 
-        // Find doors leading to room2 (0x9001)
-        val doorsToRoom1 = index.findDoorsLeadingTo(0x9001)
+        // Find doors leading to room2 (0x9100)
+        val doorsToRoom1 = index.findDoorsLeadingTo(0x9100)
         assertEquals(3, doorsToRoom1.size) // Room1->Room2, Room2->Room2 (self), Room3->Room2
 
-        // Find doors leading to room3 (0x9002)
-        val doorsToRoom2 = index.findDoorsLeadingTo(0x9002)
+        // Find doors leading to room3 (0x9200)
+        val doorsToRoom2 = index.findDoorsLeadingTo(0x9200)
         assertEquals(1, doorsToRoom2.size)
-        assertEquals(0x9002, doorsToRoom2[0].destRoomPtr)
+        assertEquals(0x9200, doorsToRoom2[0].destRoomPtr)
     }
-    */
 }

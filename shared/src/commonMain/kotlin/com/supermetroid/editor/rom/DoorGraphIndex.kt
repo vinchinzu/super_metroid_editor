@@ -126,7 +126,7 @@ class DoorGraphIndex private constructor(
 
     /**
      * Get all doors leading to a specific room.
-     * This replaces the inefficient `RomParser.findDoorsLeadingTo()` which scans all rooms.
+     * Provides an efficient alternative to `RomParser.findDoorsLeadingTo()` using the cached index.
      */
     fun findDoorsLeadingTo(roomId: Int): List<RomParser.DoorEntry> {
         val connections = incomingDoors[roomId] ?: return emptyList()

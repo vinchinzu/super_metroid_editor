@@ -38,7 +38,9 @@ object RomValidator {
         issues.addAll(checkEnemyGfxLimits(parser, rooms))
         issues.addAll(checkRoomDimensions(rooms))
         issues.addAll(checkPlmSets(parser, rooms))
-        issues.addAll(checkRoomGraph(parser, roomIds))
+        // TODO: Re-enable checkRoomGraph once start set includes game-start/Ceres entry points
+        // (not just PLM 0xB76F save stations), otherwise Ceres will WARNING-spam as orphaned
+        // issues.addAll(checkRoomGraph(parser, roomIds))
         if (project != null) {
             issues.addAll(checkProjectSaveStationSpawns(parser, project, rooms))
             issues.addAll(checkProjectGraphicsExportFit(parser, project))
@@ -219,8 +221,7 @@ object RomValidator {
      */
     fun checkRoomGraph(parser: RomParser, roomIds: List<Int>): List<Issue> {
         val issues = mutableListOf<Issue>()
-        val index = parser.doorGraphIndex
-        val summary = index.summary()
+        val index = DoorGraphIndex.build(parser, roomIds)
 
         // Report orphaned rooms (exist but not reachable from any save station)
         for (roomId in index.orphanedRooms) {
