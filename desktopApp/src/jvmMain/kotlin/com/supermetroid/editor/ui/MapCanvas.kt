@@ -449,7 +449,13 @@ fun MapCanvas(
                     renderData = null
                     try {
                         val roomId = room.getRoomIdAsInt()
-                        val romHeader = romParser.readRoomHeader(roomId)
+                        // Check if room is already loaded in EditorState (e.g., newly created)
+                        val alreadyLoaded = editorState?.currentRoomId == roomId
+                        
+                        val romHeader = if (!alreadyLoaded) {
+                            romParser.readRoomHeader(roomId)
+                        } else null
+                        
                         if (romHeader != null) {
                             // Apply any project header changes (e.g. resize) before loading/rendering
                             val roomHeader = editorState?.applyHeaderChanges(romHeader) ?: romHeader
@@ -462,6 +468,32 @@ fun MapCanvas(
                                     roomHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                             } else {
                                 MapRenderer(romParser).renderRoom(roomHeader)
+                            }
+                            if (renderData == null) errorMessage = "Failed to render"
+                        } else if (alreadyLoaded) {
+                            // Room is already loaded (e.g., from createNewRoom), just render
+                            val es = editorState
+                            if (es?.workingLevelData != null) {
+                                // Build minimal room header for rendering from EditorState
+                                val renderHeader = com.supermetroid.editor.data.Room(
+                                    roomId = roomId,
+                                    name = "New Room",
+                                    handle = "new_room",
+                                    width = es.workingBlocksWide / 16,
+                                    height = es.workingBlocksTall / 16,
+                                    area = es.currentArea,
+                                    mapX = 0, mapY = 0, index = 0,
+                                    upScroller = 0, downScroller = 0, creBitflag = 0,
+                                    tileset = es.currentTilesetId,
+                                    musicTrack = 0x05, musicData = 0x05,
+                                    fxPtr = 0, enemySetPtr = 0, enemyGfxPtr = 0,
+                                    bgScrolling = es.currentBgScrolling,
+                                    plmSetPtr = 0, bgDataPtr = 0,
+                                    setupAsmPtr = 0, mainAsmPtr = 0,
+                                    doorOut = 0, roomScrollsPtr = 0, levelDataPtr = 0,
+                                )
+                                renderData = MapRenderer(romParser, es.tileGraphics).renderRoomFromLevelData(
+                                    renderHeader, es.workingLevelData!!, es.workingPlms, es.workingEnemies)
                             }
                             if (renderData == null) errorMessage = "Failed to render"
                         } else {

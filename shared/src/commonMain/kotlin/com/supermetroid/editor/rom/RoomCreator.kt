@@ -247,6 +247,11 @@ class RoomCreator(
             }
         }
         
+        // Include indices from existing in-memory allocations
+        for (allocation in existingAllocations) {
+            usedIndices.add(allocation.roomIndex)
+        }
+        
         // Find first free index
         for (index in 0..255) {
             if (index !in usedIndices) {

@@ -167,8 +167,8 @@ class EditorState {
         private set
     /** The loaded room's tileset as stored in the ROM (before project overrides). */
     private var romTilesetId: Int = 0
-    private var currentBgScrolling: Int = 0
-    private var currentArea: Int = 0
+    var currentBgScrolling: Int = 0
+    var currentArea: Int = 0
     private var currentIncomingDoorPtrs: List<Int> = emptyList()
     private var currentAreaRomSaveEntries: Map<Int, RomParser.Companion.SaveEntry> = emptyMap()
     private var currentAreaSaveEntryCount: Int = 0
@@ -2113,10 +2113,11 @@ class EditorState {
         romTilesetId = room.tileset
         // A stored state-data change (e.g. from the biome generator or room
         // properties panel) overrides the ROM tileset for editing/rendering.
-        val stateDataChange = project.rooms[project.roomKey(roomId)]?.stateDataChange
+        val roomKey = project.roomKey(roomId)
+        val stateDataChange = project.rooms[roomKey]?.stateDataChange
         currentTilesetId = stateDataChange?.tileset ?: room.tileset
         currentBgScrolling = stateDataChange?.bgScrolling ?: room.bgScrolling
-        currentArea = project.rooms[project.roomKey(roomId)]?.roomHeaderChange?.area ?: room.area
+        currentArea = project.rooms[roomKey]?.roomHeaderChange?.area ?: room.area
         refreshVanillaSaveIndices(romParser)
         currentIncomingDoorPtrs = romParser.findDoorsLeadingTo(roomId)
             .map { it.doorDefPtr }
@@ -2135,7 +2136,16 @@ class EditorState {
             applyCustomGfxToTileGraphics(tg, currentTilesetId)
             tileGraphics = tg
         }
-        var levelData = romParser.decompressLZ2(room.levelDataPtr)
+        
+        // Check if this is a new room (not yet written to ROM)
+        val isNewRoom = project.rooms[roomKey]?.newRoomAllocation != null
+        
+        var levelData = if (isNewRoom) {
+            // Use pre-hydrated level data from createNewRoom
+            workingLevelData ?: romParser.decompressLZ2(room.levelDataPtr)
+        } else {
+            romParser.decompressLZ2(room.levelDataPtr)
+        }
         val romWidth = room.width
         val romHeight = room.height
 
@@ -2185,7 +2195,12 @@ class EditorState {
         pendingPositions.clear()
 
         // Load scroll data for this room (resize if dimensions changed)
-        val romScrolls = romParser.parseScrollData(room.roomScrollsPtr, romWidth, romHeight)
+        val romScrolls = if (isNewRoom) {
+            // New room: use all blue scrolls
+            IntArray(effectiveWidth * effectiveHeight) { 0x01 }
+        } else {
+            romParser.parseScrollData(room.roomScrollsPtr, romWidth, romHeight)
+        }
         _originalScrolls = if (effectiveWidth != romWidth || effectiveHeight != romHeight) {
             resizeScrollGrid(romScrolls, romWidth, romHeight, effectiveWidth, effectiveHeight)
         } else {
@@ -2196,18 +2211,30 @@ class EditorState {
 
         // Load PLMs for this room from all states so rogue door caps (e.g. in Mother Brain / Tourian escape) are visible
         _workingPlms.clear()
-        val plms = romParser.getAllPlmEntriesForRoom(roomId)
+        val plms = if (isNewRoom) {
+            // New room: empty PLM list
+            emptyList()
+        } else {
+            romParser.getAllPlmEntriesForRoom(roomId)
+        }
         _workingPlms.addAll(plms)
         originalPlmCount = plms.size
 
         // Parse door entries for this room
-        doorEntries = romParser.parseDoorList(room.doorOut)
+        doorEntries = if (isNewRoom) {
+            // New room: empty door list
+            emptyList()
+        } else {
+            romParser.parseDoorList(room.doorOut)
+        }
 
         // Load enemies for this room
         _workingEnemies.clear()
-        _workingEnemies.addAll(romParser.parseEnemyPopulation(room.enemySetPtr))
+        if (!isNewRoom) {
+            _workingEnemies.addAll(romParser.parseEnemyPopulation(room.enemySetPtr))
+        }
+        // Else: new room, enemies list stays empty
 
-        val roomKey = project.roomKey(roomId)
         val savedRoom = project.rooms[roomKey]
         if (savedRoom != null) replaySavedRoomEdits(savedRoom, effectiveWidth, roomKey)
         // Bump render version without marking room as user-edited

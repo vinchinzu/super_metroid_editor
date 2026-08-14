@@ -395,8 +395,8 @@ fun RoomListView(
                 )
                 if (roomId != null) {
                     showNewRoomDialog = false
-                    // Select the newly created room
-                    val newRoomInfo = rooms.firstOrNull { it.getRoomIdAsInt() == roomId }
+                    // Select the newly created room from session rooms (not stale `rooms` param)
+                    val newRoomInfo = editorState.sessionRooms.firstOrNull { it.getRoomIdAsInt() == roomId }
                     if (newRoomInfo != null) {
                         onRoomSelected(newRoomInfo)
                     }
