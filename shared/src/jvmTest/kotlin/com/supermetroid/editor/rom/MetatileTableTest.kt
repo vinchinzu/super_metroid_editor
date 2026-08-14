@@ -387,7 +387,7 @@ class MetatileTableTest {
                 rawTable = rawTable,
                 romData = rom,
                 creSnesPtr = 0x809000,
-                loadSiteRefs = listOf(0x500, 0x503), // Not used when fits
+                loadSiteRefs = listOf(0x500), // Not used when fits
                 snesToPc = ::snesToPc,
                 pcToSnes = ::pcToSnes,
                 compress = ::compress,
@@ -431,18 +431,27 @@ class MetatileTableTest {
         }
 
         @Test
-        fun `CRE grows with refs relocates and updates load sites`() {
+        fun `CRE grows with refs relocates and updates LDA immediates`() {
             val rom = makeSyntheticRom(0x20000)
-            val originalRom = rom.copyOf()
             val rawTable = ByteArray(256 * 8) // Will compress to 2050 bytes
 
-            // Plant load-site refs at 0x500 and 0x503 (low word and bank byte)
-            // Pattern: LDA #$xxxx (3 bytes), STA $48 (2 bytes), LDA #$xxxx (3 bytes)...
-            rom[0x500] = 0x00 // Original low byte
-            rom[0x501] = 0x90 // Original mid byte
-            rom[0x502] = 0x00 // (part of next instruction)
-            rom[0x503] = 0x80 // Original bank byte
-            rom[0x504] = 0x00 // (part of next instruction)
+            // Plant real 14-byte decompression call pattern at 0x500
+            // Pattern: A9 00 80 85 48 A9 00 90 85 47 22 FF B0 80
+            // Points to $809000 (bank=$80, low=$9000)
+            rom[0x500] = 0xA9.toByte()  // LDA #$8000
+            rom[0x501] = 0x00.toByte()
+            rom[0x502] = 0x80.toByte()  // Bank byte here
+            rom[0x503] = 0x85.toByte()  // STA $48
+            rom[0x504] = 0x48.toByte()
+            rom[0x505] = 0xA9.toByte()  // LDA #$9000
+            rom[0x506] = 0x00.toByte()  // Low word here (LE)
+            rom[0x507] = 0x90.toByte()
+            rom[0x508] = 0x85.toByte()  // STA $47
+            rom[0x509] = 0x47.toByte()
+            rom[0x50A] = 0x22.toByte()  // JSL $80B0FF
+            rom[0x50B] = 0xFF.toByte()
+            rom[0x50C] = 0xB0.toByte()
+            rom[0x50D] = 0x80.toByte()
 
             val allocatedSnes = 0x81A000
             val allocatedPc = snesToPc(allocatedSnes)
@@ -451,7 +460,7 @@ class MetatileTableTest {
                 rawTable = rawTable,
                 romData = rom,
                 creSnesPtr = 0x809000,
-                loadSiteRefs = listOf(0x500, 0x503),
+                loadSiteRefs = listOf(0x500), // Pattern start
                 snesToPc = ::snesToPc,
                 pcToSnes = ::pcToSnes,
                 compress = ::compress,
@@ -465,11 +474,18 @@ class MetatileTableTest {
             assertTrue(result is MetatileTableWriteResult.Relocated)
             assertEquals(allocatedSnes, (result as MetatileTableWriteResult.Relocated).newSnesAddress)
 
-            // Verify load-site refs updated to new address
-            val newLow = (rom[0x500].toInt() and 0xFF) or ((rom[0x501].toInt() and 0xFF) shl 8)
-            assertEquals(0xA000, newLow)
-            val newBank = (rom[0x503].toInt() and 0xFF) or ((rom[0x504].toInt() and 0xFF) shl 8)
-            assertEquals(0x0081, newBank)
+            // Verify LDA immediates updated, opcodes unchanged
+            assertEquals(0xA9.toByte(), rom[0x500]) // LDA opcode
+            assertEquals(0x00.toByte(), rom[0x501]) // Bank low byte
+            assertEquals(0x81.toByte(), rom[0x502]) // Bank byte updated to $81
+            assertEquals(0x85.toByte(), rom[0x503]) // STA opcode unchanged
+            assertEquals(0x48.toByte(), rom[0x504]) // STA operand unchanged
+            assertEquals(0xA9.toByte(), rom[0x505]) // LDA opcode
+            assertEquals(0x00.toByte(), rom[0x506]) // Low word updated to $A000 (LE)
+            assertEquals(0xA0.toByte(), rom[0x507])
+            assertEquals(0x85.toByte(), rom[0x508]) // STA opcode unchanged
+            assertEquals(0x47.toByte(), rom[0x509]) // STA operand unchanged
+            assertEquals(0x22.toByte(), rom[0x50A]) // JSL opcode unchanged
 
             // Verify old range FF-filled
             assertEquals(0xFF.toByte(), rom[0x1000])
@@ -478,15 +494,24 @@ class MetatileTableTest {
         @Test
         fun `CRE grows with no free space throws and ROM unchanged`() {
             val rom = makeSyntheticRom()
-            val originalRom = rom.copyOf()
             val rawTable = ByteArray(256 * 8)
+
+            // Plant pattern
+            rom[0x500] = 0xA9.toByte(); rom[0x501] = 0x00; rom[0x502] = 0x80.toByte()
+            rom[0x503] = 0x85.toByte(); rom[0x504] = 0x48.toByte()
+            rom[0x505] = 0xA9.toByte(); rom[0x506] = 0x00; rom[0x507] = 0x90.toByte()
+            rom[0x508] = 0x85.toByte(); rom[0x509] = 0x47.toByte()
+            rom[0x50A] = 0x22.toByte(); rom[0x50B] = 0xFF.toByte()
+            rom[0x50C] = 0xB0.toByte(); rom[0x50D] = 0x80.toByte()
+
+            val originalRom = rom.copyOf()
 
             val exception = assertThrows<IllegalStateException> {
                 writeCreMetatileTable(
                     rawTable = rawTable,
                     romData = rom,
                     creSnesPtr = 0x809000,
-                    loadSiteRefs = listOf(0x500, 0x503),
+                    loadSiteRefs = listOf(0x500),
                     snesToPc = ::snesToPc,
                     pcToSnes = ::pcToSnes,
                     compress = ::compress,
@@ -649,16 +674,17 @@ class MetatileTableTest {
                     rawTable = ByteArray(8),
                     romData = rom,
                     creSnesPtr = 0x809000,
-                    loadSiteRefs = listOf(98), // OOB: needs offset+2 (98+2=100 >= size)
+                    loadSiteRefs = listOf(87), // Pattern needs 14 bytes: 87+13=100, exactly at boundary
                     snesToPc = ::snesToPc,
                     pcToSnes = ::pcToSnes,
                     compress = { ByteArray(200) }, // Force relocation
                     decompress = ::decompress,
-                    allocate = { _, _, _ -> 0x81A000 },
+                    allocate = { _, _, _ -> 0x81A000 }, // Would allocate, but validation fails first
                 )
             }
-            assertTrue(exception.message!!.contains("out of bounds"))
-            // ROM should be unchanged because writeU24 throws before any write
+            assertTrue(exception.message!!.contains("14 bytes") || exception.message!!.contains("out of bounds"))
+            // ROM unchanged because validation happens before allocation
+            assertArrayEquals(originalRom, rom)
         }
     }
 }

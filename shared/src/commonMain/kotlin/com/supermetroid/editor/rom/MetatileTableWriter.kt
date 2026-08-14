@@ -29,7 +29,7 @@ sealed class MetatileTableWriteResult {
  * @param rawTable Raw metatile table bytes (must be non-empty and multiple of 8)
  * @param romData ROM data to modify
  * @param creSnesPtr SNES address of the CRE table (from RomGraphicsCatalog.creTileTablePtr)
- * @param loadSiteRefs List of PC offsets where 24-bit SNES pointers to the CRE table are loaded
+ * @param loadSiteRefs List of pattern-start PC offsets (A9 opcode of 14-byte decompression call)
  * @param snesToPc Function to convert SNES address to PC offset
  * @param pcToSnes Function to convert PC offset to SNES address
  * @param compress Function to compress raw bytes
@@ -74,6 +74,20 @@ fun writeCreMetatileTable(
         )
     }
 
+    // Validate all load-site writes are in-bounds BEFORE allocating
+    for (patternStart in loadSiteRefs) {
+        if (patternStart < 0 || patternStart + 13 >= romData.size) {
+            throw IndexOutOfBoundsException(
+                "Load-site pattern at PC $patternStart requires 14 bytes but romData.size=${romData.size}"
+            )
+        }
+        if (patternStart + 6 + 1 >= romData.size || patternStart + 2 >= romData.size) {
+            throw IndexOutOfBoundsException(
+                "Load-site pattern at PC $patternStart: cannot patch LDA immediates (romData.size=${romData.size})"
+            )
+        }
+    }
+
     val origBank = (creSnesPtr shr 16) and 0xFF
     val banksToTry = (listOf(origBank) + (0xCE downTo 0xC0) + (0xBF downTo 0xB0))
         .distinct()
@@ -89,8 +103,10 @@ fun writeCreMetatileTable(
                 "and no free space was found. Abort export."
         )
 
-    for (loadSiteOffset in loadSiteRefs) {
-        writeU24(romData, loadSiteOffset, newSnesAddress)
+    // Patch LDA immediates at each load-site pattern
+    for (patternStart in loadSiteRefs) {
+        writeU16(romData, patternStart + 6, newSnesAddress and 0xFFFF)
+        romData[patternStart + 2] = ((newSnesAddress shr 16) and 0xFF).toByte()
     }
 
     for (i in pcOffset until pcOffset + origSize) {
@@ -98,6 +114,11 @@ fun writeCreMetatileTable(
     }
 
     return MetatileTableWriteResult.Relocated(compressed.size, origSize, newSnesAddress)
+}
+
+private fun writeU16(romData: ByteArray, offset: Int, value: Int) {
+    romData[offset] = (value and 0xFF).toByte()
+    romData[offset + 1] = ((value shr 8) and 0xFF).toByte()
 }
 
 /**

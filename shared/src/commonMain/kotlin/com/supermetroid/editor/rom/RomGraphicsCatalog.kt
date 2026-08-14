@@ -479,8 +479,8 @@ object RomGraphicsCatalogDetector {
 
         /**
          * Find all PC offsets where the specified SNES pointer is loaded in decompression call patterns.
-         * Returns list of PC offsets where the 24-bit pointer operand starts (the +1 and +6 offsets
-         * within the 14-byte pattern).
+         * Returns list of pattern-start PCs (the offset of the first A9 opcode in the 14-byte sequence).
+         * Caller must patch LDA immediates at patternStart+6 (low word) and patternStart+2 (bank byte).
          */
         fun findLoadSiteRefs(parser: RomParser, snesPtr: Int): List<Int> {
             val romData = parser.getRomData()
@@ -503,8 +503,7 @@ object RomGraphicsCatalogDetector {
                 val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
                 
                 if (ptr == snesPtr) {
-                    refs.add(pc + 1)
-                    refs.add(pc + 6)
+                    refs.add(pc)
                 }
             }
             return refs
