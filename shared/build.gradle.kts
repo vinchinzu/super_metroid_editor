@@ -120,6 +120,9 @@ val buildNativeSpc = tasks.register("buildNativeSpc") {
 
 kotlin {
     jvm {
+        compilations.all {
+            kotlinOptions.jvmTarget = "11"
+        }
         testRuns["test"].executionTask.configure {
             useJUnitPlatform()
             systemProperty("smedit.expandedRomFixture", System.getProperty("smedit.expandedRomFixture", ""))

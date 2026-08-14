@@ -3770,7 +3770,7 @@ class EditorState {
 
     /**
      * Create a new blank room with the specified dimensions.
-     * The room will be allocated with minimal valid data and added to the project.
+     * The room will be allocated and written to ROM immediately so export uses the same addresses.
      * Returns the allocated room ID if successful, null if free space is exhausted.
      */
     fun createNewRoom(
@@ -3798,6 +3798,17 @@ class EditorState {
             editorLog("ERROR: Failed to create new room: insufficient free space")
             return null
         }
+
+        // Write the room to ROM immediately so export sees it at this address
+        roomCreator.writeAllocatedRoom(
+            allocation = allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+        )
 
         val roomEdits = roomCreator.createInitialRoomEdits(
             allocation = allocation,

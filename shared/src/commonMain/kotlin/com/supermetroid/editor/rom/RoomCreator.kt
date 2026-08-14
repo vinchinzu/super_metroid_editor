@@ -2,19 +2,23 @@ package com.supermetroid.editor.rom
 
 import com.supermetroid.editor.data.RoomEdits
 import com.supermetroid.editor.data.RoomHeaderChange
+import com.supermetroid.editor.data.RoomRepository
 
 /**
  * Creates new blank rooms with allocated pointers.
  *
+ * CRITICAL: In Super Metroid, the room ID IS the SNES address of the room header.
+ * We allocate header+state (39 bytes) in bank $8F first via RomFreeSpaceAllocator,
+ * and the resulting SNES address IS the room ID.
+ *
  * Allocates:
- * - Room header in bank $8F (11 bytes)
+ * - Room header + state select (39 bytes) → room ID = headerAllocation.snesAddress & 0xFFFF
  * - Door table (2 bytes minimum for empty table)
- * - Level data (compressed, minimal 1x1 screen air tiles)
+ * - Level data (compressed, minimal air tiles)
  * - PLM set (2 bytes: terminator 0x0000)
  * - Enemy population (3 bytes: terminator 0xFFFF + kill count byte)
  * - Enemy GFX set (2 bytes: terminator 0xFFFF)
- * - Scroll data (1 byte: 0x01 = blue/explorable)
- * - State select (28 bytes: E5E6 default condition + 26-byte state data)
+ * - Scroll data (width × height bytes: 0x01 = blue/explorable)
  *
  * All allocations use the existing RomFreeSpaceAllocator fail-closed approach.
  */
@@ -27,19 +31,20 @@ class RoomCreator(
 
     data class NewRoomAllocation(
         val roomId: Int,
-        val headerAllocation: RomAllocation,
-        val stateSelectAllocation: RomAllocation,
-        val doorTableAllocation: RomAllocation,
-        val levelDataAllocation: RomAllocation,
-        val plmSetAllocation: RomAllocation,
-        val enemyPopAllocation: RomAllocation,
-        val enemyGfxAllocation: RomAllocation,
-        val scrollDataAllocation: RomAllocation,
+        val headerPcOffset: Int,
+        val doorTablePtr: Int,
+        val levelDataPtr: Int,
+        val plmSetPtr: Int,
+        val enemyPopPtr: Int,
+        val enemyGfxPtr: Int,
+        val scrollPtr: Int,
     )
 
     /**
      * Allocate a new blank room with the specified dimensions.
      * Returns null if there is insufficient free space to allocate all structures.
+     *
+     * CRITICAL: Header is allocated FIRST in bank $8F, and its SNES address IS the room ID.
      *
      * @param width Room width in screens (1-15)
      * @param height Room height in screens (1-15)
@@ -58,7 +63,7 @@ class RoomCreator(
         require(area in 0..6) { "area must be 0-6" }
         require(tileset in 0..28) { "tileset must be 0-28" }
 
-        val roomId = findUnusedRoomId() ?: return null
+        val usedRoomIds = collectUsedRoomIds()
 
         val allocator = RomFreeSpaceAllocator(
             romData = romData,
@@ -67,73 +72,72 @@ class RoomCreator(
             guardBytes = 1,
         )
 
+        // CRITICAL: Allocate header+state FIRST. Its SNES address IS the room ID.
         val headerAllocation = allocator.reserve(
-            size = 11 + 28,
+            size = 39,
             banks = listOf(0x8F),
-            label = "new room 0x${roomId.toString(16)} header+stateSelect",
+            label = "new room header+state",
         ) ?: return null
 
-        val stateSelectAllocation = RomAllocation(
-            bank = headerAllocation.bank,
-            pcOffset = headerAllocation.pcOffset + 11,
-            snesAddress = headerAllocation.snesAddress + 11,
-            size = 28,
-            label = "new room 0x${roomId.toString(16)} stateSelect",
-        )
+        val roomId = headerAllocation.snesAddress and 0xFFFF
+        
+        // Fail if this room ID is already in use
+        if (roomId in usedRoomIds) {
+            return null
+        }
 
         val doorTableAllocation = allocator.reserve(
             size = 2,
             banks = listOf(0x8F),
-            label = "new room 0x${roomId.toString(16)} door table",
+            label = "room 0x${roomId.toString(16)} door table",
         ) ?: return null
 
         val levelData = createMinimalLevelData(width, height)
         val levelDataAllocation = allocator.allocate(
             bytes = levelData,
             banks = levelDataRelocationBanks(),
-            label = "new room 0x${roomId.toString(16)} level data",
+            label = "room 0x${roomId.toString(16)} level data",
         ) ?: return null
 
         val plmSetAllocation = allocator.reserve(
             size = 2,
             banks = listOf(0x8F),
-            label = "new room 0x${roomId.toString(16)} PLM set",
+            label = "room 0x${roomId.toString(16)} PLM set",
         ) ?: return null
 
         val enemyPopAllocation = allocator.reserve(
             size = 3,
             banks = listOf(0xA1),
-            label = "new room 0x${roomId.toString(16)} enemy population",
+            label = "room 0x${roomId.toString(16)} enemy population",
         ) ?: return null
 
         val enemyGfxAllocation = allocator.reserve(
             size = 2,
             banks = listOf(0xB4),
-            label = "new room 0x${roomId.toString(16)} enemy GFX set",
+            label = "room 0x${roomId.toString(16)} enemy GFX set",
         ) ?: return null
 
         val scrollDataAllocation = allocator.reserve(
             size = width * height,
             banks = listOf(0x8F),
-            label = "new room 0x${roomId.toString(16)} scroll data",
+            label = "room 0x${roomId.toString(16)} scroll data",
         ) ?: return null
 
         return NewRoomAllocation(
             roomId = roomId,
-            headerAllocation = headerAllocation,
-            stateSelectAllocation = stateSelectAllocation,
-            doorTableAllocation = doorTableAllocation,
-            levelDataAllocation = levelDataAllocation,
-            plmSetAllocation = plmSetAllocation,
-            enemyPopAllocation = enemyPopAllocation,
-            enemyGfxAllocation = enemyGfxAllocation,
-            scrollDataAllocation = scrollDataAllocation,
+            headerPcOffset = headerAllocation.pcOffset,
+            doorTablePtr = doorTableAllocation.snesAddress and 0xFFFF,
+            levelDataPtr = levelDataAllocation.snesAddress,
+            plmSetPtr = plmSetAllocation.snesAddress and 0xFFFF,
+            enemyPopPtr = enemyPopAllocation.snesAddress and 0xFFFF,
+            enemyGfxPtr = enemyGfxAllocation.snesAddress and 0xFFFF,
+            scrollPtr = scrollDataAllocation.snesAddress and 0xFFFF,
         )
     }
 
     /**
      * Create initial RoomEdits for a newly allocated room.
-     * This creates a room header change that sets all the basic room properties.
+     * Stores allocation pointers so export uses the same addresses.
      */
     fun createInitialRoomEdits(
         allocation: NewRoomAllocation,
@@ -148,8 +152,6 @@ class RoomCreator(
     ): RoomEdits {
         val roomEdits = RoomEdits(roomId = allocation.roomId)
 
-        val doorOutPtr = allocation.doorTableAllocation.snesAddress and 0xFFFF
-
         roomEdits.roomHeaderChange = RoomHeaderChange(
             index = 0,
             area = area,
@@ -160,7 +162,7 @@ class RoomCreator(
             upScroller = 0x70,
             downScroller = 0xA0,
             creBitflag = 0x00,
-            doorOut = doorOutPtr,
+            doorOut = allocation.doorTablePtr,
         )
 
         roomEdits.stateDataChange = com.supermetroid.editor.data.StateDataChange(
@@ -176,6 +178,8 @@ class RoomCreator(
     /**
      * Write the allocated room data to ROM.
      * Should be called during export after all allocations are confirmed.
+     * 
+     * CRITICAL: The header is written at the room ID address (already allocated).
      */
     fun writeAllocatedRoom(
         allocation: NewRoomAllocation,
@@ -188,9 +192,9 @@ class RoomCreator(
         musicData: Int = 0x05,
         musicTrack: Int = 0x05,
     ) {
-        val headerPc = allocation.headerAllocation.pcOffset
-        val doorOutPtr = allocation.doorTableAllocation.snesAddress and 0xFFFF
+        val headerPc = allocation.headerPcOffset
 
+        // Write 11-byte room header
         romData[headerPc] = 0x00.toByte()
         romData[headerPc + 1] = area.toByte()
         romData[headerPc + 2] = mapX.toByte()
@@ -200,107 +204,65 @@ class RoomCreator(
         romData[headerPc + 6] = 0x70.toByte()
         romData[headerPc + 7] = 0xA0.toByte()
         romData[headerPc + 8] = 0x00.toByte()
-        writeU16(romData, headerPc + 9, doorOutPtr)
+        writeU16(romData, headerPc + 9, allocation.doorTablePtr)
 
-        val stateSelectPc = allocation.stateSelectAllocation.pcOffset
+        // Write 2-byte state select (E5E6 = default)
+        val stateSelectPc = headerPc + 11
         writeU16(romData, stateSelectPc, 0xE5E6)
 
+        // Write 26-byte state data
         val statePc = stateSelectPc + 2
-        val levelPtr = allocation.levelDataAllocation.snesAddress
-        writeU24(romData, statePc, levelPtr)
+        writeU24(romData, statePc, allocation.levelDataPtr)
         romData[statePc + 3] = tileset.toByte()
         romData[statePc + 4] = musicData.toByte()
         romData[statePc + 5] = musicTrack.toByte()
-        writeU16(romData, statePc + 6, 0x0000)
-        val enemyPopPtr = allocation.enemyPopAllocation.snesAddress and 0xFFFF
-        writeU16(romData, statePc + 8, enemyPopPtr)
-        val enemyGfxPtr = allocation.enemyGfxAllocation.snesAddress and 0xFFFF
-        writeU16(romData, statePc + 10, enemyGfxPtr)
-        writeU16(romData, statePc + 12, 0x0000)
-        val scrollPtr = allocation.scrollDataAllocation.snesAddress and 0xFFFF
-        writeU16(romData, statePc + 14, scrollPtr)
-        writeU16(romData, statePc + 16, 0x0000)
-        writeU16(romData, statePc + 18, 0x0000)
-        val plmPtr = allocation.plmSetAllocation.snesAddress and 0xFFFF
-        writeU16(romData, statePc + 20, plmPtr)
-        writeU16(romData, statePc + 22, 0x0000)
-        writeU16(romData, statePc + 24, 0x0000)
+        writeU16(romData, statePc + 6, 0x0000)  // FX pointer
+        writeU16(romData, statePc + 8, allocation.enemyPopPtr)
+        writeU16(romData, statePc + 10, allocation.enemyGfxPtr)
+        writeU16(romData, statePc + 12, 0x0000)  // BG scrolling
+        writeU16(romData, statePc + 14, allocation.scrollPtr)
+        writeU16(romData, statePc + 16, 0x0000)  // RoomVar
+        writeU16(romData, statePc + 18, 0x0000)  // Main ASM
+        writeU16(romData, statePc + 20, allocation.plmSetPtr)
+        writeU16(romData, statePc + 22, 0x0000)  // BG data
+        writeU16(romData, statePc + 24, 0x0000)  // Setup ASM
 
-        val doorTablePc = allocation.doorTableAllocation.pcOffset
+        // Write door table (2-byte terminator)
+        val doorTablePc = snesToPc(0x8F0000 or allocation.doorTablePtr)
         writeU16(romData, doorTablePc, 0x0000)
 
-        val plmSetPc = allocation.plmSetAllocation.pcOffset
+        // Write PLM set (2-byte terminator)
+        val plmSetPc = snesToPc(0x8F0000 or allocation.plmSetPtr)
         writeU16(romData, plmSetPc, 0x0000)
 
-        val enemyPopPc = allocation.enemyPopAllocation.pcOffset
+        // Write enemy population (3 bytes: terminator + kill count)
+        val enemyPopPc = snesToPc(0xA10000 or allocation.enemyPopPtr)
         writeU16(romData, enemyPopPc, 0xFFFF)
         romData[enemyPopPc + 2] = 0x00.toByte()
 
-        val enemyGfxPc = allocation.enemyGfxAllocation.pcOffset
+        // Write enemy GFX set (2-byte terminator)
+        val enemyGfxPc = snesToPc(0xB40000 or allocation.enemyGfxPtr)
         writeU16(romData, enemyGfxPc, 0xFFFF)
 
-        val scrollDataPc = allocation.scrollDataAllocation.pcOffset
+        // Write scroll data (blue/explorable for all screens)
+        val scrollDataPc = snesToPc(0x8F0000 or allocation.scrollPtr)
         for (i in 0 until width * height) {
             romData[scrollDataPc + i] = 0x01.toByte()
         }
     }
 
-    private fun findUnusedRoomId(): Int? {
-        val usedIds = collectUsedRoomIds()
-
-        val bankStart = snesToPc(0x8F8000)
-        val bankEnd = snesToPc(0x8FFFFF)
-
-        for (offset in bankStart..bankEnd step 16) {
-            val snesAddr = pcToSnes(offset)
-            val roomId = snesAddr and 0xFFFF
-
-            if (roomId in usedIds) continue
-            if (roomId < 0x8000) continue
-
-            if (isLocationFree(offset, 11 + 28)) {
-                return roomId
-            }
-        }
-
-        return null
-    }
-
+    /**
+     * Collect used room IDs from RoomRepository instead of byte-scanning.
+     * This avoids false positives from ROM patterns that look like headers.
+     */
     private fun collectUsedRoomIds(): Set<Int> {
         val ids = mutableSetOf<Int>()
-
-        val roomsStart = snesToPc(0x8F8000)
-        val roomsEnd = snesToPc(0x8FFFFF)
-
-        for (offset in roomsStart..roomsEnd) {
-            if (offset + 11 >= romData.size) break
-
-            val snesAddr = pcToSnes(offset)
-            val possibleRoomId = snesAddr and 0xFFFF
-
-            if (possibleRoomId < 0x8000) continue
-
-            val width = romData[offset + 4].toInt() and 0xFF
-            val height = romData[offset + 5].toInt() and 0xFF
-            val area = romData[offset + 1].toInt() and 0xFF
-
-            if (width in 1..15 && height in 1..15 && area in 0..6) {
-                val testRoom = romParser.readRoomHeader(possibleRoomId)
-                if (testRoom != null) {
-                    ids.add(possibleRoomId)
-                }
-            }
+        
+        for (roomInfo in RoomRepository().getAllRooms()) {
+            ids.add(roomInfo.getRoomIdAsInt())
         }
-
+        
         return ids
-    }
-
-    private fun isLocationFree(pcOffset: Int, size: Int): Boolean {
-        if (pcOffset < 0 || pcOffset + size > romData.size) return false
-        for (i in 0 until size) {
-            if ((romData[pcOffset + i].toInt() and 0xFF) != 0xFF) return false
-        }
-        return true
     }
 
     private fun createMinimalLevelData(width: Int, height: Int): ByteArray {
