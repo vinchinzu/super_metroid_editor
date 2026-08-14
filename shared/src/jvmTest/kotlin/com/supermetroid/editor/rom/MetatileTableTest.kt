@@ -340,33 +340,225 @@ class MetatileTableTest {
     }
 
     @Nested
-    inner class ExportSimulationTests {
-        @Test
-        fun `compressed-fits scenario writes successfully`() {
-            // Simulate: custom table compresses to same or smaller size
-            val customTable = ByteArray(256 * 8) { i -> (i and 0xFF).toByte() }
-            val error = validateMetatileTableForExport(customTable)
-            assertNull(error)
+    inner class ExportTests {
+        private fun makeSyntheticRom(size: Int = 0x10000): ByteArray {
+            val rom = ByteArray(size) { 0xFF.toByte() }
+            // Write a fake compressed blob at 0x1000 (16 bytes original)
+            rom[0x1000] = 0x10 // fake compressed header
+            for (i in 1..15) rom[0x1000 + i] = 0xAA.toByte()
+            return rom
+        }
+
+        private fun snesToPc(snes: Int): Int = when {
+            snes in 0x808000..0x80FFFF -> (snes and 0x7FFF)
+            snes in 0x818000..0x81FFFF -> 0x8000 + (snes and 0x7FFF)
+            else -> snes and 0xFFFF
+        }
+
+        private fun pcToSnes(pc: Int): Int = when {
+            pc < 0x8000 -> 0x808000 or pc
+            else -> 0x818000 or (pc - 0x8000)
+        }
+
+        private fun compress(data: ByteArray): ByteArray {
+            // Fake compressor: prepends length header
+            val out = ByteArray(data.size + 2)
+            out[0] = (data.size and 0xFF).toByte()
+            out[1] = ((data.size shr 8) and 0xFF).toByte()
+            System.arraycopy(data, 0, out, 2, data.size)
+            return out
+        }
+
+        private fun decompress(snes: Int): Pair<ByteArray, Int> {
+            // For testing: assume blob at 0x1000 is 16 bytes
+            if (snes == 0x809000) {
+                return ByteArray(8) { 0xAA.toByte() } to 16
+            }
+            return ByteArray(0) to 0
         }
 
         @Test
-        fun `compressed-grows scenario requires relocate`() {
-            // Simulate: custom table is valid but would compress larger
-            // (actual compression happens in RomExporter, we just validate the table)
-            val customTable = ByteArray(256 * 8)
-            val error = validateMetatileTableForExport(customTable)
-            assertNull(error)
+        fun `CRE fits writes in-place`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+            val rawTable = ByteArray(8) { i -> i.toByte() } // 1 metatile
+
+            val result = writeCreMetatileTable(
+                rawTable = rawTable,
+                romData = rom,
+                creSnesPtr = 0x809000,
+                snesToPc = ::snesToPc,
+                compress = ::compress,
+                decompress = ::decompress,
+            )
+
+            assertTrue(result is MetatileTableWriteResult.InPlace)
+            assertEquals(10, (result as MetatileTableWriteResult.InPlace).compressedSize)
+            assertEquals(16, result.originalSize)
+
+            // Verify write at PC 0x1000
+            assertEquals(8.toByte(), rom[0x1000]) // length lo
+            assertEquals(0.toByte(), rom[0x1001]) // length hi
+            assertEquals(0.toByte(), rom[0x1002]) // data starts
+            // Verify FF fill
+            assertEquals(0xFF.toByte(), rom[0x100A])
         }
 
         @Test
-        fun `no-free-space scenario aborts with original unchanged`() {
-            // This test validates that the table itself is valid before attempting export
-            val customTable = ByteArray(256 * 8)
-            val error = validateMetatileTableForExport(customTable)
-            assertNull(error)
+        fun `CRE grows throws and leaves ROM unchanged`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+            // Table that will compress to 258 bytes (> 16 original)
+            val rawTable = ByteArray(256 * 8)
 
-            // If export fails due to no free space, the ROM should remain unchanged
-            // (this is enforced in RomExporter, not in the library)
+            val exception = assertThrows<IllegalStateException> {
+                writeCreMetatileTable(
+                    rawTable = rawTable,
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    snesToPc = ::snesToPc,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                )
+            }
+            assertTrue(exception.message!!.contains("CRE metatile table"))
+            assertTrue(exception.message!!.contains("cannot be relocated"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `VAR fits writes in-place and tileset pointer unchanged`() {
+            val rom = makeSyntheticRom()
+            val entryOffset = 0x100
+            // Set up tileset table entry pointer
+            rom[entryOffset] = 0x00
+            rom[entryOffset + 1] = 0x90
+            rom[entryOffset + 2] = 0x80
+            val originalPointer = rom.copyOfRange(entryOffset, entryOffset + 3)
+
+            val rawTable = ByteArray(8) { i -> i.toByte() }
+
+            val result = writeVarMetatileTable(
+                rawTable = rawTable,
+                romData = rom,
+                varSnesPtr = 0x809000,
+                tilesetTableEntryOffset = entryOffset,
+                snesToPc = ::snesToPc,
+                pcToSnes = ::pcToSnes,
+                compress = ::compress,
+                decompress = ::decompress,
+                allocate = { _, _, _ -> null }, // Won't be called
+            )
+
+            assertTrue(result is MetatileTableWriteResult.InPlace)
+            // Verify pointer unchanged
+            assertArrayEquals(originalPointer, rom.copyOfRange(entryOffset, entryOffset + 3))
+        }
+
+        @Test
+        fun `VAR grows relocates and updates tileset pointer`() {
+            val rom = makeSyntheticRom(0x20000)
+            val entryOffset = 0x100
+            rom[entryOffset] = 0x00
+            rom[entryOffset + 1] = 0x90
+            rom[entryOffset + 2] = 0x80
+
+            val rawTable = ByteArray(256 * 8) // Will compress to 2050 bytes
+
+            val allocatedSnes = 0x81A000
+            val allocatedPc = snesToPc(allocatedSnes)
+            val result = writeVarMetatileTable(
+                rawTable = rawTable,
+                romData = rom,
+                varSnesPtr = 0x809000,
+                tilesetTableEntryOffset = entryOffset,
+                snesToPc = ::snesToPc,
+                pcToSnes = ::pcToSnes,
+                compress = ::compress,
+                decompress = ::decompress,
+                allocate = { bytes, _, _ ->
+                    System.arraycopy(bytes, 0, rom, allocatedPc, bytes.size)
+                    allocatedSnes
+                },
+            )
+
+            assertTrue(result is MetatileTableWriteResult.Relocated)
+            assertEquals(allocatedSnes, (result as MetatileTableWriteResult.Relocated).newSnesAddress)
+
+            // Verify tileset pointer updated
+            val newPtr = (rom[entryOffset].toInt() and 0xFF) or
+                    ((rom[entryOffset + 1].toInt() and 0xFF) shl 8) or
+                    ((rom[entryOffset + 2].toInt() and 0xFF) shl 16)
+            assertEquals(allocatedSnes, newPtr)
+
+            // Verify old range FF-filled
+            assertEquals(0xFF.toByte(), rom[0x1000])
+        }
+
+        @Test
+        fun `VAR grows with no free space throws and ROM unchanged`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+            val entryOffset = 0x100
+            rom[entryOffset] = 0x00
+            rom[entryOffset + 1] = 0x90
+            rom[entryOffset + 2] = 0x80
+
+            val rawTable = ByteArray(256 * 8)
+
+            val exception = assertThrows<IllegalStateException> {
+                writeVarMetatileTable(
+                    rawTable = rawTable,
+                    romData = rom,
+                    varSnesPtr = 0x809000,
+                    tilesetTableEntryOffset = entryOffset,
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> null }, // Simulate no free space
+                )
+            }
+            assertTrue(exception.message!!.contains("no free space"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `rejects empty table before any write`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IllegalArgumentException> {
+                writeCreMetatileTable(
+                    rawTable = ByteArray(0),
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    snesToPc = ::snesToPc,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                )
+            }
+            assertTrue(exception.message!!.contains("empty"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `rejects non-multiple-of-8 before any write`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IllegalArgumentException> {
+                writeCreMetatileTable(
+                    rawTable = ByteArray(7),
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    snesToPc = ::snesToPc,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                )
+            }
+            assertTrue(exception.message!!.contains("multiple of 8"))
+            assertArrayEquals(originalRom, rom)
         }
     }
 }
