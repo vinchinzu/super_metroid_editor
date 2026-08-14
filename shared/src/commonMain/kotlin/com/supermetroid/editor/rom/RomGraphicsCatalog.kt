@@ -22,6 +22,7 @@ data class RomGraphicsCatalog(
     val entries: List<TilesetPointerEntry>,
     val creTileTablePtr: Int = TileGraphics.CRE_TILE_TABLE_SNES,
     val creGfxPtr: Int = TileGraphics.CRE_GFX_SNES,
+    val creTileTableLoadSiteRefs: List<Int> = emptyList(),
 ) {
     fun entry(tilesetId: Int): TilesetPointerEntry? =
         entries.getOrNull(tilesetId)?.takeIf { it.valid }
@@ -332,9 +333,11 @@ object RomGraphicsCatalogDetector {
 
     private fun RomGraphicsCatalog.withCrePointers(parser: RomParser): RomGraphicsCatalog {
         val crePointers = CreGraphicsDetector.detect(parser)
+        val loadSiteRefs = CreGraphicsDetector.findLoadSiteRefs(parser, crePointers.tileTablePtr)
         return copy(
             creTileTablePtr = crePointers.tileTablePtr,
             creGfxPtr = crePointers.gfxPtr,
+            creTileTableLoadSiteRefs = loadSiteRefs,
         )
     }
 
@@ -469,6 +472,22 @@ object RomGraphicsCatalogDetector {
                 val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
                 if (ptrLooksReadable(parser, ptr)) {
                     refs[ptr] = refs.getOrDefault(ptr, 0) + 1
+                }
+            }
+            return refs
+        }
+
+        /**
+         * Find all PC offsets where the specified SNES pointer is loaded in decompression call patterns.
+         * Returns list of pattern-start PCs (the offset of the first A9 opcode in the 14-byte sequence).
+         * Caller must patch LDA immediates at patternStart+6 (low word) and patternStart+2 (bank byte).
+         */
+        fun findLoadSiteRefs(parser: RomParser, snesPtr: Int): List<Int> {
+            val romData = parser.getRomData()
+            val refs = mutableListOf<Int>()
+            for (pc in 0..(romData.size - POINTER_LOAD_BYTES)) {
+                if (isValidCreLoadSitePattern(romData, pc, snesPtr)) {
+                    refs.add(pc)
                 }
             }
             return refs

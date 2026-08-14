@@ -25,13 +25,6 @@ package com.supermetroid.editor.rom
  *   - SNESLab wiki: https://sneslab.net/wiki/LZ5
  *   - Metroid Construction: room_data_format
  */
-data class MetatileSubtile(
-    val tileNum: Int,
-    val palette: Int,
-    val priority: Boolean,
-    val hFlip: Boolean,
-    val vFlip: Boolean,
-)
 
 class TileGraphics(private val romParser: RomParser) {
     enum class TileSource { AREA, CRE, INVALID }
@@ -73,22 +66,16 @@ class TileGraphics(private val romParser: RomParser) {
             priority: Boolean = false,
             hFlip: Boolean = false,
             vFlip: Boolean = false,
-        ): Int {
-            return (tileNum.coerceIn(0, TOTAL_TILES - 1) and 0x03FF) or
-                ((palette.coerceIn(0, 7) and 7) shl 10) or
-                (if (priority) 0x2000 else 0) or
-                (if (hFlip) 0x4000 else 0) or
-                (if (vFlip) 0x8000 else 0)
-        }
+        ): Int = com.supermetroid.editor.rom.encodeMetatileWord(
+            tileNum = tileNum,
+            palette = palette,
+            priority = priority,
+            hFlip = hFlip,
+            vFlip = vFlip,
+        )
 
         fun decodeMetatileWord(word: Int): MetatileSubtile =
-            MetatileSubtile(
-                tileNum = word and 0x03FF,
-                palette = (word shr 10) and 7,
-                priority = (word and 0x2000) != 0,
-                hFlip = (word and 0x4000) != 0,
-                vFlip = (word and 0x8000) != 0,
-            )
+            com.supermetroid.editor.rom.decodeMetatileWord(word)
     }
 
     // Cached data per tileset
@@ -803,14 +790,11 @@ class TileGraphics(private val romParser: RomParser) {
 
     private fun parseTileTableRaw(data: ByteArray): Array<IntArray> {
         val result = Array(METATILE_COUNT) { IntArray(4) }
-        val entryCount = minOf(data.size / 8, METATILE_COUNT)
-        for (i in 0 until entryCount) {
-            val offset = i * 8
-            for (q in 0..3) {
-                val lo = data[offset + q * 2].toInt() and 0xFF
-                val hi = data[offset + q * 2 + 1].toInt() and 0xFF
-                result[i][q] = (hi shl 8) or lo
-            }
+        if (data.isEmpty() || data.size % 8 != 0) return result
+        val parsed = com.supermetroid.editor.rom.parseMetatileTable(data)
+        val copyCount = minOf(parsed.size, METATILE_COUNT)
+        for (i in 0 until copyCount) {
+            result[i] = parsed[i]
         }
         return result
     }
@@ -821,50 +805,40 @@ class TileGraphics(private val romParser: RomParser) {
         targetStart: Int,
         maxEntries: Int,
     ) {
-        val entryCount = minOf(source.size / 8, maxEntries, target.size - targetStart)
-        for (i in 0 until entryCount) {
-            val offset = i * 8
-            for (q in 0..3) {
-                val lo = source[offset + q * 2].toInt() and 0xFF
-                val hi = source[offset + q * 2 + 1].toInt() and 0xFF
-                target[targetStart + i][q] = (hi shl 8) or lo
-            }
-        }
+        if (source.isEmpty() || source.size % 8 != 0) return
+        com.supermetroid.editor.rom.applyMetatileTable(
+            rawTable = source,
+            target = target,
+            targetStart = targetStart,
+            maxMetatiles = maxEntries,
+        )
     }
 
     private fun exportTileTableRange(startMetatile: Int, metatileCount: Int): ByteArray? {
         val metas = metatiles ?: return null
         if (startMetatile < 0 || metatileCount <= 0 || startMetatile + metatileCount > metas.size) return null
-        val out = ByteArray(metatileCount * 8)
-        for (i in 0 until metatileCount) {
-            val words = metas[startMetatile + i]
-            val offset = i * 8
-            for (q in 0..3) {
-                val word = words[q] and 0xFFFF
-                out[offset + q * 2] = (word and 0xFF).toByte()
-                out[offset + q * 2 + 1] = ((word shr 8) and 0xFF).toByte()
-            }
-        }
-        return out
+        return com.supermetroid.editor.rom.serializeMetatileTable(
+            metatiles = metas,
+            startIndex = startMetatile,
+            count = metatileCount,
+        )
     }
 
     private fun applyTileTableRange(rawTable: ByteArray, startMetatile: Int, maxMetatiles: Int): Boolean {
         val metas = metatiles ?: return false
         if (rawTable.isEmpty() || rawTable.size % 8 != 0 || startMetatile < 0 || maxMetatiles <= 0) return false
-        val count = minOf(rawTable.size / 8, maxMetatiles, metas.size - startMetatile)
-        if (count <= 0) return false
-        for (i in 0 until count) {
-            val offset = i * 8
-            val words = IntArray(4)
-            for (q in 0..3) {
-                val lo = rawTable[offset + q * 2].toInt() and 0xFF
-                val hi = rawTable[offset + q * 2 + 1].toInt() and 0xFF
-                words[q] = (hi shl 8) or lo
-            }
-            metas[startMetatile + i] = words
+        return try {
+            val count = com.supermetroid.editor.rom.applyMetatileTable(
+                rawTable = rawTable,
+                target = metas,
+                targetStart = startMetatile,
+                maxMetatiles = maxMetatiles,
+            )
+            cachedDefinedMetatiles = maxOf(cachedDefinedMetatiles, startMetatile + count)
+            true
+        } catch (e: IllegalArgumentException) {
+            false
         }
-        cachedDefinedMetatiles = maxOf(cachedDefinedMetatiles, startMetatile + count)
-        return true
     }
     
     /**

@@ -111,7 +111,14 @@ internal class RomExporter(
         }
         roomsPatched.addAll(roomExportResult.roomsPatched)
 
-        val gfxPatched = applyCustomGfxPatches(romData)
+        val gfxPatched = try {
+            applyCustomGfxPatches(romData)
+        } catch (e: Exception) {
+            val message = "Export failed: custom GFX could not be written safely (${e.message})"
+            onLog("ERROR: $message")
+            onStatus(message)
+            return null
+        }
         val minimapPatched = applyMinimapEdits(romData)
         val textPatched = applyTextEdits(romData)
         val asmPatched = applyCustomAsm(romData)
@@ -438,6 +445,7 @@ internal class RomExporter(
             }
         }
 
+
         // Custom CRE graphics (shared, always at $B9:8000)
         val creB64 = gfxData.creGfx
         if (creB64 != null) {
@@ -467,34 +475,98 @@ internal class RomExporter(
             } catch (e: Exception) { onLog("WARN: Tileset $tsId gfx patch failed: ${e.message}") }
         }
 
-        // Custom shared CRE metatile table (raw 4-word metatile entries -> LZ5 compress -> write in-place)
+        // Custom shared CRE metatile table (relocate via load-site refs if compressed grows)
         val creTableB64 = gfxData.creTileTable
         if (creTableB64 != null) {
             try {
                 val rawCreTable = java.util.Base64.getDecoder().decode(creTableB64)
-                if (rawCreTable.isEmpty() || rawCreTable.size % 8 != 0) {
-                    onLog("WARN: CRE metatile table has ${rawCreTable.size} bytes (expected non-empty multiple of 8) — skipped")
-                } else {
-                    if (writeLZ5InPlace(rawCreTable, TileGraphics.CRE_TILE_TABLE_SNES, "CRE metatile table")) gfxPatched++
+                val creTableAllocator = RomFreeSpaceAllocator(
+                    romData = romData,
+                    snesToPc = romParser::snesToPc,
+                    pcToSnes = romParser::pcToSnes,
+                    guardBytes = 2,
+                )
+                val result = com.supermetroid.editor.rom.writeCreMetatileTable(
+                    rawTable = rawCreTable,
+                    romData = romData,
+                    creSnesPtr = romParser.graphicsCatalog.creTileTablePtr,
+                    loadSiteRefs = romParser.graphicsCatalog.creTileTableLoadSiteRefs,
+                    snesToPc = romParser::snesToPc,
+                    pcToSnes = romParser::pcToSnes,
+                    compress = LZ5Compressor::compress,
+                    decompress = romParser::decompressLZ2WithSize,
+                    allocate = { bytes, banks, label ->
+                        creTableAllocator.allocate(bytes, banks, label)?.snesAddress
+                    },
+                )
+                when (result) {
+                    is com.supermetroid.editor.rom.MetatileTableWriteResult.InPlace -> {
+                        onLog("Patched CRE metatile table in-place (${result.compressedSize}/${result.originalSize} bytes)")
+                        gfxPatched++
+                    }
+                    is com.supermetroid.editor.rom.MetatileTableWriteResult.Relocated -> {
+                        onLog(
+                            "Relocated CRE metatile table \$${romParser.graphicsCatalog.creTileTablePtr.toString(16)} -> " +
+                                "\$${result.newSnesAddress.toString(16)} (${result.compressedSize}/${result.originalSize} bytes), " +
+                                "${romParser.graphicsCatalog.creTileTableLoadSiteRefs.size} load-site refs updated"
+                        )
+                        gfxPatched++
+                    }
                 }
-            } catch (e: Exception) { onLog("WARN: CRE metatile table patch failed: ${e.message}") }
+            } catch (e: Exception) {
+                val msg = "Export failed: CRE metatile table could not be written safely (${e.message})"
+                onLog("ERROR: $msg")
+                onStatus(msg)
+                throw IllegalStateException(msg)
+            }
         }
 
         // Custom variable (URE) metatile tables per tileset
+        val metatileTableAllocator = RomFreeSpaceAllocator(
+            romData = romData,
+            snesToPc = romParser::snesToPc,
+            pcToSnes = romParser::pcToSnes,
+            guardBytes = 2,
+        )
         for ((tsIdStr, tableB64) in gfxData.tileTables) {
             val tsId = tsIdStr.toIntOrNull() ?: continue
             try {
                 val rawTable = java.util.Base64.getDecoder().decode(tableB64)
-                if (rawTable.isEmpty() || rawTable.size % 8 != 0) {
-                    onLog("WARN: Tileset $tsId metatile table has ${rawTable.size} bytes (expected non-empty multiple of 8) — skipped")
-                    continue
-                }
                 val entryOffset = tablePC + tsId * 9
                 val tableSnes = (romData[entryOffset].toInt() and 0xFF) or
                         ((romData[entryOffset + 1].toInt() and 0xFF) shl 8) or
                         ((romData[entryOffset + 2].toInt() and 0xFF) shl 16)
-                if (writeLZ5InPlace(rawTable, tableSnes, "tileset $tsId metatile table")) gfxPatched++
-            } catch (e: Exception) { onLog("WARN: Tileset $tsId metatile table patch failed: ${e.message}") }
+                val result = com.supermetroid.editor.rom.writeVarMetatileTable(
+                    rawTable = rawTable,
+                    romData = romData,
+                    varSnesPtr = tableSnes,
+                    tilesetTableEntryOffset = entryOffset,
+                    snesToPc = romParser::snesToPc,
+                    pcToSnes = romParser::pcToSnes,
+                    compress = LZ5Compressor::compress,
+                    decompress = romParser::decompressLZ2WithSize,
+                    allocate = { bytes, banks, label ->
+                        metatileTableAllocator.allocate(bytes, banks, label)?.snesAddress
+                    },
+                )
+                when (result) {
+                    is com.supermetroid.editor.rom.MetatileTableWriteResult.InPlace -> {
+                        onLog("Patched tileset $tsId metatile table in-place (${result.compressedSize}/${result.originalSize} bytes)")
+                    }
+                    is com.supermetroid.editor.rom.MetatileTableWriteResult.Relocated -> {
+                        onLog(
+                            "Relocated tileset $tsId metatile table \$${tableSnes.toString(16)} -> " +
+                                "\$${result.newSnesAddress.toString(16)} (${result.compressedSize}/${result.originalSize} bytes)"
+                        )
+                    }
+                }
+                gfxPatched++
+            } catch (e: Exception) {
+                val msg = "Export failed: tileset $tsId metatile table could not be written safely (${e.message})"
+                onLog("ERROR: $msg")
+                onStatus(msg)
+                throw IllegalStateException(msg)
+            }
         }
 
         // Custom palette overrides per tileset (raw BGR555 -> LZ5 compress).
