@@ -40,6 +40,114 @@ class ProjectRoomExporterTest {
         assertTrue(failure.message.orEmpty().contains("avoid corrupting adjacent data"))
     }
 
+    @Test
+    fun `new room creation allocates all required structures`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+
+        val project = SmEditProject(romPath = "base.smc")
+        val roomEdits = RoomEdits(roomId = 0x8000)
+        roomEdits.roomHeaderChange = RoomHeaderChange(
+            width = 1,
+            height = 1,
+            area = 0,
+        )
+        roomEdits.stateDataChange = StateDataChange(
+            tileset = 0,
+        )
+        project.rooms["8000"] = roomEdits
+
+        val exporter = ProjectRoomExporter(
+            project = project,
+            romParser = parser,
+            romData = rom,
+        )
+
+        val result = exporter.exportRooms()
+        assertTrue(result.roomsPatched.contains("8000"), "New room should be marked as patched")
+
+        val allocatedRoom = RomParser(rom).readRoomHeader(0x8000)
+        assertNotNull(allocatedRoom, "New room should be readable after export")
+        assertEquals(1, allocatedRoom.width, "Width should match")
+        assertEquals(1, allocatedRoom.height, "Height should match")
+        assertEquals(0, allocatedRoom.area, "Area should match")
+    }
+
+    @Test
+    fun `new room export fails closed when free space is exhausted`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+
+        fillTrailingBank8FFreeSpace(rom, parser)
+
+        val project = SmEditProject(romPath = "base.smc")
+        val roomEdits = RoomEdits(roomId = 0x8000)
+        roomEdits.roomHeaderChange = RoomHeaderChange(
+            width = 1,
+            height = 1,
+            area = 0,
+        )
+        roomEdits.stateDataChange = StateDataChange(
+            tileset = 0,
+        )
+        project.rooms["8000"] = roomEdits
+
+        val failure = assertFailsWith<ProjectRoomExportException> {
+            ProjectRoomExporter(
+                project = project,
+                romParser = parser,
+                romData = rom,
+            ).exportRooms()
+        }
+
+        assertTrue(
+            failure.message.orEmpty().contains("insufficient free space") ||
+                failure.message.orEmpty().contains("Failed to allocate"),
+            "Should fail with appropriate message"
+        )
+    }
+
+    @Test
+    fun `new room does not corrupt adjacent data`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+
+        val sentinelAddress = parser.snesToPc(0x8F8000) + 0x100
+        val sentinelValue = 0x42.toByte()
+        rom[sentinelAddress] = sentinelValue
+
+        val project = SmEditProject(romPath = "base.smc")
+        val roomEdits = RoomEdits(roomId = 0x8000)
+        roomEdits.roomHeaderChange = RoomHeaderChange(
+            width = 1,
+            height = 1,
+            area = 0,
+        )
+        roomEdits.stateDataChange = StateDataChange(
+            tileset = 0,
+        )
+        project.rooms["8000"] = roomEdits
+
+        val exporter = ProjectRoomExporter(
+            project = project,
+            romParser = parser,
+            romData = rom,
+        )
+
+        exporter.exportRooms()
+
+        assertEquals(
+            sentinelValue,
+            rom[sentinelAddress],
+            "Sentinel value should not be overwritten"
+        )
+    }
+
+    private fun createFreshTestRom(): ByteArray {
+        val rom = ByteArray(RomConstants.ROM_SIZE) { 0xFF.toByte() }
+        return rom
+    }
+
     private fun fillTrailingBank8FFreeSpace(rom: ByteArray, parser: RomParser) {
         val bankStart = parser.snesToPc(0x8F8000)
         val bankEndExclusive = parser.snesToPc(0x8FFFFF) + 1

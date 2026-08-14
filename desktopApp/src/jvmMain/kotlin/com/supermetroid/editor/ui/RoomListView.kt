@@ -20,14 +20,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +85,7 @@ fun RoomListView(
     var searchQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(RoomSortMode.AREA) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var showNewRoomDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val roomAreas = remember(romParser, rooms) {
@@ -226,6 +231,19 @@ fun RoomListView(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
+                // New Room button
+                if (editorState != null && romParser != null) {
+                    IconButton(
+                        onClick = { showNewRoomDialog = true },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "New Room",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
                 // Sort dropdown with toggle: clicking the active sort's group swaps direction
                 val menuEntries = listOf(
                     RoomSortMode.AREA,
@@ -362,6 +380,24 @@ fun RoomListView(
             }
         }
     }
+
+    if (showNewRoomDialog && editorState != null && romParser != null) {
+        NewRoomDialog(
+            onDismiss = { showNewRoomDialog = false },
+            onConfirm = { width, height, area, tileset ->
+                val roomId = editorState.createNewRoom(
+                    width = width,
+                    height = height,
+                    area = area,
+                    tileset = tileset,
+                    romParser = romParser,
+                )
+                if (roomId != null) {
+                    showNewRoomDialog = false
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -438,4 +474,102 @@ fun RoomListItem(
             }
         }
     }
+}
+
+@Composable
+private fun NewRoomDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (width: Int, height: Int, area: Int, tileset: Int) -> Unit,
+) {
+    var width by remember { mutableStateOf("1") }
+    var height by remember { mutableStateOf("1") }
+    var areaIndex by remember { mutableStateOf(0) }
+    var tileset by remember { mutableStateOf("0") }
+
+    val widthInt = width.toIntOrNull() ?: 1
+    val heightInt = height.toIntOrNull() ?: 1
+    val tilesetInt = tileset.toIntOrNull() ?: 0
+
+    val isValid = widthInt in 1..15 && heightInt in 1..15 && tilesetInt in 0..28
+
+    val fs = LocalEditorTheme.current.fontSize.value
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create New Room", fontSize = fs.heading) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = width,
+                        onValueChange = { width = it },
+                        label = { Text("Width (screens)", fontSize = fs.detail) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontSize = fs.body),
+                        isError = widthInt !in 1..15
+                    )
+                    OutlinedTextField(
+                        value = height,
+                        onValueChange = { height = it },
+                        label = { Text("Height (screens)", fontSize = fs.detail) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontSize = fs.body),
+                        isError = heightInt !in 1..15
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Area:", fontSize = fs.body, fontWeight = FontWeight.Medium)
+                Column {
+                    areaInfo.toSortedMap().forEach { (index, info) ->
+                        val (areaName, _) = info
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { areaIndex = index }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.RadioButton(
+                                selected = areaIndex == index,
+                                onClick = { areaIndex = index }
+                            )
+                            Text(areaName, fontSize = fs.body)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = tileset,
+                    onValueChange = { tileset = it },
+                    label = { Text("Tileset (0-28)", fontSize = fs.detail) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = TextStyle(fontSize = fs.body),
+                    isError = tilesetInt !in 0..28
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(widthInt, heightInt, areaIndex, tilesetInt) },
+                enabled = isValid
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

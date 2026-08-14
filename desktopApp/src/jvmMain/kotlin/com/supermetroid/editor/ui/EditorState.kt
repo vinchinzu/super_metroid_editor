@@ -3769,6 +3769,60 @@ class EditorState {
     }
 
     /**
+     * Create a new blank room with the specified dimensions.
+     * The room will be allocated with minimal valid data and added to the project.
+     * Returns the allocated room ID if successful, null if free space is exhausted.
+     */
+    fun createNewRoom(
+        width: Int = 1,
+        height: Int = 1,
+        area: Int = 0,
+        tileset: Int = 0,
+        mapX: Int = 0,
+        mapY: Int = 0,
+        romParser: RomParser,
+    ): Int? {
+        require(width in 1..15) { "width must be 1-15" }
+        require(height in 1..15) { "height must be 1-15" }
+        require(area in 0..6) { "area must be 0-6" }
+        require(tileset in 0..28) { "tileset must be 0-28" }
+
+        val roomCreator = RoomCreator(romParser.romData, romParser)
+
+        val allocation = roomCreator.allocateBlankRoom(
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+        ) ?: run {
+            editorLog("ERROR: Failed to create new room: insufficient free space")
+            return null
+        }
+
+        val roomEdits = roomCreator.createInitialRoomEdits(
+            allocation = allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+        )
+
+        project.rooms[project.roomKey(allocation.roomId)] = roomEdits
+        _roomEditOrder[allocation.roomId] = System.currentTimeMillis()
+        _editVersionState.value++
+        dirty = true
+
+        editorLog(
+            "Created new room 0x${allocation.roomId.toString(16).uppercase()} " +
+                "(${width}x${height} screens, area $area, tileset $tileset)"
+        )
+
+        return allocation.roomId
+    }
+
+    /**
      * Apply a [BiomeTheme] to the loaded room: switch its tileset (persisted
      * as a state-data change for ROM export), install the theme's palette
      * recolor as a tileset palette override, and set liquid/atmosphere FX.

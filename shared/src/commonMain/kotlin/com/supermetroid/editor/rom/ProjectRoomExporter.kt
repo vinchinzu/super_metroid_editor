@@ -70,7 +70,19 @@ class ProjectRoomExporter(
         for ((roomKey, roomEdits) in project.rooms) {
             if (!roomEdits.hasEdits) continue
             val roomId = roomKey.toIntOrNull(16) ?: continue
-            val room = romParser.readRoomHeader(roomId) ?: continue
+            
+            val existingRoom = romParser.readRoomHeader(roomId)
+            val room = if (existingRoom == null) {
+                if (isNewRoomCreation(roomEdits)) {
+                    createAndWriteNewRoom(roomId, roomEdits)
+                    roomsPatched.add(roomKey)
+                    romParser.readRoomHeader(roomId) ?: continue
+                } else {
+                    continue
+                }
+            } else {
+                existingRoom
+            }
 
             val headerChange = roomEdits.roomHeaderChange
             val effectiveWidth = headerChange?.width ?: room.width
@@ -1201,5 +1213,65 @@ class ProjectRoomExporter(
             data[offset + 1] = ((value shr 8) and 0xFF).toByte()
             data[offset + 2] = ((value shr 16) and 0xFF).toByte()
         }
+    }
+
+    private fun isNewRoomCreation(roomEdits: RoomEdits): Boolean {
+        return roomEdits.roomHeaderChange != null &&
+            roomEdits.roomHeaderChange!!.width != null &&
+            roomEdits.roomHeaderChange!!.height != null &&
+            roomEdits.roomHeaderChange!!.area != null
+    }
+
+    private fun createAndWriteNewRoom(roomId: Int, roomEdits: RoomEdits) {
+        val headerChange = roomEdits.roomHeaderChange!!
+        val width = headerChange.width!!
+        val height = headerChange.height!!
+        val area = headerChange.area!!
+        val tileset = roomEdits.stateDataChange?.tileset ?: 0
+
+        val roomCreator = RoomCreator(romData, romParser)
+        val allocation = roomCreator.allocateBlankRoom(
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+        ) ?: failExport(
+            "Failed to allocate new room 0x${roomId.toString(16)}: insufficient free space in ROM"
+        )
+
+        if (allocation.roomId != roomId) {
+            onLog(
+                "WARN: New room requested at 0x${roomId.toString(16)}, but allocated at 0x${allocation.roomId.toString(16)} " +
+                    "(no free space at requested location)"
+            )
+        }
+
+        val musicData = roomEdits.stateDataChange?.musicData ?: 0x05
+        val musicTrack = roomEdits.stateDataChange?.musicTrack ?: 0x05
+        val mapX = headerChange.mapX ?: 0
+        val mapY = headerChange.mapY ?: 0
+
+        roomCreator.writeAllocatedRoom(
+            allocation = allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+            musicData = musicData,
+            musicTrack = musicTrack,
+        )
+
+        onLog(
+            "Created new room 0x${allocation.roomId.toString(16)} (${width}x${height} screens, area $area, tileset $tileset):\n" +
+                "  header:    \$8F:${(allocation.headerAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  door table: \$8F:${(allocation.doorTableAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  level data: \$${(allocation.levelDataAllocation.snesAddress shr 16).toString(16).uppercase()}:${(allocation.levelDataAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  PLM set:    \$8F:${(allocation.plmSetAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  enemy pop:  \$A1:${(allocation.enemyPopAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  enemy GFX:  \$B4:${(allocation.enemyGfxAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}\n" +
+                "  scroll:     \$8F:${(allocation.scrollDataAllocation.snesAddress and 0xFFFF).toString(16).uppercase()}"
+        )
     }
 }
