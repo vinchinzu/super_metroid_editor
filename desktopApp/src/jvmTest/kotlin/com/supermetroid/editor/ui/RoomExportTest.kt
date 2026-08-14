@@ -15,6 +15,7 @@ import com.supermetroid.editor.rom.TileGraphics
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
@@ -80,62 +81,79 @@ class RoomExportTest {
 
     @Test
     fun `import rejects invalid JSON`() {
+        val es = createSyntheticEditorState(0x1234, 2, 2)
+        val rp = createMinimalRomParser()
+        
         val invalidJson = "{ invalid json }"
-        val result = parseRoomExportData(invalidJson)
-        assertTrue(result.isFailure, "Should reject invalid JSON")
-        assertTrue(result.exceptionOrNull()?.message?.contains("JSON") == true)
+        val result = es.importRoomFromJson(invalidJson, rp)
+        
+        assertTrue(result.contains("invalid JSON format"), "Should reject invalid JSON: $result")
+        assertTrue(result.contains("Import failed"), "Should report import failure: $result")
     }
 
     @Test
     fun `import rejects bad version`() {
+        val es = createSyntheticEditorState(0x1234, 2, 2)
+        val rp = createMinimalRomParser()
+        
         val badVersion = RoomExportData(
             version = 99,
-            roomId = "91F8",
+            roomId = "1234",
             roomName = "Test",
-            width = 3,
+            width = 2,
             height = 2,
             tileset = 0,
             area = 0,
-            levelDataBase64 = createSyntheticLevelData(3, 2),
-            scrollData = List(6) { 1 }
+            levelDataBase64 = createSyntheticLevelData(2, 2),
+            scrollData = List(4) { 1 }
         )
         val json = Json.encodeToString(RoomExportData.serializer(), badVersion)
-        val result = parseRoomExportData(json)
-        assertTrue(result.isSuccess)
-        assertEquals(99, result.getOrNull()?.version)
+        val result = es.importRoomFromJson(json, rp)
+        
+        assertTrue(result.contains("unsupported version"), "Should reject version 99: $result")
+        assertTrue(result.contains("99"), "Error should mention version 99: $result")
+        assertTrue(result.contains("Import failed"), "Should report import failure: $result")
     }
 
     @Test
     fun `import rejects scroll size mismatch`() {
+        val es = createSyntheticEditorState(0x1234, 2, 2)
+        val rp = createMinimalRomParser()
+        
         val badScrolls = RoomExportData(
             version = 1,
-            roomId = "91F8",
+            roomId = "1234",
             roomName = "Test",
-            width = 3,
+            width = 2,
             height = 2,
             tileset = 0,
             area = 0,
-            levelDataBase64 = createSyntheticLevelData(3, 2),
-            scrollData = List(5) { 1 }
+            levelDataBase64 = createSyntheticLevelData(2, 2),
+            scrollData = List(3) { 1 }
         )
         val json = Json.encodeToString(RoomExportData.serializer(), badScrolls)
-        val parsed = parseRoomExportData(json).getOrThrow()
-        assertFalse(parsed.scrollData.size == parsed.width * parsed.height, "Scroll size should not match dimensions")
+        val result = es.importRoomFromJson(json, rp)
+        
+        assertTrue(result.contains("scroll data size"), "Should reject scroll size mismatch: $result")
+        assertTrue(result.contains("Import failed"), "Should report import failure: $result")
     }
 
     @Test
     fun `import rejects invalid base64`() {
+        val es = createSyntheticEditorState(0x1234, 2, 2)
+        val rp = createMinimalRomParser()
+        
         val badBase64 = """
         {
           "version": 1,
-          "roomId": "91F8",
+          "roomId": "1234",
           "roomName": "Test",
-          "width": 3,
+          "width": 2,
           "height": 2,
           "tileset": 0,
           "area": 0,
           "levelDataBase64": "not-valid-base64!!!",
-          "scrollData": [1, 1, 1, 1, 1, 1],
+          "scrollData": [1, 1, 1, 1],
           "enemies": [],
           "plms": [],
           "doors": [],
@@ -143,76 +161,79 @@ class RoomExportTest {
           "musicControl": 0
         }
         """.trimIndent()
-        val parsed = parseRoomExportData(badBase64).getOrThrow()
-        val decoded = try {
-            java.util.Base64.getDecoder().decode(parsed.levelDataBase64)
-            true
-        } catch (_: Exception) {
-            false
-        }
-        assertFalse(decoded, "Base64 decode should fail")
+        val result = es.importRoomFromJson(badBase64, rp)
+        
+        assertTrue(result.contains("invalid base64"), "Should reject invalid base64: $result")
+        assertTrue(result.contains("Import failed"), "Should report import failure: $result")
     }
 
     @Test
-    fun `import applies tiles from synthetic JSON`() {
-        val synthetic = RoomExportData(
+    fun `import successfully applies tiles and scrolls`() {
+        val es = createSyntheticEditorState(0x1234, 2, 1)
+        val rp = createMinimalRomParser()
+        
+        val originalLevelDataSnapshot = es.originalLevelData?.copyOf()
+        
+        val importData = RoomExportData(
             version = 1,
-            roomId = "TEST",
-            roomName = "Synthetic Room",
+            roomId = "1234",
+            roomName = "Test",
             width = 2,
             height = 1,
             tileset = 0,
             area = 0,
             levelDataBase64 = createSyntheticLevelData(2, 1, fillTile = 0x0042),
-            scrollData = listOf(1, 2),
+            scrollData = listOf(0, 2),
             enemies = emptyList(),
             plms = emptyList(),
             doors = emptyList()
         )
-        val decoded = java.util.Base64.getDecoder().decode(synthetic.levelDataBase64)
-        assertTrue(decoded.size > 0, "Level data should decode")
-        val l1Size = (decoded[0].toInt() and 0xFF) or ((decoded[1].toInt() and 0xFF) shl 8)
-        assertEquals(2 * 16 * 1 * 16 * 2, l1Size, "L1 size should match 2x1 screens")
+        val json = Json.encodeToString(RoomExportData.serializer(), importData)
+        val result = es.importRoomFromJson(json, rp)
         
-        val firstTileOffset = 2
-        val firstTileWord = (decoded[firstTileOffset].toInt() and 0xFF) or ((decoded[firstTileOffset + 1].toInt() and 0xFF) shl 8)
-        assertEquals(0x0042, firstTileWord, "First tile should be 0x0042")
+        assertTrue(result.contains("successfully"), "Import should succeed: $result")
+        
+        val firstTile = es.readBlockWord(0, 0)
+        assertEquals(0x0042, firstTile, "First tile should be 0x0042 from import")
+        
+        assertEquals(0, es.workingScrolls[0], "First scroll should be 0 from import")
+        assertEquals(2, es.workingScrolls[1], "Second scroll should be 2 from import")
+        
+        assertTrue(originalLevelDataSnapshot!!.contentEquals(es.originalLevelData!!), "originalLevelData should be unchanged")
     }
 
-    @Test
-    fun `import applies scrolls from synthetic JSON`() {
-        val synthetic = RoomExportData(
-            version = 1,
-            roomId = "TEST",
-            roomName = "Synthetic Room",
-            width = 3,
-            height = 2,
-            tileset = 0,
-            area = 0,
-            levelDataBase64 = createSyntheticLevelData(3, 2),
-            scrollData = listOf(0, 1, 2, 1, 0, 2),
-            enemies = emptyList(),
-            plms = emptyList(),
-            doors = emptyList()
-        )
-        assertEquals(6, synthetic.scrollData.size)
-        assertEquals(0, synthetic.scrollData[0])
-        assertEquals(1, synthetic.scrollData[1])
-        assertEquals(2, synthetic.scrollData[2])
-        assertEquals(1, synthetic.scrollData[3])
-        assertEquals(0, synthetic.scrollData[4])
-        assertEquals(2, synthetic.scrollData[5])
+    private fun createSyntheticEditorState(roomId: Int, widthScreens: Int, heightScreens: Int): EditorState {
+        val es = EditorState()
+        es.setRoomIdForTest(roomId)
+        es.initTestLevel(widthScreens * 16, heightScreens * 16, includeLayer2 = false)
+        return es
     }
-
-    private fun parseRoomExportData(json: String): Result<RoomExportData> {
-        return try {
-            Result.success(Json.decodeFromString(RoomExportData.serializer(), json))
-        } catch (ex: Exception) {
-            Result.failure(ex)
+    
+    private fun createMinimalRomParser(): RomParser {
+        val minimalRomBytes = ByteArray(0x800000) { 0xFF.toByte() }
+        val rp = RomParser(minimalRomBytes)
+        
+        val roomId = 0x1234
+        val pcOffset = rp.roomIdToPc(roomId)
+        
+        if (pcOffset >= 0 && pcOffset + 11 < minimalRomBytes.size) {
+            minimalRomBytes[pcOffset] = 0
+            minimalRomBytes[pcOffset + 1] = 0
+            minimalRomBytes[pcOffset + 2] = 0
+            minimalRomBytes[pcOffset + 3] = 0
+            minimalRomBytes[pcOffset + 4] = 2
+            minimalRomBytes[pcOffset + 5] = 1
+            minimalRomBytes[pcOffset + 6] = 0
+            minimalRomBytes[pcOffset + 7] = 0
+            minimalRomBytes[pcOffset + 8] = 0
+            minimalRomBytes[pcOffset + 9] = 0
+            minimalRomBytes[pcOffset + 10] = 0
         }
+        
+        return rp
     }
 
-    private fun createSyntheticLevelData(widthScreens: Int, heightScreens: Int, fillTile: Int = 0x00FF): String {
+    private fun createSyntheticLevelDataBytes(widthScreens: Int, heightScreens: Int, fillTile: Int = 0x00FF): ByteArray {
         val blocksW = widthScreens * 16
         val blocksH = heightScreens * 16
         val totalBlocks = blocksW * blocksH
@@ -232,7 +253,13 @@ class RoomExportTest {
             data[2 + l1Size + i] = 0
         }
 
-        return java.util.Base64.getEncoder().encodeToString(data)
+        return data
+    }
+
+    private fun createSyntheticLevelData(widthScreens: Int, heightScreens: Int, fillTile: Int = 0x00FF): String {
+        return java.util.Base64.getEncoder().encodeToString(
+            createSyntheticLevelDataBytes(widthScreens, heightScreens, fillTile)
+        )
     }
 
     @Test
