@@ -26,7 +26,7 @@ class MetatileUndoTest {
         state = EditorState()
         state.testMode = true
         state.initTestLevel(blocksWide = 4, blocksTall = 4)
-        state.loadEditorTileset(0, romParser)
+        assertTrue(state.loadEditorTileset(0, romParser), "Synthetic ROM must load tileset 0")
     }
 
     private fun syntheticRom(size: Int): ByteArray =
@@ -56,12 +56,15 @@ class MetatileUndoTest {
         write24(rom, tablePc + 3, gfxSnes)
         write24(rom, tablePc + 6, paletteSnes)
 
-        // Write VAR tile table (1 metatile for simplicity)
-        val varTileTable = ByteArray(8)
-        write16(varTileTable, 0, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
-        write16(varTileTable, 2, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
-        write16(varTileTable, 4, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
-        write16(varTileTable, 6, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        // Write VAR tile table (64 metatiles so indices 256-319 are valid)
+        val varTileTable = ByteArray(64 * 8)
+        for (i in 0 until 64) {
+            val offset = i * 8
+            write16(varTileTable, offset, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+            write16(varTileTable, offset + 2, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+            write16(varTileTable, offset + 4, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+            write16(varTileTable, offset + 6, TileGraphics.encodeMetatileWord(tileNum = 0, palette = 1))
+        }
         writeBytesAtSnes(rom, tileTableSnes, lz5Direct(varTileTable))
 
         // Write VAR graphics (1 tile)
