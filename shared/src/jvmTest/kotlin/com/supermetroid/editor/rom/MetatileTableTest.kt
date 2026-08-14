@@ -431,6 +431,74 @@ class MetatileTableTest {
         }
 
         @Test
+        fun `CRE grows with junk at ref PC throws and ROM unchanged`() {
+            val rom = makeSyntheticRom()
+            val rawTable = ByteArray(256 * 8)
+
+            // Plant junk at 0x500 (not a valid pattern)
+            rom[0x500] = 0x00
+            rom[0x501] = 0x00
+            
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IllegalStateException> {
+                writeCreMetatileTable(
+                    rawTable = rawTable,
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    loadSiteRefs = listOf(0x500),
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> 0x81A000 },
+                )
+            }
+            assertTrue(exception.message!!.contains("invalid") || exception.message!!.contains("no longer points"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `CRE grows with pattern pointing to different addr throws and ROM unchanged`() {
+            val rom = makeSyntheticRom()
+            val rawTable = ByteArray(256 * 8)
+
+            // Plant valid pattern at 0x500 but pointing to $818000 instead of $809000
+            rom[0x500] = 0xA9.toByte()  // LDA #$0081
+            rom[0x501] = 0x81.toByte()
+            rom[0x502] = 0x00.toByte()
+            rom[0x503] = 0x85.toByte()  // STA $48
+            rom[0x504] = 0x48.toByte()
+            rom[0x505] = 0xA9.toByte()  // LDA #$8000
+            rom[0x506] = 0x00.toByte()
+            rom[0x507] = 0x80.toByte()
+            rom[0x508] = 0x85.toByte()  // STA $47
+            rom[0x509] = 0x47.toByte()
+            rom[0x50A] = 0x22.toByte()  // JSL $80B0FF
+            rom[0x50B] = 0xFF.toByte()
+            rom[0x50C] = 0xB0.toByte()
+            rom[0x50D] = 0x80.toByte()
+
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IllegalStateException> {
+                writeCreMetatileTable(
+                    rawTable = rawTable,
+                    romData = rom,
+                    creSnesPtr = 0x809000, // Expects $809000, but pattern points to $818000
+                    loadSiteRefs = listOf(0x500),
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> 0x81A000 },
+                )
+            }
+            assertTrue(exception.message!!.contains("no longer points") || exception.message!!.contains("invalid"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
         fun `CRE grows with refs relocates and updates LDA immediates`() {
             val rom = makeSyntheticRom(0x20000)
             val rawTable = ByteArray(256 * 8) // Will compress to 2050 bytes
@@ -665,11 +733,11 @@ class MetatileTableTest {
         }
 
         @Test
-        fun `writeU24 OOB throws`() {
+        fun `CRE load-site pattern OOB throws and ROM unchanged`() {
             val rom = ByteArray(100)
             val originalRom = rom.copyOf()
 
-            val exception = assertThrows<IndexOutOfBoundsException> {
+            val exception = assertThrows<IllegalStateException> {
                 writeCreMetatileTable(
                     rawTable = ByteArray(8),
                     romData = rom,
@@ -682,9 +750,31 @@ class MetatileTableTest {
                     allocate = { _, _, _ -> 0x81A000 }, // Would allocate, but validation fails first
                 )
             }
-            assertTrue(exception.message!!.contains("14 bytes") || exception.message!!.contains("out of bounds"))
+            assertTrue(exception.message!!.contains("invalid") || exception.message!!.contains("no longer points"))
             // ROM unchanged because validation happens before allocation
             assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `VAR entryOffset OOB throws and ROM unchanged`() {
+            val rom = ByteArray(100)
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IndexOutOfBoundsException> {
+                writeVarMetatileTable(
+                    rawTable = ByteArray(8),
+                    romData = rom,
+                    varSnesPtr = 0x809000,
+                    tilesetTableEntryOffset = 98, // OOB: writeU24 needs offset+2 (98+2=100 >= size)
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = { ByteArray(200) }, // Force relocation
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> 0x81A000 }, // Allocate succeeds but writeU24 throws
+                )
+            }
+            assertTrue(exception.message!!.contains("out of bounds"))
+            // ROM should be unchanged (writeU24 throws before completing the write)
         }
     }
 }

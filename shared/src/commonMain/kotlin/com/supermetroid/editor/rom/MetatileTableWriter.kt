@@ -74,16 +74,16 @@ fun writeCreMetatileTable(
         )
     }
 
-    // Validate all load-site writes are in-bounds BEFORE allocating
+    // Re-validate each load-site pattern BEFORE allocating
+    // (Refs are from original catalog scan; patches may have moved or destroyed them)
     for (patternStart in loadSiteRefs) {
-        if (patternStart < 0 || patternStart + 13 >= romData.size) {
-            throw IndexOutOfBoundsException(
-                "Load-site pattern at PC $patternStart requires 14 bytes but romData.size=${romData.size}"
+        if (!com.supermetroid.editor.rom.RomGraphicsCatalogDetector.CreGraphicsDetector.isValidLoadSitePattern(
+                romData, patternStart, creSnesPtr
             )
-        }
-        if (patternStart + 6 + 1 >= romData.size || patternStart + 2 >= romData.size) {
-            throw IndexOutOfBoundsException(
-                "Load-site pattern at PC $patternStart: cannot patch LDA immediates (romData.size=${romData.size})"
+        ) {
+            throw IllegalStateException(
+                "CRE load-site pattern at PC $patternStart is invalid or no longer points to \$${creSnesPtr.toString(16).uppercase()}. " +
+                    "Patches may have moved or destroyed the decompression call. Abort export."
             )
         }
     }

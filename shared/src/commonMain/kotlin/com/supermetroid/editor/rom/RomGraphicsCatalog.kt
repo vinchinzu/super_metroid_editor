@@ -486,27 +486,40 @@ object RomGraphicsCatalogDetector {
             val romData = parser.getRomData()
             val refs = mutableListOf<Int>()
             for (pc in 0..(romData.size - POINTER_LOAD_BYTES)) {
-                if ((romData[pc].toInt() and 0xFF) != 0xA9) continue
-                if ((romData[pc + 3].toInt() and 0xFF) != 0x85 || (romData[pc + 4].toInt() and 0xFF) != 0x48) continue
-                if ((romData[pc + 5].toInt() and 0xFF) != 0xA9) continue
-                if ((romData[pc + 8].toInt() and 0xFF) != 0x85 || (romData[pc + 9].toInt() and 0xFF) != 0x47) continue
-                if ((romData[pc + 10].toInt() and 0xFF) != 0x22 ||
-                    (romData[pc + 11].toInt() and 0xFF) != 0xFF ||
-                    (romData[pc + 12].toInt() and 0xFF) != 0xB0 ||
-                    (romData[pc + 13].toInt() and 0xFF) != 0x80
-                ) {
-                    continue
-                }
-
-                val bankWord = readU16(romData, pc + 1)
-                val lowWord = readU16(romData, pc + 6)
-                val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
-                
-                if (ptr == snesPtr) {
+                if (isValidLoadSitePattern(romData, pc, snesPtr)) {
                     refs.add(pc)
                 }
             }
             return refs
+        }
+
+        /**
+         * Check if a 14-byte decompression call pattern exists at patternStart and points to expectedPtr.
+         * Returns true if all opcodes match and the decoded pointer equals expectedPtr.
+         */
+        fun isValidLoadSitePattern(romData: ByteArray, patternStart: Int, expectedPtr: Int): Boolean {
+            if (patternStart < 0 || patternStart + POINTER_LOAD_BYTES > romData.size) return false
+            
+            // Check opcodes
+            if ((romData[patternStart].toInt() and 0xFF) != 0xA9) return false
+            if ((romData[patternStart + 3].toInt() and 0xFF) != 0x85 || 
+                (romData[patternStart + 4].toInt() and 0xFF) != 0x48) return false
+            if ((romData[patternStart + 5].toInt() and 0xFF) != 0xA9) return false
+            if ((romData[patternStart + 8].toInt() and 0xFF) != 0x85 || 
+                (romData[patternStart + 9].toInt() and 0xFF) != 0x47) return false
+            if ((romData[patternStart + 10].toInt() and 0xFF) != 0x22 ||
+                (romData[patternStart + 11].toInt() and 0xFF) != 0xFF ||
+                (romData[patternStart + 12].toInt() and 0xFF) != 0xB0 ||
+                (romData[patternStart + 13].toInt() and 0xFF) != 0x80) {
+                return false
+            }
+
+            // Decode pointer
+            val bankWord = readU16(romData, patternStart + 1)
+            val lowWord = readU16(romData, patternStart + 6)
+            val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
+            
+            return ptr == expectedPtr
         }
 
         private fun scanExpandedData(parser: RomParser, targetSize: Int): List<DataCandidate> {
