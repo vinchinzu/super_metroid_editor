@@ -34,7 +34,7 @@
 ### Text & Data
 - In-Game Text Editor — Intro story (6 parts), area names (7), escape messages (2), UI messages (9), item pickup names (19)
 - Mapshot / Save as PNG — Export button on canvas toolbar
-- Room JSON Export — Self-contained room data with PNG/JSON dropdown
+- Room JSON Export/Import — Self-contained room data with PNG/JSON dropdown export and JSON import with validation
 - Custom ASM Embedding — Hex bytes → free space + auto-link pointer
 
 ### Infrastructure
@@ -53,9 +53,8 @@
 |---|---------|--------|-----|
 | 1 | **Tileset/Metatile Composer** | Large | Define 16x16 metatiles from 4 8x8 tiles with palette/flip per sub-tile. Enables truly custom tilesets. |
 | 2 | **New Room Creation** | Medium | Allocate room header in $8F, door table, level data, enemy/PLM/scroll pointers. Auto-repointing foundation already exists. |
-| 3 | **Room JSON Import** | Small | Export done; import creates RoomEdits from JSON file. |
-| 4 | **AreaSave Expansion / Conflict UI** | Small-Medium | Save station spawn editing writes existing slots; table expansion and collision resolution remain. |
-| 5 | **SMART XML Interop** | Medium | Export rooms in SMART XML format. Plugs into Map Randomizer ecosystem — no other modern editor has this. |
+| 3 | **AreaSave Expansion / Conflict UI** | Small-Medium | Save station spawn editing writes existing slots; table expansion and collision resolution remain. |
+| 4 | **SMART XML Interop** | Medium | Export rooms in SMART XML format. Plugs into Map Randomizer ecosystem — no other modern editor has this. |
 
 ### Tier 2: Medium Impact
 

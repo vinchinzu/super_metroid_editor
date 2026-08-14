@@ -79,6 +79,158 @@ class RoomExportTest {
     }
 
     @Test
+    fun `export then import roundtrip preserves tile data`() {
+        val rp = TestRomHelper.loadRomParser() ?: return
+        val room = rp.readRoomHeader(0x91F8) ?: return
+        val es = EditorState()
+        es.loadRoom(0x91F8, rp, room)
+
+        val originalData = es.workingLevelData?.copyOf()
+        val originalScrolls = es.workingScrolls.copyOf()
+
+        val json = es.exportRoomToJson(0x91F8, rp)
+
+        val es2 = EditorState()
+        es2.loadRoom(0x91F8, rp, room)
+        val result = es2.importRoomFromJson(json, rp)
+
+        assertTrue(result.contains("successfully"), "Import should succeed: $result")
+        assertTrue(originalData!!.contentEquals(es2.workingLevelData!!), "Level data should match after import")
+        assertTrue(originalScrolls.contentEquals(es2.workingScrolls), "Scroll data should match after import")
+    }
+
+    @Test
+    fun `import validates JSON structure`() {
+        val es = EditorState()
+        val rp = TestRomHelper.loadRomParser() ?: return
+        val room = rp.readRoomHeader(0x91F8) ?: return
+        es.loadRoom(0x91F8, rp, room)
+
+        val invalidJson = "{ invalid json }"
+        val result = es.importRoomFromJson(invalidJson, rp)
+        assertTrue(result.contains("invalid JSON format"), "Should reject invalid JSON: $result")
+    }
+
+    @Test
+    fun `import validates room ID match`() {
+        val rp = TestRomHelper.loadRomParser() ?: return
+        val room = rp.readRoomHeader(0x91F8) ?: return
+        val es = EditorState()
+        es.loadRoom(0x91F8, rp, room)
+
+        val json = es.exportRoomToJson(0x91F8, rp)
+
+        val es2 = EditorState()
+        val room2 = rp.readRoomHeader(0x92FD) ?: return
+        es2.loadRoom(0x92FD, rp, room2)
+
+        val result = es2.importRoomFromJson(json, rp)
+        assertTrue(result.contains("wrong room") || result.contains("is for room"), "Should detect room mismatch: $result")
+    }
+
+    @Test
+    fun `import rejects when room has existing edits`() {
+        val rp = TestRomHelper.loadRomParser() ?: return
+        val room = rp.readRoomHeader(0x91F8) ?: return
+        val es = EditorState()
+        es.loadRoom(0x91F8, rp, room)
+
+        val json = es.exportRoomToJson(0x91F8, rp)
+
+        val es2 = EditorState()
+        es2.loadRoom(0x91F8, rp, room)
+
+        val oldWord = es2.readBlockWord(4, 4)
+        val oldBts = es2.readBts(4, 4)
+        es2.applyBulkEdits("test edit", listOf(TileEdit(4, 4, oldWord, oldWord xor 0x01, oldBts, oldBts)))
+
+        val result = es2.importRoomFromJson(json, rp)
+        assertTrue(result.contains("already has edits"), "Should reject import when edits exist: $result")
+    }
+
+    @Test
+    fun `import handles dimension changes`() {
+        val exportData = RoomExportData(
+            version = 1,
+            roomId = "91F8",
+            roomName = "Landing Site Modified",
+            width = 10,
+            height = 6,
+            tileset = 0,
+            area = 0,
+            levelDataBase64 = createSyntheticLevelData(10, 6),
+            scrollData = List(60) { 1 },
+            enemies = emptyList(),
+            plms = emptyList(),
+            doors = emptyList(),
+        )
+        val json = Json.encodeToString(RoomExportData.serializer(), exportData)
+
+        val rp = TestRomHelper.loadRomParser() ?: return
+        val room = rp.readRoomHeader(0x91F8) ?: return
+        val es = EditorState()
+        es.loadRoom(0x91F8, rp, room)
+
+        val result = es.importRoomFromJson(json, rp)
+        assertTrue(result.contains("successfully"), "Import should succeed with dimension change: $result")
+        assertEquals(10, es.workingBlocksWide / 16, "Width should be updated to 10 screens")
+        assertEquals(6, es.workingBlocksTall / 16, "Height should be updated to 6 screens")
+    }
+
+    @Test
+    fun `landing site fixture has expected structure`() {
+        val fixtureJson = """
+        {
+          "version": 1,
+          "roomId": "91F8",
+          "roomName": "Landing Site",
+          "width": 9,
+          "height": 5,
+          "tileset": 0,
+          "area": 0,
+          "levelDataBase64": "${createSyntheticLevelData(9, 5)}",
+          "scrollData": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+          "enemies": [],
+          "plms": [],
+          "doors": [],
+          "musicTrack": 5,
+          "musicControl": 0
+        }
+        """.trimIndent()
+
+        val parsed = Json.decodeFromString(RoomExportData.serializer(), fixtureJson)
+        assertEquals("91F8", parsed.roomId)
+        assertEquals("Landing Site", parsed.roomName)
+        assertEquals(9, parsed.width)
+        assertEquals(5, parsed.height)
+        assertEquals(45, parsed.scrollData.size)
+        assertTrue(parsed.levelDataBase64.isNotEmpty())
+    }
+
+    private fun createSyntheticLevelData(widthScreens: Int, heightScreens: Int): String {
+        val blocksW = widthScreens * 16
+        val blocksH = heightScreens * 16
+        val totalBlocks = blocksW * blocksH
+        val l1Size = totalBlocks * 2
+
+        val data = ByteArray(2 + l1Size + totalBlocks)
+        data[0] = (l1Size and 0xFF).toByte()
+        data[1] = ((l1Size shr 8) and 0xFF).toByte()
+
+        for (i in 0 until totalBlocks) {
+            val offset = 2 + i * 2
+            data[offset] = 0xFF.toByte()
+            data[offset + 1] = 0x00.toByte()
+        }
+
+        for (i in 0 until totalBlocks) {
+            data[2 + l1Size + i] = 0
+        }
+
+        return java.util.Base64.getEncoder().encodeToString(data)
+    }
+
+    @Test
     fun `reset current room restores ROM data and removes room edits`() {
         val rp = TestRomHelper.loadRomParser() ?: return
         val room = rp.readRoomHeader(0x91F8) ?: return

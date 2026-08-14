@@ -4047,6 +4047,104 @@ class EditorState {
         )
     }
 
+    /**
+     * Import room data from JSON and apply as undoable edit operations.
+     * Validates JSON structure, handles dimension changes through resize,
+     * and detects conflicts (wrong room loaded or existing edits).
+     * Returns a status message (success or error).
+     */
+    fun importRoomFromJson(json: String, romParser: RomParser): String {
+        val parsed = try {
+            kotlinx.serialization.json.Json.decodeFromString(
+                com.supermetroid.editor.data.RoomExportData.serializer(),
+                json
+            )
+        } catch (ex: Exception) {
+            return "Import failed: invalid JSON format (${ex.message})"
+        }
+
+        if (parsed.version != 1) {
+            return "Import failed: unsupported version ${parsed.version} (expected 1)"
+        }
+
+        val importRoomId = try {
+            parsed.roomId.toInt(16)
+        } catch (_: Exception) {
+            return "Import failed: invalid room ID '${parsed.roomId}'"
+        }
+
+        if (currentRoomId != importRoomId) {
+            return "Import failed: JSON is for room \$${parsed.roomId}, but room \$${currentRoomId.toString(16).uppercase()} is loaded"
+        }
+
+        val existingEdits = project.rooms[project.roomKey(currentRoomId)]
+        if (existingEdits != null && (existingEdits.operations.isNotEmpty() ||
+            existingEdits.scrollChanges.isNotEmpty() ||
+            existingEdits.roomHeaderChange != null)) {
+            return "Import failed: room already has edits. Reset room to original before importing."
+        }
+
+        if (parsed.width !in 1..15 || parsed.height !in 1..15) {
+            return "Import failed: invalid dimensions ${parsed.width}x${parsed.height} (must be 1-15 screens)"
+        }
+
+        val levelData = try {
+            java.util.Base64.getDecoder().decode(parsed.levelDataBase64)
+        } catch (_: Exception) {
+            return "Import failed: invalid base64 level data"
+        }
+
+        val room = romParser.readRoomHeader(currentRoomId) ?: return "Import failed: cannot read ROM room header"
+        val currentWidth = workingBlocksWide / 16
+        val currentHeight = workingBlocksTall / 16
+
+        if (parsed.width != currentWidth || parsed.height != currentHeight) {
+            resizeRoom(currentWidth, currentHeight, parsed.width, parsed.height)
+        }
+
+        workingLevelData = levelData.copyOf()
+        originalLevelData = levelData.copyOf()
+        workingBlocksWide = parsed.width * 16
+        workingBlocksTall = parsed.height * 16
+
+        if (parsed.scrollData.size != parsed.width * parsed.height) {
+            return "Import failed: scroll data size ${parsed.scrollData.size} does not match dimensions ${parsed.width}x${parsed.height}"
+        }
+        _workingScrolls = parsed.scrollData.toIntArray()
+        _originalScrolls = _workingScrolls.copyOf()
+        scrollVersion++
+
+        val tileEdits = mutableListOf<TileEdit>()
+        for (by in 0 until workingBlocksTall) {
+            for (bx in 0 until workingBlocksWide) {
+                val word = readBlockWord(bx, by)
+                val bts = readBts(bx, by)
+                tileEdits.add(TileEdit(bx, by, 0, word, 0, bts))
+            }
+        }
+
+        val scrollEdits = mutableListOf<ScrollChange>()
+        for (sy in 0 until parsed.height) {
+            for (sx in 0 until parsed.width) {
+                val idx = sy * parsed.width + sx
+                scrollEdits.add(ScrollChange(sx, sy, 0, parsed.scrollData[idx]))
+            }
+        }
+
+        pushEditOperation(EditOperation("Import room from JSON", tileEdits, scrollEdits = scrollEdits))
+
+        if (parsed.area != room.area || parsed.tileset != room.tileset) {
+            val headerChange = RoomHeaderChange(area = parsed.area)
+            setRoomHeaderChange(headerChange)
+            val stateChange = StateDataChange(tileset = parsed.tileset)
+            setStateDataChange(stateChange)
+        }
+
+        editVersion++
+        dirty = true
+        return "Room imported successfully from JSON"
+    }
+
     fun saveProject(romParser: RomParser? = null): Boolean {
         val saved = ProjectFileService.saveProject(
             project = project,
