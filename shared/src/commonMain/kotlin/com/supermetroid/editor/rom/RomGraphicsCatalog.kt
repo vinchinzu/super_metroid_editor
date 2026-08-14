@@ -22,6 +22,7 @@ data class RomGraphicsCatalog(
     val entries: List<TilesetPointerEntry>,
     val creTileTablePtr: Int = TileGraphics.CRE_TILE_TABLE_SNES,
     val creGfxPtr: Int = TileGraphics.CRE_GFX_SNES,
+    val creTileTableLoadSiteRefs: List<Int> = emptyList(),
 ) {
     fun entry(tilesetId: Int): TilesetPointerEntry? =
         entries.getOrNull(tilesetId)?.takeIf { it.valid }
@@ -332,9 +333,11 @@ object RomGraphicsCatalogDetector {
 
     private fun RomGraphicsCatalog.withCrePointers(parser: RomParser): RomGraphicsCatalog {
         val crePointers = CreGraphicsDetector.detect(parser)
+        val loadSiteRefs = CreGraphicsDetector.findLoadSiteRefs(parser, crePointers.tileTablePtr)
         return copy(
             creTileTablePtr = crePointers.tileTablePtr,
             creGfxPtr = crePointers.gfxPtr,
+            creTileTableLoadSiteRefs = loadSiteRefs,
         )
     }
 
@@ -469,6 +472,39 @@ object RomGraphicsCatalogDetector {
                 val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
                 if (ptrLooksReadable(parser, ptr)) {
                     refs[ptr] = refs.getOrDefault(ptr, 0) + 1
+                }
+            }
+            return refs
+        }
+
+        /**
+         * Find all PC offsets where the specified SNES pointer is loaded in decompression call patterns.
+         * Returns list of PC offsets where the 24-bit pointer operand starts (the +1 and +6 offsets
+         * within the 14-byte pattern).
+         */
+        fun findLoadSiteRefs(parser: RomParser, snesPtr: Int): List<Int> {
+            val romData = parser.getRomData()
+            val refs = mutableListOf<Int>()
+            for (pc in 0..(romData.size - POINTER_LOAD_BYTES)) {
+                if ((romData[pc].toInt() and 0xFF) != 0xA9) continue
+                if ((romData[pc + 3].toInt() and 0xFF) != 0x85 || (romData[pc + 4].toInt() and 0xFF) != 0x48) continue
+                if ((romData[pc + 5].toInt() and 0xFF) != 0xA9) continue
+                if ((romData[pc + 8].toInt() and 0xFF) != 0x85 || (romData[pc + 9].toInt() and 0xFF) != 0x47) continue
+                if ((romData[pc + 10].toInt() and 0xFF) != 0x22 ||
+                    (romData[pc + 11].toInt() and 0xFF) != 0xFF ||
+                    (romData[pc + 12].toInt() and 0xFF) != 0xB0 ||
+                    (romData[pc + 13].toInt() and 0xFF) != 0x80
+                ) {
+                    continue
+                }
+
+                val bankWord = readU16(romData, pc + 1)
+                val lowWord = readU16(romData, pc + 6)
+                val ptr = (((bankWord ushr 8) and 0xFF) shl 16) or lowWord
+                
+                if (ptr == snesPtr) {
+                    refs.add(pc + 1)
+                    refs.add(pc + 6)
                 }
             }
             return refs

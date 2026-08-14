@@ -387,9 +387,12 @@ class MetatileTableTest {
                 rawTable = rawTable,
                 romData = rom,
                 creSnesPtr = 0x809000,
+                loadSiteRefs = listOf(0x500, 0x503), // Not used when fits
                 snesToPc = ::snesToPc,
+                pcToSnes = ::pcToSnes,
                 compress = ::compress,
                 decompress = ::decompress,
+                allocate = { _, _, _ -> null }, // Won't be called
             )
 
             assertTrue(result is MetatileTableWriteResult.InPlace)
@@ -405,10 +408,9 @@ class MetatileTableTest {
         }
 
         @Test
-        fun `CRE grows throws and leaves ROM unchanged`() {
+        fun `CRE grows with no refs throws and leaves ROM unchanged`() {
             val rom = makeSyntheticRom()
             val originalRom = rom.copyOf()
-            // Table that will compress to 258 bytes (> 16 original)
             val rawTable = ByteArray(256 * 8)
 
             val exception = assertThrows<IllegalStateException> {
@@ -416,13 +418,83 @@ class MetatileTableTest {
                     rawTable = rawTable,
                     romData = rom,
                     creSnesPtr = 0x809000,
+                    loadSiteRefs = emptyList(),
                     snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
                     compress = ::compress,
                     decompress = ::decompress,
+                    allocate = { _, _, _ -> null },
                 )
             }
-            assertTrue(exception.message!!.contains("CRE metatile table"))
-            assertTrue(exception.message!!.contains("cannot be relocated"))
+            assertTrue(exception.message!!.contains("no load-site references"))
+            assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `CRE grows with refs relocates and updates load sites`() {
+            val rom = makeSyntheticRom(0x20000)
+            val originalRom = rom.copyOf()
+            val rawTable = ByteArray(256 * 8) // Will compress to 2050 bytes
+
+            // Plant load-site refs at 0x500 and 0x503 (low word and bank byte)
+            // Pattern: LDA #$xxxx (3 bytes), STA $48 (2 bytes), LDA #$xxxx (3 bytes)...
+            rom[0x500] = 0x00 // Original low byte
+            rom[0x501] = 0x90 // Original mid byte
+            rom[0x502] = 0x00 // (part of next instruction)
+            rom[0x503] = 0x80 // Original bank byte
+            rom[0x504] = 0x00 // (part of next instruction)
+
+            val allocatedSnes = 0x81A000
+            val allocatedPc = snesToPc(allocatedSnes)
+
+            val result = writeCreMetatileTable(
+                rawTable = rawTable,
+                romData = rom,
+                creSnesPtr = 0x809000,
+                loadSiteRefs = listOf(0x500, 0x503),
+                snesToPc = ::snesToPc,
+                pcToSnes = ::pcToSnes,
+                compress = ::compress,
+                decompress = ::decompress,
+                allocate = { bytes, _, _ ->
+                    System.arraycopy(bytes, 0, rom, allocatedPc, bytes.size)
+                    allocatedSnes
+                },
+            )
+
+            assertTrue(result is MetatileTableWriteResult.Relocated)
+            assertEquals(allocatedSnes, (result as MetatileTableWriteResult.Relocated).newSnesAddress)
+
+            // Verify load-site refs updated to new address
+            val newLow = (rom[0x500].toInt() and 0xFF) or ((rom[0x501].toInt() and 0xFF) shl 8)
+            assertEquals(0xA000, newLow)
+            val newBank = (rom[0x503].toInt() and 0xFF) or ((rom[0x504].toInt() and 0xFF) shl 8)
+            assertEquals(0x0081, newBank)
+
+            // Verify old range FF-filled
+            assertEquals(0xFF.toByte(), rom[0x1000])
+        }
+
+        @Test
+        fun `CRE grows with no free space throws and ROM unchanged`() {
+            val rom = makeSyntheticRom()
+            val originalRom = rom.copyOf()
+            val rawTable = ByteArray(256 * 8)
+
+            val exception = assertThrows<IllegalStateException> {
+                writeCreMetatileTable(
+                    rawTable = rawTable,
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    loadSiteRefs = listOf(0x500, 0x503),
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = ::compress,
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> null }, // Simulate no free space
+                )
+            }
+            assertTrue(exception.message!!.contains("no free space"))
             assertArrayEquals(originalRom, rom)
         }
 
@@ -533,9 +605,12 @@ class MetatileTableTest {
                     rawTable = ByteArray(0),
                     romData = rom,
                     creSnesPtr = 0x809000,
+                    loadSiteRefs = emptyList(),
                     snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
                     compress = ::compress,
                     decompress = ::decompress,
+                    allocate = { _, _, _ -> null },
                 )
             }
             assertTrue(exception.message!!.contains("empty"))
@@ -552,13 +627,38 @@ class MetatileTableTest {
                     rawTable = ByteArray(7),
                     romData = rom,
                     creSnesPtr = 0x809000,
+                    loadSiteRefs = emptyList(),
                     snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
                     compress = ::compress,
                     decompress = ::decompress,
+                    allocate = { _, _, _ -> null },
                 )
             }
             assertTrue(exception.message!!.contains("multiple of 8"))
             assertArrayEquals(originalRom, rom)
+        }
+
+        @Test
+        fun `writeU24 OOB throws`() {
+            val rom = ByteArray(100)
+            val originalRom = rom.copyOf()
+
+            val exception = assertThrows<IndexOutOfBoundsException> {
+                writeCreMetatileTable(
+                    rawTable = ByteArray(8),
+                    romData = rom,
+                    creSnesPtr = 0x809000,
+                    loadSiteRefs = listOf(98), // OOB: needs offset+2 (98+2=100 >= size)
+                    snesToPc = ::snesToPc,
+                    pcToSnes = ::pcToSnes,
+                    compress = { ByteArray(200) }, // Force relocation
+                    decompress = ::decompress,
+                    allocate = { _, _, _ -> 0x81A000 },
+                )
+            }
+            assertTrue(exception.message!!.contains("out of bounds"))
+            // ROM should be unchanged because writeU24 throws before any write
         }
     }
 }

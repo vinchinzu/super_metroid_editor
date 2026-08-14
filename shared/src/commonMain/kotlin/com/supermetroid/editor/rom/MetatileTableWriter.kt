@@ -24,25 +24,31 @@ sealed class MetatileTableWriteResult {
 }
 
 /**
- * Write a CRE metatile table to ROM (in-place only, abort if compressed grows).
+ * Write a CRE metatile table to ROM (in-place if fits, relocate via load-site refs if needed).
  *
  * @param rawTable Raw metatile table bytes (must be non-empty and multiple of 8)
  * @param romData ROM data to modify
  * @param creSnesPtr SNES address of the CRE table (from RomGraphicsCatalog.creTileTablePtr)
+ * @param loadSiteRefs List of PC offsets where 24-bit SNES pointers to the CRE table are loaded
  * @param snesToPc Function to convert SNES address to PC offset
+ * @param pcToSnes Function to convert PC offset to SNES address
  * @param compress Function to compress raw bytes
  * @param decompress Function to decompress and return (data, originalCompressedSize)
+ * @param allocate Function to allocate free space: (bytes, banks, label) -> snesAddress or null
  * @return Write result on success
  * @throws IllegalArgumentException if rawTable is invalid
- * @throws IllegalStateException if compressed table does not fit in original space
+ * @throws IllegalStateException if compressed table does not fit and cannot be relocated
  */
 fun writeCreMetatileTable(
     rawTable: ByteArray,
     romData: ByteArray,
     creSnesPtr: Int,
+    loadSiteRefs: List<Int>,
     snesToPc: (Int) -> Int,
+    pcToSnes: (Int) -> Int,
     compress: (ByteArray) -> ByteArray,
     decompress: (Int) -> Pair<ByteArray, Int>,
+    allocate: (ByteArray, List<Int>, String) -> Int?,
 ): MetatileTableWriteResult {
     val validationError = validateMetatileTableForExport(rawTable)
     if (validationError != null) {
@@ -53,19 +59,45 @@ fun writeCreMetatileTable(
     val pcOffset = snesToPc(creSnesPtr)
     val (_, origSize) = decompress(creSnesPtr)
 
-    if (compressed.size > origSize) {
+    if (compressed.size <= origSize) {
+        System.arraycopy(compressed, 0, romData, pcOffset, compressed.size)
+        for (i in compressed.size until origSize) {
+            romData[pcOffset + i] = 0xFF.toByte()
+        }
+        return MetatileTableWriteResult.InPlace(compressed.size, origSize)
+    }
+
+    if (loadSiteRefs.isEmpty()) {
         throw IllegalStateException(
-            "CRE metatile table compressed size (${compressed.size}) exceeds original ($origSize). " +
-                "CRE cannot be relocated in this PR. Abort export."
+            "CRE metatile table compressed size (${compressed.size}) exceeds original ($origSize) " +
+                "and no load-site references are available for relocation. Abort export."
         )
     }
 
-    System.arraycopy(compressed, 0, romData, pcOffset, compressed.size)
-    for (i in compressed.size until origSize) {
-        romData[pcOffset + i] = 0xFF.toByte()
+    val origBank = (creSnesPtr shr 16) and 0xFF
+    val banksToTry = (listOf(origBank) + (0xCE downTo 0xC0) + (0xBF downTo 0xB0))
+        .distinct()
+        .filter { bank ->
+            val bankStart = runCatching { snesToPc((bank shl 16) or 0x8000) }.getOrNull()
+            val bankEnd = runCatching { snesToPc((bank shl 16) or 0xFFFF) + 1 }.getOrNull()
+            bankStart != null && bankEnd != null && bankStart >= 0 && bankEnd <= romData.size
+        }
+
+    val newSnesAddress = allocate(compressed, banksToTry, "CRE metatile table")
+        ?: throw IllegalStateException(
+            "CRE metatile table compressed size (${compressed.size}) exceeds original ($origSize) " +
+                "and no free space was found. Abort export."
+        )
+
+    for (loadSiteOffset in loadSiteRefs) {
+        writeU24(romData, loadSiteOffset, newSnesAddress)
     }
 
-    return MetatileTableWriteResult.InPlace(compressed.size, origSize)
+    for (i in pcOffset until pcOffset + origSize) {
+        romData[i] = 0xFF.toByte()
+    }
+
+    return MetatileTableWriteResult.Relocated(compressed.size, origSize, newSnesAddress)
 }
 
 /**
@@ -139,9 +171,10 @@ fun writeVarMetatileTable(
 }
 
 private fun writeU24(romData: ByteArray, offset: Int, value: Int) {
-    if (offset + 2 < romData.size) {
-        romData[offset] = (value and 0xFF).toByte()
-        romData[offset + 1] = ((value shr 8) and 0xFF).toByte()
-        romData[offset + 2] = ((value shr 16) and 0xFF).toByte()
+    if (offset < 0 || offset + 2 >= romData.size) {
+        throw IndexOutOfBoundsException("writeU24 offset $offset is out of bounds (romData.size=${romData.size})")
     }
+    romData[offset] = (value and 0xFF).toByte()
+    romData[offset + 1] = ((value shr 8) and 0xFF).toByte()
+    romData[offset + 2] = ((value shr 16) and 0xFF).toByte()
 }
