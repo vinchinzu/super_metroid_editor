@@ -498,11 +498,11 @@ class MetatileTableTest {
         @Test
         fun `VAR grows with no free space throws and ROM unchanged`() {
             val rom = makeSyntheticRom()
-            val originalRom = rom.copyOf()
             val entryOffset = 0x100
             rom[entryOffset] = 0x00
             rom[entryOffset + 1] = 0x90
             rom[entryOffset + 2] = 0x80
+            val originalRom = rom.copyOf()
 
             val rawTable = ByteArray(256 * 8)
 
