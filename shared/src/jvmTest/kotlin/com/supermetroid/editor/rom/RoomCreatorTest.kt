@@ -236,10 +236,8 @@ class RoomCreatorTest {
         }
     }
 
-    // TODO: Fix collision detection - marked ranges don't prevent RomFreeSpaceAllocator
-    // from reusing same PC offsets. Needs allocator-level exclusion mechanism.
-    // @Test
-    fun `two reserve-only allocates do not collide - DISABLED`() {
+    @Test
+    fun `two reserve-only allocates do not collide`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
         

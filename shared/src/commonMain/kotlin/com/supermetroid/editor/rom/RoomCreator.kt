@@ -72,29 +72,28 @@ class RoomCreator(
 
         val usedRoomIds = collectUsedRoomIds()
 
-        // Mark existing in-memory allocations as used by writing sentinel bytes
-        // This prevents collisions when creating multiple rooms in the same session
-        val markedRanges = mutableListOf<Pair<Int, Int>>()
+        // Build excluded ranges from existing in-memory allocations
+        val excludedRanges = mutableListOf<Pair<Int, Int>>()
         for (alloc in existingAllocations) {
-            // Mark header+state
-            markRangeAsUsed(alloc.headerPcOffset, 39, markedRanges)
-            // Mark door table
+            // Header+state
+            excludedRanges.add(Pair(alloc.headerPcOffset, 39))
+            // Door table
             val doorPc = snesToPc(0x8F0000 or alloc.doorTablePtr)
-            markRangeAsUsed(doorPc, 2, markedRanges)
-            // Mark level data
-            markRangeAsUsed(alloc.levelDataPcOffset, alloc.compressedLevelData.size, markedRanges)
-            // Mark PLM set
+            excludedRanges.add(Pair(doorPc, 2))
+            // Level data
+            excludedRanges.add(Pair(alloc.levelDataPcOffset, alloc.compressedLevelData.size))
+            // PLM set
             val plmPc = snesToPc(0x8F0000 or alloc.plmSetPtr)
-            markRangeAsUsed(plmPc, 2, markedRanges)
-            // Mark enemy pop
+            excludedRanges.add(Pair(plmPc, 2))
+            // Enemy pop
             val enemyPopPc = snesToPc(0xA10000 or alloc.enemyPopPtr)
-            markRangeAsUsed(enemyPopPc, 3, markedRanges)
-            // Mark enemy GFX
+            excludedRanges.add(Pair(enemyPopPc, 3))
+            // Enemy GFX
             val enemyGfxPc = snesToPc(0xB40000 or alloc.enemyGfxPtr)
-            markRangeAsUsed(enemyGfxPc, 2, markedRanges)
-            // Mark scroll data (size depends on room dimensions, estimate conservatively)
+            excludedRanges.add(Pair(enemyGfxPc, 2))
+            // Scroll data
             val scrollPc = snesToPc(0x8F0000 or alloc.scrollPtr)
-            markRangeAsUsed(scrollPc, 15 * 15, markedRanges) // Max possible size
+            excludedRanges.add(Pair(scrollPc, 15 * 15)) // Max possible size
         }
 
         val allocator = RomFreeSpaceAllocator(
@@ -102,6 +101,7 @@ class RoomCreator(
             snesToPc = snesToPc,
             pcToSnes = pcToSnes,
             guardBytes = 1,
+            excludedRanges = excludedRanges,
         )
 
         // CRITICAL: Allocate header+state FIRST. Its SNES address IS the room ID.
@@ -109,17 +109,11 @@ class RoomCreator(
             size = 39,
             banks = listOf(0x8F),
             label = "new room header+state",
-        )
-        
-        // Restore marked ranges before returning
-        restoreMarkedRanges(markedRanges)
-        
-        if (headerAllocation == null) return null
+        ) ?: return null
 
-        val roomId = headerAllocation.snesAddress and 0xFFFF
+        val roomId = headerAllocation.snesAddress and 0xFFFF        
         // Fail if this room ID is already in use
         if (roomId in usedRoomIds) {
-            restoreMarkedRanges(markedRanges)
             return null
         }
 
@@ -128,11 +122,7 @@ class RoomCreator(
             size = 2,
             banks = listOf(0x8F),
             label = "room 0x${roomId.toString(16)} door table",
-        )
-        if (doorTableAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
+        ) ?: return null
 
         // Prepare compressed level data but DON'T write it yet
         val compressedLevelData = createMinimalLevelData(width, height)
@@ -142,57 +132,35 @@ class RoomCreator(
             size = compressedLevelData.size,
             banks = levelDataRelocationBanks(),
             label = "room 0x${roomId.toString(16)} level data",
-        )
-        if (levelDataAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
+        ) ?: return null
 
         // Reserve PLM set
         val plmSetAllocation = allocator.reserve(
             size = 2,
             banks = listOf(0x8F),
             label = "room 0x${roomId.toString(16)} PLM set",
-        )
-        if (plmSetAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
+        ) ?: return null
 
         // Reserve enemy population
         val enemyPopAllocation = allocator.reserve(
             size = 3,
             banks = listOf(0xA1),
             label = "room 0x${roomId.toString(16)} enemy population",
-        )
-        if (enemyPopAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
+        ) ?: return null
 
         // Reserve enemy GFX set
         val enemyGfxAllocation = allocator.reserve(
             size = 2,
             banks = listOf(0xB4),
             label = "room 0x${roomId.toString(16)} enemy GFX set",
-        )
-        if (enemyGfxAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
+        ) ?: return null
 
         // Reserve scroll data
         val scrollDataAllocation = allocator.reserve(
             size = width * height,
             banks = listOf(0x8F),
             label = "room 0x${roomId.toString(16)} scroll data",
-        )
-        if (scrollDataAllocation == null) {
-            restoreMarkedRanges(markedRanges)
-            return null
-        }
-
-        // SUCCESS - don't restore marked ranges, they represent real allocations now
+        ) ?: return null
 
         // Find a free room index
         val roomIndex = findFreeRoomIndex(area)
@@ -431,31 +399,6 @@ class RoomCreator(
         }
         
         return ids
-    }
-
-    /**
-     * Temporarily mark a range as used by writing sentinel bytes.
-     * Records original values for later restoration.
-     */
-    private fun markRangeAsUsed(pcOffset: Int, size: Int, markedRanges: MutableList<Pair<Int, Int>>) {
-        if (pcOffset < 0 || pcOffset + size > romData.size) return
-        markedRanges.add(Pair(pcOffset, size))
-        for (i in 0 until size) {
-            romData[pcOffset + i] = 0x00.toByte()
-        }
-    }
-
-    /**
-     * Restore all marked ranges back to 0xFF (free space).
-     */
-    private fun restoreMarkedRanges(markedRanges: List<Pair<Int, Int>>) {
-        for ((pcOffset, size) in markedRanges) {
-            for (i in 0 until size) {
-                if (pcOffset + i < romData.size) {
-                    romData[pcOffset + i] = 0xFF.toByte()
-                }
-            }
-        }
     }
 
     private fun createMinimalLevelData(width: Int, height: Int): ByteArray {

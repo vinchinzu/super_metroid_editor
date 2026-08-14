@@ -1,6 +1,7 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.data.CustomItemDef
@@ -113,6 +114,10 @@ class EditorState {
 
     var activeTool by mutableStateOf(EditorTool.SELECT)
     var activeRoomLayer by mutableStateOf(RoomEditLayer.LAYER1)
+
+    /** Session-only RoomInfos for newly created rooms not yet in ROM. */
+    private val _sessionRooms = mutableStateListOf<com.supermetroid.editor.data.RoomInfo>()
+    val sessionRooms: List<com.supermetroid.editor.data.RoomInfo> get() = _sessionRooms
 
     /** Map selection rectangle in block coordinates (inclusive). */
     var mapSelStart by mutableStateOf<Pair<Int, Int>?>(null)
@@ -3840,6 +3845,14 @@ class EditorState {
         val decompressed = com.supermetroid.editor.rom.LZ5Compressor.decompress(result.allocation.compressedLevelData)
         workingLevelData = decompressed
         originalLevelData = decompressed.copyOf()
+        
+        // Add to session rooms so it appears in sidebar
+        val roomInfo = com.supermetroid.editor.data.RoomInfo(
+            id = "0x${result.roomId.toString(16).uppercase()}",
+            handle = "new_room_${result.roomId.toString(16).lowercase()}",
+            name = "New Room 0x${result.roomId.toString(16).uppercase()}",
+        )
+        _sessionRooms.add(roomInfo)
         
         // Load the room
         loadRoom(result.roomId, romParser, syntheticRoom)

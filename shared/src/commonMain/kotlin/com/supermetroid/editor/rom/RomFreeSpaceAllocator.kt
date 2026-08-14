@@ -5,12 +5,16 @@ package com.supermetroid.editor.rom
  *
  * The allocator scans the current ROM data, reserves bytes, and advances an in-memory cursor per bank.
  * Callers should write allocations immediately during export so later free-space scanners see them as used.
+ *
+ * @param excludedRanges PC offset ranges to exclude from allocation (e.g., in-memory allocations not yet written to ROM).
+ *                       Each pair is (startPcOffset, size).
  */
 class RomFreeSpaceAllocator(
     private val romData: ByteArray,
     private val snesToPc: (Int) -> Int,
     private val pcToSnes: (Int) -> Int,
     private val guardBytes: Int = 1,
+    private val excludedRanges: List<Pair<Int, Int>> = emptyList(),
 ) {
     private val nextFreeByBank = mutableMapOf<Int, Int>()
 
@@ -74,6 +78,19 @@ class RomFreeSpaceAllocator(
         }
         val cursor = alignUp(rawCursor, alignment)
         if (cursor + size > bankEndExclusive) return null
+        
+        // Check if allocation would overlap any excluded range
+        val allocEnd = cursor + size
+        for ((excludedStart, excludedSize) in excludedRanges) {
+            val excludedEnd = excludedStart + excludedSize
+            // Check if [cursor, allocEnd) overlaps [excludedStart, excludedEnd)
+            if (cursor < excludedEnd && excludedStart < allocEnd) {
+                // Overlap detected - try advancing past the excluded range
+                nextFreeByBank[bank] = excludedEnd
+                return reserveInBank(bank, size, label, alignment)
+            }
+        }
+        
         for (pc in cursor until cursor + size) {
             if ((romData[pc].toInt() and 0xFF) != 0xFF) return null
         }

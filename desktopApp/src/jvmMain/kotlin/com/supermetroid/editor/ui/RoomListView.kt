@@ -395,6 +395,11 @@ fun RoomListView(
                 )
                 if (roomId != null) {
                     showNewRoomDialog = false
+                    // Select the newly created room
+                    val newRoomInfo = rooms.firstOrNull { it.getRoomIdAsInt() == roomId }
+                    if (newRoomInfo != null) {
+                        onRoomSelected(newRoomInfo)
+                    }
                 }
             }
         )
