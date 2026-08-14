@@ -218,6 +218,52 @@ class RoomCreator(
      * Room index is byte 0 of the header. Using 0x00 may collide with area map index.
      * Returns the first unused index in range 0-255.
      */
+    /**
+     * Build a synthetic Room object from a NewRoomAllocation.
+     * This allows the editor to load and display a newly created room before it's written to ROM.
+     */
+    fun buildSyntheticRoom(
+        roomId: Int,
+        allocation: com.supermetroid.editor.data.NewRoomAllocation,
+        width: Int,
+        height: Int,
+        area: Int,
+        tileset: Int,
+        mapX: Int,
+        mapY: Int,
+        musicData: Int = 0x05,
+        musicTrack: Int = 0x05,
+    ): com.supermetroid.editor.data.Room {
+        return com.supermetroid.editor.data.Room(
+            roomId = roomId,
+            name = "New Room 0x${roomId.toString(16).uppercase()}",
+            handle = "new_room_${roomId.toString(16).lowercase()}",
+            index = allocation.roomIndex,
+            area = area,
+            mapX = mapX,
+            mapY = mapY,
+            width = width,
+            height = height,
+            upScroller = 0x70,
+            downScroller = 0xA0,
+            creBitflag = 0xE0,
+            doorOut = allocation.doorTablePtr,
+            levelDataPtr = allocation.levelDataPtr,
+            tileset = tileset,
+            musicData = musicData,
+            musicTrack = musicTrack,
+            fxPtr = 0,
+            enemySetPtr = allocation.enemyPopPtr,
+            enemyGfxPtr = allocation.enemyGfxPtr,
+            bgScrolling = 0,
+            roomScrollsPtr = allocation.scrollPtr,
+            mainAsmPtr = 0,
+            plmSetPtr = allocation.plmSetPtr,
+            bgDataPtr = 0,
+            setupAsmPtr = 0,
+        )
+    }
+
     private fun findFreeRoomIndex(area: Int): Int {
         val usedIndices = mutableSetOf<Int>()
         

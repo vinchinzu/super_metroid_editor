@@ -3824,6 +3824,26 @@ class EditorState {
         _editVersionState.value++
         dirty = true
 
+        // Build a synthetic Room and load it
+        val syntheticRoom = roomCreator.buildSyntheticRoom(
+            roomId = result.roomId,
+            allocation = result.allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+        )
+        
+        // Decompress the level data to hydrate working and original level data
+        val decompressed = com.supermetroid.editor.rom.LZ5Compressor.decompress(result.allocation.compressedLevelData)
+        workingLevelData = decompressed
+        originalLevelData = decompressed.copyOf()
+        
+        // Load the room
+        loadRoom(result.roomId, romParser, syntheticRoom)
+
         editorLog(
             "Created new room 0x${result.roomId.toString(16).uppercase()} " +
                 "(${width}x${height} screens, area $area, tileset $tileset) - will be written at export"

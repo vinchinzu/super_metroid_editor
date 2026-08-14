@@ -95,7 +95,7 @@ class ProjectRoomExporterTest {
     fun `new room export fails closed when free space is exhausted`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
         
         // Take snapshot before filling
         val romSnapshot = rom.copyOf()
@@ -134,7 +134,7 @@ class ProjectRoomExporterTest {
     fun `new room does not corrupt adjacent data`() {
         val rom = createFreshTestRom()
         val parser = RomParser(rom)
-        val creator = RoomCreator(rom, parser)
+        val creator = RoomCreator(rom, parser, emptyList())
 
         // Place a sentinel value in bank $8F
         val sentinelAddress = parser.snesToPc(0x8F8000) + 0x100
@@ -165,6 +165,70 @@ class ProjectRoomExporterTest {
             rom[sentinelAddress],
             "Sentinel value should not be overwritten"
         )
+    }
+
+    @Test
+    fun `export applies later tile edits to new room`() {
+        val rom = createFreshTestRom()
+        val parser = RomParser(rom)
+        val creator = RoomCreator(rom, parser, emptyList())
+
+        // Allocate a new room
+        val result = creator.allocateBlankRoom(
+            width = 1,
+            height = 1,
+            area = 0,
+            tileset = 0,
+        )
+        assertNotNull(result, "Allocation should succeed")
+
+        // Create RoomEdits with the allocation
+        val roomEdits = creator.createInitialRoomEdits(
+            roomId = result.roomId,
+            allocation = result.allocation,
+            width = 1,
+            height = 1,
+            area = 0,
+            tileset = 0,
+        )
+
+        // Add a tile edit (change tile at block position 0,0 to a non-air tile)
+        roomEdits.operations.add(
+            com.supermetroid.editor.data.EditOperation(
+                description = "Test tile edit",
+                edits = listOf(
+                    com.supermetroid.editor.data.TileEdit(
+                        blockX = 0,
+                        blockY = 0,
+                        oldBlockWord = RomConstants.AIR_TILE_WORD,
+                        newBlockWord = 0x1234, // Some non-air tile
+                        layer = com.supermetroid.editor.data.TILE_EDIT_LAYER_1,
+                    )
+                )
+            )
+        )
+
+        val project = SmEditProject(romPath = "base.smc")
+        project.rooms[result.roomId.toString(16).uppercase()] = roomEdits
+
+        // Export should write the room AND apply the tile edit
+        val exporter = ProjectRoomExporter(
+            project = project,
+            romParser = RomParser(rom),
+            romData = rom,
+        )
+        exporter.exportRooms()
+
+        // Read back the level data and verify the tile edit was applied
+        val writtenRoom = parser.readRoomHeader(result.roomId)
+        assertNotNull(writtenRoom, "Room should be written to ROM")
+        
+        val decompressed = parser.decompressLZ2(writtenRoom.levelDataPtr)
+        val layer1Size = (decompressed[0].toInt() and 0xFF) or ((decompressed[1].toInt() and 0xFF) shl 8)
+        
+        // First tile should be the edited value
+        val firstTile = (decompressed[2].toInt() and 0xFF) or ((decompressed[3].toInt() and 0xFF) shl 8)
+        assertEquals(0x1234, firstTile, "First tile should be the edited value, not air")
     }
 
     private fun createFreshTestRom(): ByteArray {
