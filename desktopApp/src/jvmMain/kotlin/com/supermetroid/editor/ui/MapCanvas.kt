@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -799,6 +800,38 @@ fun MapCanvas(
                                         }
                                     )
                                 }
+                            }
+                            
+                            // ─── Import JSON ────────────────────────────────
+                            Text("│", fontSize = 10.sp, color = MaterialTheme.colorScheme.outlineVariant)
+                            IconButton(
+                                onClick = {
+                                    if (editorState != null && romParser != null && room != null) {
+                                        val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Import Room JSON", java.awt.FileDialog.LOAD)
+                                        dialog.file = "*.json"
+                                        dialog.isVisible = true
+                                        val dir = dialog.directory
+                                        val file = dialog.file
+                                        if (dir != null && file != null) {
+                                            try {
+                                                val json = java.io.File(dir, file).readText()
+                                                val result = editorState.importRoomFromJson(json, romParser)
+                                                mapCanvasLogLine(result)
+                                            } catch (ex: Exception) {
+                                                mapCanvasLogLine("Room import failed: ${ex.message}")
+                                            }
+                                        }
+                                    }
+                                    mapFocusReq.requestFocus()
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Upload,
+                                    contentDescription = "Import room from JSON",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }

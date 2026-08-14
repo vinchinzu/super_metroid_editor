@@ -53,7 +53,7 @@
 |---|---------|--------|-----|
 | 1 | **Tileset/Metatile Composer** | Large | Define 16x16 metatiles from 4 8x8 tiles with palette/flip per sub-tile. Enables truly custom tilesets. |
 | 2 | **New Room Creation** | Medium | Allocate room header in $8F, door table, level data, enemy/PLM/scroll pointers. Auto-repointing foundation already exists. |
-| 3 | **Room JSON Import** | Small | Export done; import creates RoomEdits from JSON file. |
+| 3 | **Room JSON Import** | Small | Export done; import creates RoomEdits from JSON file. Current: tiles + scrolls only (no enemies/PLMs/doors). |
 | 4 | **AreaSave Expansion / Conflict UI** | Small-Medium | Save station spawn editing writes existing slots; table expansion and collision resolution remain. |
 | 5 | **SMART XML Interop** | Medium | Export rooms in SMART XML format. Plugs into Map Randomizer ecosystem — no other modern editor has this. |
 

@@ -4047,6 +4047,130 @@ class EditorState {
         )
     }
 
+    /**
+     * Import room data from JSON and apply as undoable edit operations.
+     * Validates JSON structure, handles dimension changes through resize,
+     * and detects conflicts (wrong room loaded or existing edits).
+     * Returns a status message (success or error).
+     */
+    fun importRoomFromJson(json: String, romParser: RomParser): String {
+        val parsed = try {
+            kotlinx.serialization.json.Json.decodeFromString(
+                com.supermetroid.editor.data.RoomExportData.serializer(),
+                json
+            )
+        } catch (ex: Exception) {
+            return "Import failed: invalid JSON format (${ex.message})"
+        }
+
+        if (parsed.version != 1) {
+            return "Import failed: unsupported version ${parsed.version} (expected 1)"
+        }
+
+        val importRoomId = try {
+            parsed.roomId.toInt(16)
+        } catch (_: Exception) {
+            return "Import failed: invalid room ID '${parsed.roomId}'"
+        }
+
+        if (currentRoomId != importRoomId) {
+            return "Import failed: JSON is for room \$${parsed.roomId}, but room \$${currentRoomId.toString(16).uppercase()} is loaded"
+        }
+
+        val existingEdits = project.rooms[project.roomKey(currentRoomId)]
+        if (existingEdits != null && (existingEdits.operations.isNotEmpty() ||
+            existingEdits.scrollChanges.isNotEmpty() ||
+            existingEdits.roomHeaderChange != null)) {
+            return "Import failed: room already has edits. Reset room to original before importing."
+        }
+
+        if (parsed.width !in 1..15 || parsed.height !in 1..15) {
+            return "Import failed: invalid dimensions ${parsed.width}x${parsed.height} (must be 1-15 screens)"
+        }
+
+        if (parsed.scrollData.size != parsed.width * parsed.height) {
+            return "Import failed: scroll data size ${parsed.scrollData.size} does not match dimensions ${parsed.width}x${parsed.height}"
+        }
+
+        val levelData = try {
+            java.util.Base64.getDecoder().decode(parsed.levelDataBase64)
+        } catch (_: Exception) {
+            return "Import failed: invalid base64 level data"
+        }
+
+        val room = romParser.readRoomHeader(currentRoomId) ?: return "Import failed: cannot read ROM room header"
+        val currentWidth = workingBlocksWide / 16
+        val currentHeight = workingBlocksTall / 16
+
+        val oldWorkingScrolls = _workingScrolls.copyOf()
+        val oldWorkingLevelData = workingLevelData?.copyOf()
+
+        if (parsed.width != currentWidth || parsed.height != currentHeight) {
+            resizeRoom(currentWidth, currentHeight, parsed.width, parsed.height)
+        }
+
+        val tileEdits = mutableListOf<TileEdit>()
+        val newBlocksWide = parsed.width * 16
+        val newBlocksTall = parsed.height * 16
+        
+        workingLevelData = levelData.copyOf()
+        workingBlocksWide = newBlocksWide
+        workingBlocksTall = newBlocksTall
+
+        for (by in 0 until newBlocksTall) {
+            for (bx in 0 until newBlocksWide) {
+                val oldWord = if (oldWorkingLevelData != null && bx < currentWidth * 16 && by < currentHeight * 16) {
+                    val idx = by * (currentWidth * 16) + bx
+                    val offset = 2 + idx * 2
+                    if (offset + 1 < oldWorkingLevelData.size) {
+                        ((oldWorkingLevelData[offset + 1].toInt() and 0xFF) shl 8) or (oldWorkingLevelData[offset].toInt() and 0xFF)
+                    } else 0
+                } else 0
+                
+                val oldBts = if (oldWorkingLevelData != null && bx < currentWidth * 16 && by < currentHeight * 16) {
+                    val layer1Size = if (oldWorkingLevelData.size >= 2) {
+                        (oldWorkingLevelData[0].toInt() and 0xFF) or ((oldWorkingLevelData[1].toInt() and 0xFF) shl 8)
+                    } else 0
+                    val idx = by * (currentWidth * 16) + bx
+                    val btsOffset = 2 + layer1Size + idx
+                    if (btsOffset < oldWorkingLevelData.size) oldWorkingLevelData[btsOffset].toInt() and 0xFF else 0
+                } else 0
+
+                val word = readBlockWord(bx, by)
+                val bts = readBts(bx, by)
+                tileEdits.add(TileEdit(bx, by, oldWord, word, oldBts, bts))
+            }
+        }
+
+        val scrollEdits = mutableListOf<ScrollChange>()
+        _workingScrolls = parsed.scrollData.toIntArray()
+        scrollVersion++
+        
+        for (sy in 0 until parsed.height) {
+            for (sx in 0 until parsed.width) {
+                val idx = sy * parsed.width + sx
+                val oldScroll = if (sx < oldWorkingScrolls.size / currentHeight && sy < currentHeight) {
+                    val oldIdx = sy * currentWidth + sx
+                    if (oldIdx < oldWorkingScrolls.size) oldWorkingScrolls[oldIdx] else 0
+                } else 0
+                scrollEdits.add(ScrollChange(sx, sy, oldScroll, parsed.scrollData[idx]))
+            }
+        }
+
+        pushEditOperation(EditOperation("Import room from JSON", tileEdits, scrollEdits = scrollEdits))
+
+        if (parsed.area != room.area || parsed.tileset != room.tileset) {
+            val headerChange = RoomHeaderChange(area = parsed.area)
+            setRoomHeaderChange(headerChange)
+            val stateChange = StateDataChange(tileset = parsed.tileset)
+            setStateDataChange(stateChange)
+        }
+
+        editVersion++
+        dirty = true
+        return "Room imported successfully from JSON"
+    }
+
     fun saveProject(romParser: RomParser? = null): Boolean {
         val saved = ProjectFileService.saveProject(
             project = project,
