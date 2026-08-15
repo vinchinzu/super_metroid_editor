@@ -11,7 +11,7 @@ class EditorStateSessionRoomsTest {
 
     @Test
     fun `cleanupConsumedSessionRooms removes rooms with null allocation`() {
-        // Create a fake project with some room edits
+        val editorState = EditorState()
         val project = SmEditProject(romPath = "/fake/path.smc")
         
         // Add a room with an allocation (not yet exported)
@@ -39,18 +39,17 @@ class EditorStateSessionRoomsTest {
             newRoomAllocation = null
         }
         
-        // Create EditorState with fake project
-        val editorState = EditorState(project)
+        editorState.setProjectForTest(project)
         
-        // Manually add session rooms (simulating what createNewRoom does)
-        editorState._sessionRooms.add(
+        // Manually add session rooms using test helper
+        editorState.addSessionRoomForTest(
             com.supermetroid.editor.data.RoomInfo(
                 id = "0x${roomId1.toString(16).uppercase()}",
                 handle = "new_room_${roomId1.toString(16).lowercase()}",
                 name = "New Room 0x${roomId1.toString(16).uppercase()}",
             )
         )
-        editorState._sessionRooms.add(
+        editorState.addSessionRoomForTest(
             com.supermetroid.editor.data.RoomInfo(
                 id = "0x${roomId2.toString(16).uppercase()}",
                 handle = "new_room_${roomId2.toString(16).lowercase()}",
@@ -59,19 +58,20 @@ class EditorStateSessionRoomsTest {
         )
         
         // Verify we have 2 session rooms before cleanup
-        assertEquals(2, editorState.sessionRooms.size)
+        assertEquals(2, editorState.getSessionRoomsForTest().size)
         
         // Clean up consumed rooms
         editorState.cleanupConsumedSessionRooms()
         
         // After cleanup, only the room with non-null allocation should remain
-        assertEquals(1, editorState.sessionRooms.size)
-        val remaining = editorState.sessionRooms.first()
-        assertEquals("0x91F8", remaining.id)
+        val remaining = editorState.getSessionRoomsForTest()
+        assertEquals(1, remaining.size)
+        assertEquals("0x91F8", remaining.first().id)
     }
 
     @Test
     fun `cleanupConsumedSessionRooms keeps all rooms with allocations`() {
+        val editorState = EditorState()
         val project = SmEditProject(romPath = "/fake/path.smc")
         
         // Add two rooms, both with allocations
@@ -109,17 +109,17 @@ class EditorStateSessionRoomsTest {
             )
         }
         
-        val editorState = EditorState(project)
+        editorState.setProjectForTest(project)
         
         // Add both rooms to session
-        editorState._sessionRooms.add(
+        editorState.addSessionRoomForTest(
             com.supermetroid.editor.data.RoomInfo(
                 id = "0x${roomId1.toString(16).uppercase()}",
                 handle = "new_room_${roomId1.toString(16).lowercase()}",
                 name = "New Room 0x${roomId1.toString(16).uppercase()}",
             )
         )
-        editorState._sessionRooms.add(
+        editorState.addSessionRoomForTest(
             com.supermetroid.editor.data.RoomInfo(
                 id = "0x${roomId2.toString(16).uppercase()}",
                 handle = "new_room_${roomId2.toString(16).lowercase()}",
@@ -127,16 +127,17 @@ class EditorStateSessionRoomsTest {
             )
         )
         
-        assertEquals(2, editorState.sessionRooms.size)
+        assertEquals(2, editorState.getSessionRoomsForTest().size)
         
         // Clean up - should keep both since both have allocations
         editorState.cleanupConsumedSessionRooms()
         
-        assertEquals(2, editorState.sessionRooms.size)
+        assertEquals(2, editorState.getSessionRoomsForTest().size)
     }
 
     @Test
     fun `cleanupConsumedSessionRooms removes all rooms when all allocations consumed`() {
+        val editorState = EditorState()
         val project = SmEditProject(romPath = "/fake/path.smc")
         
         // Add a room with null allocation
@@ -146,9 +147,9 @@ class EditorStateSessionRoomsTest {
             newRoomAllocation = null
         }
         
-        val editorState = EditorState(project)
+        editorState.setProjectForTest(project)
         
-        editorState._sessionRooms.add(
+        editorState.addSessionRoomForTest(
             com.supermetroid.editor.data.RoomInfo(
                 id = "0x${roomId1.toString(16).uppercase()}",
                 handle = "new_room_${roomId1.toString(16).lowercase()}",
@@ -156,11 +157,11 @@ class EditorStateSessionRoomsTest {
             )
         )
         
-        assertEquals(1, editorState.sessionRooms.size)
+        assertEquals(1, editorState.getSessionRoomsForTest().size)
         
         // Clean up - should remove the room since allocation is null
         editorState.cleanupConsumedSessionRooms()
         
-        assertTrue(editorState.sessionRooms.isEmpty())
+        assertTrue(editorState.getSessionRoomsForTest().isEmpty())
     }
 }

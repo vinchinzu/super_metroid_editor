@@ -2133,6 +2133,19 @@ class EditorState {
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
     internal fun setRoomIdForTest(id: Int) { currentRoomId = id }
+    
+    // Test helpers for session rooms
+    internal fun addSessionRoomForTest(roomInfo: com.supermetroid.editor.data.RoomInfo) {
+        _sessionRooms.add(roomInfo)
+    }
+    
+    internal fun getSessionRoomsForTest(): List<com.supermetroid.editor.data.RoomInfo> {
+        return _sessionRooms.toList()
+    }
+    
+    internal fun setProjectForTest(newProject: SmEditProject) {
+        project = newProject
+    }
 
     // ─── Working level data ─────────────────────────────────────
 
