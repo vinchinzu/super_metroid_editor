@@ -405,7 +405,7 @@ class MetatileTableTest {
             applyMetatileTable(extractedCre, target, targetStart = 0, maxMetatiles = 256)
 
             for (i in 0 until 768) {
-                assertArrayEquals(varSnapshot[i], target[256 + it].copyOf(),
+                assertArrayEquals(varSnapshot[i], target[256 + i],
                     "VAR range was modified during CRE round-trip")
             }
         }

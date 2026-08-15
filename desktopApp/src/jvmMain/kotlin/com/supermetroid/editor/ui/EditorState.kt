@@ -673,8 +673,14 @@ class EditorState {
             project.customGfx.tileTables[editorTilesetId.toString()]
         }
         
+        // Apply the change to live TileGraphics
         if (!tg.setMetatileWords(selected, words)) return false
-        if (!saveCurrentMetatileTableOverride()) return false
+        
+        // Try to save the override; rollback on failure
+        if (!saveCurrentMetatileTableOverride()) {
+            tg.setMetatileWords(selected, oldWords)  // Rollback
+            return false
+        }
         
         val newTableBlob = if (isCre) {
             project.customGfx.creTileTable
@@ -2136,6 +2142,7 @@ class EditorState {
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
     internal fun setRoomIdForTest(id: Int) { currentRoomId = id }
+    internal fun clearEditorTileGraphicsForTest() { editorTileGraphics = null }
 
     // ─── Working level data ─────────────────────────────────────
 
@@ -3873,6 +3880,35 @@ class EditorState {
 
     // ─── Undo / Redo ────────────────────────────────────────────
 
+    private fun applyMetatileWordChange(mtc: com.supermetroid.editor.data.MetatileWordChange, useNew: Boolean) {
+        val words = if (useNew) mtc.newWords else mtc.oldWords
+        val blob = if (useNew) mtc.newTableBlob else mtc.oldTableBlob
+        
+        // Always restore project override, even if editorTileGraphics is null
+        if (mtc.isCre) {
+            project.customGfx.creTileTable = blob
+        } else {
+            if (blob != null) {
+                project.customGfx.tileTables[mtc.tilesetId.toString()] = blob
+            } else {
+                project.customGfx.tileTables.remove(mtc.tilesetId.toString())
+            }
+        }
+        
+        // Only apply to live editorTileGraphics when it's the right table
+        val tg = editorTileGraphics
+        if (tg != null) {
+            val shouldApply = if (mtc.isCre) {
+                true  // CRE is shared, always apply
+            } else {
+                editorTilesetId == mtc.tilesetId  // VAR: only if same tileset
+            }
+            if (shouldApply) {
+                tg.setMetatileWords(mtc.metatileIndex, words.toIntArray())
+            }
+        }
+    }
+
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
         val op = undoStack.removeAt(undoStack.lastIndex)
@@ -3941,19 +3977,7 @@ class EditorState {
 
         // Undo metatile word change
         op.metatileWordChange?.let { mtc ->
-            val tg = editorTileGraphics
-            if (tg != null) {
-                tg.setMetatileWords(mtc.metatileIndex, mtc.oldWords.toIntArray())
-                if (mtc.isCre) {
-                    project.customGfx.creTileTable = mtc.oldTableBlob
-                } else {
-                    if (mtc.oldTableBlob != null) {
-                        project.customGfx.tileTables[mtc.tilesetId.toString()] = mtc.oldTableBlob
-                    } else {
-                        project.customGfx.tileTables.remove(mtc.tilesetId.toString())
-                    }
-                }
-            }
+            applyMetatileWordChange(mtc, useNew = false)
         }
 
         redoStack.add(op)
@@ -4027,19 +4051,7 @@ class EditorState {
 
         // Redo metatile word change
         op.metatileWordChange?.let { mtc ->
-            val tg = editorTileGraphics
-            if (tg != null) {
-                tg.setMetatileWords(mtc.metatileIndex, mtc.newWords.toIntArray())
-                if (mtc.isCre) {
-                    project.customGfx.creTileTable = mtc.newTableBlob
-                } else {
-                    if (mtc.newTableBlob != null) {
-                        project.customGfx.tileTables[mtc.tilesetId.toString()] = mtc.newTableBlob
-                    } else {
-                        project.customGfx.tileTables.remove(mtc.tilesetId.toString())
-                    }
-                }
-            }
+            applyMetatileWordChange(mtc, useNew = true)
         }
 
         undoStack.add(op)
