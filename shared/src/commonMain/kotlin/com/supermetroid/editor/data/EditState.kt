@@ -1,6 +1,11 @@
 package com.supermetroid.editor.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 const val TILE_EDIT_LAYER_1 = 1
 const val TILE_EDIT_LAYER_2 = 2
@@ -209,12 +214,79 @@ data class RoomEdits(
      *  On export, each is written to free space in $8F and the PLM param is set to the address. */
     val customScrollCommands: MutableMap<String, MutableList<ScrollCommand>> = mutableMapOf(),
     val saveStationSpawns: MutableList<SaveStationSpawnChange> = mutableListOf(),
+    /** New room allocation data. Non-null indicates this is a newly created room that hasn't been written to ROM yet. */
+    var newRoomAllocation: NewRoomAllocation? = null,
 ) {
     val hasEdits: Boolean get() =
         operations.isNotEmpty() || plmChanges.isNotEmpty() || doorChanges.isNotEmpty() ||
         enemyChanges.isNotEmpty() || scrollChanges.isNotEmpty() || fxChange != null ||
         stateDataChange != null || roomHeaderChange != null || customScrollCommands.isNotEmpty() ||
-        saveStationSpawns.isNotEmpty()
+        saveStationSpawns.isNotEmpty() || newRoomAllocation != null
+    
+    val isNewRoom: Boolean get() = newRoomAllocation != null
+}
+
+/**
+ * Allocation details for a newly created room.
+ * Stored in RoomEdits until export writes the room to ROM.
+ */
+@Serializable
+data class NewRoomAllocation(
+    val headerPcOffset: Int,
+    val doorTablePtr: Int,
+    val levelDataPtr: Int,
+    val levelDataPcOffset: Int,
+    @Serializable(with = ByteArrayBase64Serializer::class)
+    val compressedLevelData: ByteArray,
+    val plmSetPtr: Int,
+    val enemyPopPtr: Int,
+    val enemyGfxPtr: Int,
+    val scrollPtr: Int,
+    val roomIndex: Int,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+        other as NewRoomAllocation
+        return headerPcOffset == other.headerPcOffset &&
+            doorTablePtr == other.doorTablePtr &&
+            levelDataPtr == other.levelDataPtr &&
+            compressedLevelData.contentEquals(other.compressedLevelData) &&
+            plmSetPtr == other.plmSetPtr &&
+            enemyPopPtr == other.enemyPopPtr &&
+            enemyGfxPtr == other.enemyGfxPtr &&
+            scrollPtr == other.scrollPtr &&
+            roomIndex == other.roomIndex
+    }
+    
+    override fun hashCode(): Int {
+        var result = headerPcOffset
+        result = 31 * result + doorTablePtr
+        result = 31 * result + levelDataPtr
+        result = 31 * result + compressedLevelData.contentHashCode()
+        result = 31 * result + plmSetPtr
+        result = 31 * result + enemyPopPtr
+        result = 31 * result + enemyGfxPtr
+        result = 31 * result + scrollPtr
+        result = 31 * result + roomIndex
+        return result
+    }
+}
+
+/**
+ * Serializer for ByteArray as base64 string.
+ */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+object ByteArrayBase64Serializer : KSerializer<ByteArray> {
+    override val descriptor = PrimitiveSerialDescriptor("ByteArrayBase64", PrimitiveKind.STRING)
+    
+    override fun serialize(encoder: Encoder, value: ByteArray) {
+        encoder.encodeString(kotlin.io.encoding.Base64.encode(value))
+    }
+    
+    override fun deserialize(decoder: Decoder): ByteArray {
+        return kotlin.io.encoding.Base64.decode(decoder.decodeString())
+    }
 }
 
 /**

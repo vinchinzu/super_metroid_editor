@@ -1,6 +1,7 @@
 package com.supermetroid.editor.ui
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.supermetroid.editor.data.CustomItemDef
@@ -114,6 +115,24 @@ class EditorState {
     var activeTool by mutableStateOf(EditorTool.SELECT)
     var activeRoomLayer by mutableStateOf(RoomEditLayer.LAYER1)
 
+    /** Session-only RoomInfos for newly created rooms not yet in ROM. */
+    private val _sessionRooms = mutableStateListOf<com.supermetroid.editor.data.RoomInfo>()
+    val sessionRooms: List<com.supermetroid.editor.data.RoomInfo> get() = _sessionRooms
+
+    /**
+     * Remove rooms from sessionRooms whose allocations have been consumed (written to ROM).
+     * Should be called after a successful export.
+     */
+    fun cleanupConsumedSessionRooms() {
+        _sessionRooms.removeAll { roomInfo ->
+            val roomId = roomInfo.getRoomIdAsInt()
+            val roomKey = project.roomKey(roomId)
+            val allocation = project.rooms[roomKey]?.newRoomAllocation
+            // Remove if allocation is null (consumed) or room no longer exists in project
+            allocation == null
+        }
+    }
+
     /** Map selection rectangle in block coordinates (inclusive). */
     var mapSelStart by mutableStateOf<Pair<Int, Int>?>(null)
     var mapSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
@@ -162,8 +181,8 @@ class EditorState {
         private set
     /** The loaded room's tileset as stored in the ROM (before project overrides). */
     private var romTilesetId: Int = 0
-    private var currentBgScrolling: Int = 0
-    private var currentArea: Int = 0
+    var currentBgScrolling: Int = 0
+    var currentArea: Int = 0
     private var currentIncomingDoorPtrs: List<Int> = emptyList()
     private var currentAreaRomSaveEntries: Map<Int, RomParser.Companion.SaveEntry> = emptyMap()
     private var currentAreaSaveEntryCount: Int = 0
@@ -2061,6 +2080,20 @@ class EditorState {
             _roomEditOrder[rid] = ++_editCounter
         }
 
+        // Rebuild session rooms from saved allocations
+        _sessionRooms.clear()
+        for ((key, edits) in project.rooms) {
+            if (edits.newRoomAllocation != null) {
+                val rid = key.toIntOrNull(16) ?: continue
+                val roomInfo = com.supermetroid.editor.data.RoomInfo(
+                    id = "0x${rid.toString(16).uppercase()}",
+                    handle = "new_room_${rid.toString(16).lowercase()}",
+                    name = "New Room 0x${rid.toString(16).uppercase()}",
+                )
+                _sessionRooms.add(roomInfo)
+            }
+        }
+
         romVersion++
         paletteVersion++
 
@@ -2100,6 +2133,19 @@ class EditorState {
 
     internal fun setBrushForTest(b: TileBrush?) { brush = b }
     internal fun setRoomIdForTest(id: Int) { currentRoomId = id }
+    
+    // Test helpers for session rooms
+    internal fun addSessionRoomForTest(roomInfo: com.supermetroid.editor.data.RoomInfo) {
+        _sessionRooms.add(roomInfo)
+    }
+    
+    internal fun getSessionRoomsForTest(): List<com.supermetroid.editor.data.RoomInfo> {
+        return _sessionRooms.toList()
+    }
+    
+    internal fun setProjectForTest(newProject: SmEditProject) {
+        project = newProject
+    }
 
     // ─── Working level data ─────────────────────────────────────
 
@@ -2108,10 +2154,11 @@ class EditorState {
         romTilesetId = room.tileset
         // A stored state-data change (e.g. from the biome generator or room
         // properties panel) overrides the ROM tileset for editing/rendering.
-        val stateDataChange = project.rooms[project.roomKey(roomId)]?.stateDataChange
+        val roomKey = project.roomKey(roomId)
+        val stateDataChange = project.rooms[roomKey]?.stateDataChange
         currentTilesetId = stateDataChange?.tileset ?: room.tileset
         currentBgScrolling = stateDataChange?.bgScrolling ?: room.bgScrolling
-        currentArea = project.rooms[project.roomKey(roomId)]?.roomHeaderChange?.area ?: room.area
+        currentArea = project.rooms[roomKey]?.roomHeaderChange?.area ?: room.area
         refreshVanillaSaveIndices(romParser)
         currentIncomingDoorPtrs = romParser.findDoorsLeadingTo(roomId)
             .map { it.doorDefPtr }
@@ -2130,7 +2177,21 @@ class EditorState {
             applyCustomGfxToTileGraphics(tg, currentTilesetId)
             tileGraphics = tg
         }
-        var levelData = romParser.decompressLZ2(room.levelDataPtr)
+        
+        // Check if this is a new room (not yet written to ROM)
+        val isNewRoom = project.rooms[roomKey]?.newRoomAllocation != null
+        
+        var levelData = if (isNewRoom) {
+            // New room: decompress from allocation (not stale workingLevelData)
+            val allocation = project.rooms[roomKey]?.newRoomAllocation
+            if (allocation != null) {
+                com.supermetroid.editor.rom.LZ5Compressor.decompress(allocation.compressedLevelData)
+            } else {
+                romParser.decompressLZ2(room.levelDataPtr)
+            }
+        } else {
+            romParser.decompressLZ2(room.levelDataPtr)
+        }
         val romWidth = room.width
         val romHeight = room.height
 
@@ -2180,7 +2241,12 @@ class EditorState {
         pendingPositions.clear()
 
         // Load scroll data for this room (resize if dimensions changed)
-        val romScrolls = romParser.parseScrollData(room.roomScrollsPtr, romWidth, romHeight)
+        val romScrolls = if (isNewRoom) {
+            // New room: use all blue scrolls
+            IntArray(effectiveWidth * effectiveHeight) { 0x01 }
+        } else {
+            romParser.parseScrollData(room.roomScrollsPtr, romWidth, romHeight)
+        }
         _originalScrolls = if (effectiveWidth != romWidth || effectiveHeight != romHeight) {
             resizeScrollGrid(romScrolls, romWidth, romHeight, effectiveWidth, effectiveHeight)
         } else {
@@ -2191,18 +2257,30 @@ class EditorState {
 
         // Load PLMs for this room from all states so rogue door caps (e.g. in Mother Brain / Tourian escape) are visible
         _workingPlms.clear()
-        val plms = romParser.getAllPlmEntriesForRoom(roomId)
+        val plms = if (isNewRoom) {
+            // New room: empty PLM list
+            emptyList()
+        } else {
+            romParser.getAllPlmEntriesForRoom(roomId)
+        }
         _workingPlms.addAll(plms)
         originalPlmCount = plms.size
 
         // Parse door entries for this room
-        doorEntries = romParser.parseDoorList(room.doorOut)
+        doorEntries = if (isNewRoom) {
+            // New room: empty door list
+            emptyList()
+        } else {
+            romParser.parseDoorList(room.doorOut)
+        }
 
         // Load enemies for this room
         _workingEnemies.clear()
-        _workingEnemies.addAll(romParser.parseEnemyPopulation(room.enemySetPtr))
+        if (!isNewRoom) {
+            _workingEnemies.addAll(romParser.parseEnemyPopulation(room.enemySetPtr))
+        }
+        // Else: new room, enemies list stays empty
 
-        val roomKey = project.roomKey(roomId)
         val savedRoom = project.rooms[roomKey]
         if (savedRoom != null) replaySavedRoomEdits(savedRoom, effectiveWidth, roomKey)
         // Bump render version without marking room as user-edited
@@ -3769,6 +3847,98 @@ class EditorState {
     }
 
     /**
+     * Create a new blank room with the specified dimensions.
+     * The room allocation is stored in RoomEdits.newRoomAllocation and will be written at export time.
+     * Returns the allocated room ID if successful, null if free space is exhausted.
+     */
+    fun createNewRoom(
+        width: Int = 1,
+        height: Int = 1,
+        area: Int = 0,
+        tileset: Int = 0,
+        mapX: Int = 0,
+        mapY: Int = 0,
+        romParser: RomParser,
+    ): Int? {
+        require(width in 1..15) { "width must be 1-15" }
+        require(height in 1..15) { "height must be 1-15" }
+        require(area in 0..6) { "area must be 0-6" }
+        require(tileset in 0..28) { "tileset must be 0-28" }
+
+        // Collect existing in-memory allocations to avoid collisions
+        val existingAllocations = project.rooms.values
+            .mapNotNull { it.newRoomAllocation }
+            .toList()
+
+        val roomCreator = com.supermetroid.editor.rom.RoomCreator(
+            romParser.getRomData(),
+            romParser,
+            existingAllocations
+        )
+
+        val result = roomCreator.allocateBlankRoom(
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+        ) ?: run {
+            editorLog("ERROR: Failed to create new room: insufficient free space")
+            return null
+        }
+
+        val roomEdits = roomCreator.createInitialRoomEdits(
+            roomId = result.roomId,
+            allocation = result.allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+        )
+
+        project.rooms[project.roomKey(result.roomId)] = roomEdits
+        _roomEditOrder[result.roomId] = System.currentTimeMillis()
+        _editVersionState.value++
+        dirty = true
+
+        // Build a synthetic Room and load it
+        val syntheticRoom = roomCreator.buildSyntheticRoom(
+            roomId = result.roomId,
+            allocation = result.allocation,
+            width = width,
+            height = height,
+            area = area,
+            tileset = tileset,
+            mapX = mapX,
+            mapY = mapY,
+        )
+        
+        // Decompress the level data to hydrate working and original level data
+        val decompressed = com.supermetroid.editor.rom.LZ5Compressor.decompress(result.allocation.compressedLevelData)
+        workingLevelData = decompressed
+        originalLevelData = decompressed.copyOf()
+        
+        // Add to session rooms so it appears in sidebar
+        val roomInfo = com.supermetroid.editor.data.RoomInfo(
+            id = "0x${result.roomId.toString(16).uppercase()}",
+            handle = "new_room_${result.roomId.toString(16).lowercase()}",
+            name = "New Room 0x${result.roomId.toString(16).uppercase()}",
+        )
+        _sessionRooms.add(roomInfo)
+        
+        // Load the room
+        loadRoom(result.roomId, romParser, syntheticRoom)
+
+        editorLog(
+            "Created new room 0x${result.roomId.toString(16).uppercase()} " +
+                "(${width}x${height} screens, area $area, tileset $tileset) - will be written at export"
+        )
+
+        return result.roomId
+    }
+
+    /**
      * Apply a [BiomeTheme] to the loaded room: switch its tileset (persisted
      * as a state-data change for ROM export), install the theme's palette
      * recolor as a tileset palette override, and set liquid/atmosphere FX.
@@ -4070,7 +4240,12 @@ class EditorState {
         seedDefaultPatches(forceRefreshBundled = true)
         if (project.romPath.isEmpty()) return null
         saveProject(romParser)
-        return ProjectFileService.exportToRom(project, romParser, ::editorLog, ::postStatus)
+        val result = ProjectFileService.exportToRom(project, romParser, ::editorLog, ::postStatus)
+        if (result != null) {
+            // Clean up session rooms whose allocations were consumed during export
+            cleanupConsumedSessionRooms()
+        }
+        return result
     }
 
     fun exportToIps(romParser: RomParser): String? {

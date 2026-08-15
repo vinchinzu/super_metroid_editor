@@ -114,7 +114,40 @@ internal fun RoomsTabSidebar(
                                 val rp = romParser
                                 val sr = selectedRoom
                                 if (rp != null && sr != null) {
-                                    val roomHeader = remember(sr) { rp.readRoomHeader(sr.getRoomIdAsInt()) }
+                                    val roomId = sr.getRoomIdAsInt()
+                                    val roomKey = editorState?.project?.roomKey(roomId)
+                                    val roomEdits = roomKey?.let { editorState?.project?.rooms?.get(it) }
+                                    val allocation = roomEdits?.newRoomAllocation
+                                    
+                                    val roomHeader = remember(sr, allocation, roomEdits?.roomHeaderChange, roomEdits?.stateDataChange) {
+                                        val romHeader = rp.readRoomHeader(roomId)
+                                        if (romHeader != null) {
+                                            romHeader
+                                        } else if (allocation != null && roomEdits?.roomHeaderChange != null && roomEdits.stateDataChange != null) {
+                                            // Build synthetic Room from allocation + RoomEdits for new rooms not yet in ROM
+                                            val headerChange = roomEdits.roomHeaderChange!!
+                                            val stateChange = roomEdits.stateDataChange!!
+                                            val roomCreator = com.supermetroid.editor.rom.RoomCreator(
+                                                rp.getRomData(),
+                                                rp,
+                                                emptyList()
+                                            )
+                                            roomCreator.buildSyntheticRoom(
+                                                roomId = roomId,
+                                                allocation = allocation,
+                                                width = headerChange.width ?: 1,
+                                                height = headerChange.height ?: 1,
+                                                area = headerChange.area ?: 0,
+                                                tileset = stateChange.tileset ?: 0,
+                                                mapX = headerChange.mapX ?: 0,
+                                                mapY = headerChange.mapY ?: 0,
+                                                musicData = stateChange.musicData ?: 0x05,
+                                                musicTrack = stateChange.musicTrack ?: 0x05,
+                                            )
+                                        } else {
+                                            null
+                                        }
+                                    }
                                     if (roomHeader != null) {
                                         RoomPropertiesPanel(
                                             room = roomHeader,

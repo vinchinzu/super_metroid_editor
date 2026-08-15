@@ -147,11 +147,14 @@ fun main() = application {
     var romParser by remember { mutableStateOf<RomParser?>(null) }
     var romFileName by remember { mutableStateOf<String?>(null) }
     var selectedRoom by remember { mutableStateOf<RoomInfo?>(null) }
-    var rooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
+    var catalogRooms by remember { mutableStateOf<List<RoomInfo>>(emptyList()) }
     var romLoadInFlight by remember { mutableStateOf(false) }
     var romLoadMessage by remember { mutableStateOf<String?>(null) }
     var romLoadMessageIsError by remember { mutableStateOf(false) }
     val editorState = remember { EditorState() }
+    
+    // Merge catalog rooms with session-only new rooms
+    val rooms = catalogRooms + editorState.sessionRooms
 
     fun pickDefaultRoom(allRooms: List<RoomInfo>, romPath: String): RoomInfo? {
         val romKey = File(romPath).name
@@ -187,7 +190,7 @@ fun main() = application {
                 val parser = loadRomParser(bootRomPath)
                 val catalog = parser.roomCatalog
                 romParser = parser
-                rooms = catalog.rooms
+                catalogRooms = catalog.rooms
                 romFileName = File(bootRomPath).nameWithoutExtension
                 romLoadMessage = catalog.loadNotice(File(bootRomPath).name)
                 romLoadMessageIsError = false
@@ -205,7 +208,7 @@ fun main() = application {
                 romLoadMessage = e.message ?: "Failed to auto-load ROM."
                 romLoadMessageIsError = true
                 romParser = null
-                rooms = emptyList()
+                catalogRooms = emptyList()
                 selectedRoom = null
             } finally {
                 romLoadInFlight = false
@@ -315,7 +318,7 @@ fun main() = application {
                                             val parser = loadRomParser(file.absolutePath)
                                             val catalog = parser.roomCatalog
                                             romParser = parser
-                                            rooms = catalog.rooms
+                                            catalogRooms = catalog.rooms
                                             romFileName = file.nameWithoutExtension
                                             romLoadMessage = catalog.loadNotice(file.name)
                                             romLoadMessageIsError = false
@@ -330,7 +333,7 @@ fun main() = application {
                                             mainLog.error(e) { "Failed to load selected ROM: ${e.message}" }
                                             romParser = null
                                             romFileName = null
-                                            rooms = emptyList()
+                                            catalogRooms = emptyList()
                                             selectedRoom = null
                                             romLoadMessage = e.message ?: "Failed to load selected ROM."
                                             romLoadMessageIsError = true
