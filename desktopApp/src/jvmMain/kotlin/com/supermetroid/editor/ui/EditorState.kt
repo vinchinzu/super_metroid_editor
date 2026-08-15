@@ -119,6 +119,20 @@ class EditorState {
     private val _sessionRooms = mutableStateListOf<com.supermetroid.editor.data.RoomInfo>()
     val sessionRooms: List<com.supermetroid.editor.data.RoomInfo> get() = _sessionRooms
 
+    /**
+     * Remove rooms from sessionRooms whose allocations have been consumed (written to ROM).
+     * Should be called after a successful export.
+     */
+    fun cleanupConsumedSessionRooms() {
+        _sessionRooms.removeAll { roomInfo ->
+            val roomId = roomInfo.getRoomIdAsInt()
+            val roomKey = project.roomKey(roomId)
+            val allocation = project.rooms[roomKey]?.newRoomAllocation
+            // Remove if allocation is null (consumed) or room no longer exists in project
+            allocation == null
+        }
+    }
+
     /** Map selection rectangle in block coordinates (inclusive). */
     var mapSelStart by mutableStateOf<Pair<Int, Int>?>(null)
     var mapSelEnd by mutableStateOf<Pair<Int, Int>?>(null)
@@ -4213,7 +4227,12 @@ class EditorState {
         seedDefaultPatches(forceRefreshBundled = true)
         if (project.romPath.isEmpty()) return null
         saveProject(romParser)
-        return ProjectFileService.exportToRom(project, romParser, ::editorLog, ::postStatus)
+        val result = ProjectFileService.exportToRom(project, romParser, ::editorLog, ::postStatus)
+        if (result != null) {
+            // Clean up session rooms whose allocations were consumed during export
+            cleanupConsumedSessionRooms()
+        }
+        return result
     }
 
     fun exportToIps(romParser: RomParser): String? {

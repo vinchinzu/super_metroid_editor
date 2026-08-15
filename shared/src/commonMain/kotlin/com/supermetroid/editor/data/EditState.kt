@@ -276,49 +276,16 @@ data class NewRoomAllocation(
 /**
  * Serializer for ByteArray as base64 string.
  */
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 object ByteArrayBase64Serializer : KSerializer<ByteArray> {
     override val descriptor = PrimitiveSerialDescriptor("ByteArrayBase64", PrimitiveKind.STRING)
     
     override fun serialize(encoder: Encoder, value: ByteArray) {
-        encoder.encodeString(value.encodeToBase64())
+        encoder.encodeString(kotlin.io.encoding.Base64.encode(value))
     }
     
     override fun deserialize(decoder: Decoder): ByteArray {
-        return decoder.decodeString().decodeFromBase64()
-    }
-    
-    private fun ByteArray.encodeToBase64(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        val result = StringBuilder()
-        var i = 0
-        while (i < size) {
-            val b0 = this[i++].toInt() and 0xFF
-            val b1 = if (i < size) this[i++].toInt() and 0xFF else 0
-            val b2 = if (i < size) this[i++].toInt() and 0xFF else 0
-            
-            result.append(chars[b0 shr 2])
-            result.append(chars[((b0 and 0x03) shl 4) or (b1 shr 4)])
-            result.append(if (i > size + 1) '=' else chars[((b1 and 0x0F) shl 2) or (b2 shr 6)])
-            result.append(if (i > size) '=' else chars[b2 and 0x3F])
-        }
-        return result.toString()
-    }
-    
-    private fun String.decodeFromBase64(): ByteArray {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-        val result = mutableListOf<Byte>()
-        var i = 0
-        while (i < length) {
-            val c0 = chars.indexOf(this[i++])
-            val c1 = chars.indexOf(this[i++])
-            val c2 = if (i < length && this[i] != '=') chars.indexOf(this[i++]) else -1
-            val c3 = if (i < length && this[i] != '=') chars.indexOf(this[i++]) else -1
-            
-            result.add(((c0 shl 2) or (c1 shr 4)).toByte())
-            if (c2 != -1) result.add(((c1 shl 4) or (c2 shr 2)).toByte())
-            if (c3 != -1) result.add(((c2 shl 6) or c3).toByte())
-        }
-        return result.toByteArray()
+        return kotlin.io.encoding.Base64.decode(decoder.decodeString())
     }
 }
 
