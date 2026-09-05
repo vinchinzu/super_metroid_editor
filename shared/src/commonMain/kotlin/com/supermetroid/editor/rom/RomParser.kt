@@ -42,6 +42,10 @@ class RomParser(internal val romData: ByteArray) {
         RomGraphicsCatalogDetector.detect(this)
     }
 
+    val doorGraphIndex: DoorGraphIndex by lazy {
+        DoorGraphIndex.build(this)
+    }
+
     internal fun romStartOffsetForLayout(): Int = romStartOffset
     
     /**
